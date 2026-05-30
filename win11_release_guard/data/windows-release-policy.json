@@ -1,0 +1,702 @@
+{
+  "broad_target_existing_devices": {
+    "availability_date": "2025-09-30",
+    "baseline_build": "26200.8457",
+    "build_family": 26200,
+    "latest_build": "26200.8457",
+    "metadata": {
+      "home_pro_end": "2027-10-12",
+      "raw": {
+        "Availability date": "2025-09-30",
+        "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2028-10-10",
+        "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2027-10-12",
+        "Latest build": "26200.8457",
+        "Latest revision date": "2026-05-12",
+        "Servicing option": "General Availability Channel",
+        "Version": "25H2"
+      }
+    },
+    "quality_policy": "b_release_only",
+    "reason": null,
+    "servicing_option": "General Availability Channel",
+    "version": "25H2"
+  },
+  "current_versions": [
+    {
+      "availability_date": "2026-02-10",
+      "baseline_build": null,
+      "build_family": 28000,
+      "latest_build": "28000.2113",
+      "metadata": {
+        "home_pro_end": "2028-03-14",
+        "raw": {
+          "Availability date": "2026-02-10",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2029-03-13",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2028-03-14",
+          "Latest build": "28000.2113",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "26H1"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "26H1"
+    },
+    {
+      "availability_date": "2025-09-30",
+      "baseline_build": null,
+      "build_family": 26200,
+      "latest_build": "26200.8457",
+      "metadata": {
+        "home_pro_end": "2027-10-12",
+        "raw": {
+          "Availability date": "2025-09-30",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2028-10-10",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2027-10-12",
+          "Latest build": "26200.8457",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "25H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "25H2"
+    },
+    {
+      "availability_date": "2024-10-01",
+      "baseline_build": null,
+      "build_family": 26100,
+      "latest_build": "26100.8457",
+      "metadata": {
+        "home_pro_end": "2026-10-13",
+        "raw": {
+          "Availability date": "2024-10-01",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2027-10-12",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2026-10-13",
+          "Latest build": "26100.8457",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "24H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "24H2"
+    },
+    {
+      "availability_date": "2023-10-31",
+      "baseline_build": null,
+      "build_family": 22631,
+      "latest_build": "22631.7079",
+      "metadata": {
+        "home_pro_end": "End of updates",
+        "raw": {
+          "Availability date": "2023-10-31",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2026-11-10",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "End of updates",
+          "Latest build": "22631.7079",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "23H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "23H2"
+    }
+  ],
+  "excluded_for_existing_devices": [
+    {
+      "availability_date": "2026-02-10",
+      "baseline_build": null,
+      "build_family": 28000,
+      "latest_build": "28000.2113",
+      "metadata": {
+        "home_pro_end": "2028-03-14",
+        "new_devices_only": true,
+        "not_broad_target": true,
+        "not_broad_target_existing_devices": true,
+        "raw": {
+          "Availability date": "2026-02-10",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2029-03-13",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2028-03-14",
+          "Latest build": "28000.2113",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "26H1"
+        },
+        "special_release": true
+      },
+      "quality_policy": "b_release_only",
+      "reason": "Windows 11, version 26H1 is scoped to support new devices that come to market in early 2026 and is not designed as a feature update for existing devices.",
+      "servicing_option": "General Availability Channel",
+      "version": "26H1"
+    }
+  ],
+  "generated_at_utc": "2026-05-28T18:17:50+00:00",
+  "generator_version": "win11-release-guard/0.2",
+  "known_notes": [
+    {
+      "build_family": 28000,
+      "flags": [
+        "special_release",
+        "new_devices_only",
+        "not_broad_target_existing_devices"
+      ],
+      "note": "Windows 11, version 26H1 is scoped to support new devices that come to market in early 2026 and is not designed as a feature update for existing devices.",
+      "release": "26H1",
+      "type": "special_release"
+    }
+  ],
+  "metadata": {
+    "generator": "win11-release-guard/0.2",
+    "parser": "stdlib_html_parser",
+    "signature_status": "valid",
+    "special_release_versions": [
+      "26H1"
+    ]
+  },
+  "out_of_band_builds": [],
+  "preview_builds": [
+    {
+      "availability_date": "2026-04-30",
+      "build": "26200.8328",
+      "build_family": 26200,
+      "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5083631",
+      "kb_article": "KB5083631",
+      "kb_url": "https://support.microsoft.com/help/5083631",
+      "metadata": {
+        "atom_enriched": true,
+        "atom_feed_title": "April 30, 2026-KB5083631 Preview (OS Build 26200.8328)",
+        "atom_feed_url": "https://support.microsoft.com/help/5083631",
+        "atom_published": "2026-04-30T18:00:00Z",
+        "atom_updated": "2026-04-30T18:00:00Z",
+        "raw": {
+          "Availability date": "2026-04-30",
+          "Build": "26200.8328",
+          "KB article": "KB5083631",
+          "Servicing option": "General Availability Channel",
+          "Update type": "2026-04 D"
+        }
+      },
+      "out_of_band": false,
+      "preview": true,
+      "release": "25H2",
+      "servicing_option": "General Availability Channel",
+      "update_type": "2026-04 D",
+      "update_type_letter": "D"
+    }
+  ],
+  "quality_baselines": {
+    "24H2": {
+      "b_release_only": {
+        "availability_date": "2026-05-12",
+        "build": "26100.8457",
+        "build_family": 26100,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26100.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "24H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_anything": {
+        "availability_date": "2026-05-12",
+        "build": "26100.8457",
+        "build_family": 26100,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26100.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "24H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_non_preview": {
+        "availability_date": "2026-05-12",
+        "build": "26100.8457",
+        "build_family": 26100,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26100.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "24H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      }
+    },
+    "25H2": {
+      "b_release_only": {
+        "availability_date": "2026-05-12",
+        "build": "26200.8457",
+        "build_family": 26200,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26200.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "25H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_anything": {
+        "availability_date": "2026-05-12",
+        "build": "26200.8457",
+        "build_family": 26200,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26200.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "25H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_non_preview": {
+        "availability_date": "2026-05-12",
+        "build": "26200.8457",
+        "build_family": 26200,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+        "kb_article": "KB5089549",
+        "kb_url": "https://support.microsoft.com/help/5089549",
+        "metadata": {
+          "atom_enriched": true,
+          "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+          "atom_feed_url": "https://support.microsoft.com/help/5089549",
+          "atom_published": "2026-05-12T18:00:00Z",
+          "atom_updated": "2026-05-12T18:00:00Z",
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "26200.8457",
+            "KB article": "KB5089549",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "25H2",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      }
+    },
+    "26H1": {
+      "b_release_only": {
+        "availability_date": "2026-05-12",
+        "build": "28000.2113",
+        "build_family": 28000,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089548",
+        "kb_article": "KB5089548",
+        "kb_url": "https://support.microsoft.com/help/5089548",
+        "metadata": {
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "28000.2113",
+            "KB article": "KB5089548",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "26H1",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_anything": {
+        "availability_date": "2026-05-12",
+        "build": "28000.2113",
+        "build_family": 28000,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089548",
+        "kb_article": "KB5089548",
+        "kb_url": "https://support.microsoft.com/help/5089548",
+        "metadata": {
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "28000.2113",
+            "KB article": "KB5089548",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "26H1",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      },
+      "latest_non_preview": {
+        "availability_date": "2026-05-12",
+        "build": "28000.2113",
+        "build_family": 28000,
+        "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089548",
+        "kb_article": "KB5089548",
+        "kb_url": "https://support.microsoft.com/help/5089548",
+        "metadata": {
+          "raw": {
+            "Availability date": "2026-05-12",
+            "Build": "28000.2113",
+            "KB article": "KB5089548",
+            "Servicing option": "General Availability Channel",
+            "Update type": "2026-05 B"
+          }
+        },
+        "out_of_band": false,
+        "preview": false,
+        "release": "26H1",
+        "servicing_option": "General Availability Channel",
+        "update_type": "2026-05 B",
+        "update_type_letter": "B"
+      }
+    }
+  },
+  "quality_policy": "b_release_only",
+  "release_history": [
+    {
+      "availability_date": "2026-05-12",
+      "build": "26200.8457",
+      "build_family": 26200,
+      "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+      "kb_article": "KB5089549",
+      "kb_url": "https://support.microsoft.com/help/5089549",
+      "metadata": {
+        "atom_enriched": true,
+        "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+        "atom_feed_url": "https://support.microsoft.com/help/5089549",
+        "atom_published": "2026-05-12T18:00:00Z",
+        "atom_updated": "2026-05-12T18:00:00Z",
+        "raw": {
+          "Availability date": "2026-05-12",
+          "Build": "26200.8457",
+          "KB article": "KB5089549",
+          "Servicing option": "General Availability Channel",
+          "Update type": "2026-05 B"
+        }
+      },
+      "out_of_band": false,
+      "preview": false,
+      "release": "25H2",
+      "servicing_option": "General Availability Channel",
+      "update_type": "2026-05 B",
+      "update_type_letter": "B"
+    },
+    {
+      "availability_date": "2026-04-30",
+      "build": "26200.8328",
+      "build_family": 26200,
+      "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5083631",
+      "kb_article": "KB5083631",
+      "kb_url": "https://support.microsoft.com/help/5083631",
+      "metadata": {
+        "atom_enriched": true,
+        "atom_feed_title": "April 30, 2026-KB5083631 Preview (OS Build 26200.8328)",
+        "atom_feed_url": "https://support.microsoft.com/help/5083631",
+        "atom_published": "2026-04-30T18:00:00Z",
+        "atom_updated": "2026-04-30T18:00:00Z",
+        "raw": {
+          "Availability date": "2026-04-30",
+          "Build": "26200.8328",
+          "KB article": "KB5083631",
+          "Servicing option": "General Availability Channel",
+          "Update type": "2026-04 D"
+        }
+      },
+      "out_of_band": false,
+      "preview": true,
+      "release": "25H2",
+      "servicing_option": "General Availability Channel",
+      "update_type": "2026-04 D",
+      "update_type_letter": "D"
+    },
+    {
+      "availability_date": "2026-05-12",
+      "build": "28000.2113",
+      "build_family": 28000,
+      "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089548",
+      "kb_article": "KB5089548",
+      "kb_url": "https://support.microsoft.com/help/5089548",
+      "metadata": {
+        "raw": {
+          "Availability date": "2026-05-12",
+          "Build": "28000.2113",
+          "KB article": "KB5089548",
+          "Servicing option": "General Availability Channel",
+          "Update type": "2026-05 B"
+        }
+      },
+      "out_of_band": false,
+      "preview": false,
+      "release": "26H1",
+      "servicing_option": "General Availability Channel",
+      "update_type": "2026-05 B",
+      "update_type_letter": "B"
+    },
+    {
+      "availability_date": "2026-05-12",
+      "build": "26100.8457",
+      "build_family": 26100,
+      "catalog_url": "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5089549",
+      "kb_article": "KB5089549",
+      "kb_url": "https://support.microsoft.com/help/5089549",
+      "metadata": {
+        "atom_enriched": true,
+        "atom_feed_title": "May 12, 2026-KB5089549 (OS Builds 26200.8457 and 26100.8457)",
+        "atom_feed_url": "https://support.microsoft.com/help/5089549",
+        "atom_published": "2026-05-12T18:00:00Z",
+        "atom_updated": "2026-05-12T18:00:00Z",
+        "raw": {
+          "Availability date": "2026-05-12",
+          "Build": "26100.8457",
+          "KB article": "KB5089549",
+          "Servicing option": "General Availability Channel",
+          "Update type": "2026-05 B"
+        }
+      },
+      "out_of_band": false,
+      "preview": false,
+      "release": "24H2",
+      "servicing_option": "General Availability Channel",
+      "update_type": "2026-05 B",
+      "update_type_letter": "B"
+    }
+  ],
+  "schema_version": 1,
+  "source": {
+    "graph_enriched": false,
+    "release_health_url": "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+    "type": "microsoft_windows11_release_health_html"
+  },
+  "source_fetch_status": {
+    "atom_feed": {
+      "bytes": 1323,
+      "path": "tests\\fixtures\\windows11-atom.xml",
+      "source": "fixture",
+      "status": "ok",
+      "url": "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+    },
+    "release_health_html": {
+      "bytes": 3827,
+      "path": "tests\\fixtures\\windows11-release-health.html",
+      "source": "fixture",
+      "status": "ok",
+      "url": "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+    }
+  },
+  "source_urls": [
+    "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
+    "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+  ],
+  "special_releases": [
+    {
+      "availability_date": "2026-02-10",
+      "baseline_build": null,
+      "build_family": 28000,
+      "latest_build": "28000.2113",
+      "metadata": {
+        "home_pro_end": "2028-03-14",
+        "new_devices_only": true,
+        "not_broad_target": true,
+        "not_broad_target_existing_devices": true,
+        "raw": {
+          "Availability date": "2026-02-10",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2029-03-13",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2028-03-14",
+          "Latest build": "28000.2113",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "26H1"
+        },
+        "special_release": true
+      },
+      "quality_policy": "b_release_only",
+      "reason": "Windows 11, version 26H1 is scoped to support new devices that come to market in early 2026 and is not designed as a feature update for existing devices.",
+      "servicing_option": "General Availability Channel",
+      "version": "26H1"
+    }
+  ],
+  "supported_build_families": {
+    "22631": "23H2",
+    "26100": "24H2",
+    "26200": "25H2",
+    "28000": "26H1"
+  },
+  "supported_releases": [
+    {
+      "availability_date": "2026-02-10",
+      "baseline_build": null,
+      "build_family": 28000,
+      "latest_build": "28000.2113",
+      "metadata": {
+        "home_pro_end": "2028-03-14",
+        "raw": {
+          "Availability date": "2026-02-10",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2029-03-13",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2028-03-14",
+          "Latest build": "28000.2113",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "26H1"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "26H1"
+    },
+    {
+      "availability_date": "2025-09-30",
+      "baseline_build": null,
+      "build_family": 26200,
+      "latest_build": "26200.8457",
+      "metadata": {
+        "home_pro_end": "2027-10-12",
+        "raw": {
+          "Availability date": "2025-09-30",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2028-10-10",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2027-10-12",
+          "Latest build": "26200.8457",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "25H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "25H2"
+    },
+    {
+      "availability_date": "2024-10-01",
+      "baseline_build": null,
+      "build_family": 26100,
+      "latest_build": "26100.8457",
+      "metadata": {
+        "home_pro_end": "2026-10-13",
+        "raw": {
+          "Availability date": "2024-10-01",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2027-10-12",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "2026-10-13",
+          "Latest build": "26100.8457",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "24H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "24H2"
+    },
+    {
+      "availability_date": "2023-10-31",
+      "baseline_build": null,
+      "build_family": 22631,
+      "latest_build": "22631.7079",
+      "metadata": {
+        "home_pro_end": "End of updates",
+        "raw": {
+          "Availability date": "2023-10-31",
+          "End of updates: Enterprise, Education, IoT Enterprise, and Enterprise multi-session": "2026-11-10",
+          "End of updates: Home, Pro, Pro Education, and Pro for Workstations": "End of updates",
+          "Latest build": "22631.7079",
+          "Latest revision date": "2026-05-12",
+          "Servicing option": "General Availability Channel",
+          "Version": "23H2"
+        }
+      },
+      "quality_policy": "b_release_only",
+      "reason": null,
+      "servicing_option": "General Availability Channel",
+      "version": "23H2"
+    }
+  ],
+  "validation_warnings": []
+}

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "win11-release-guard"
+version = "0.2.0"
+description = "Windows 11 broad-fleet release compliance guard."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["cryptography>=41"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["win11_release_guard*"]
+exclude = ["tests*", "WindowsOSBuild*", "WUView*", "release_checker*"]
+
+[tool.setuptools.package-data]
+win11_release_guard = ["bundled/*.json", "data/*.json", "data/*.sig"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

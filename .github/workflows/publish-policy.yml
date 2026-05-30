@@ -1,0 +1,111 @@
+name: Publish policy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-policy.yml"
+      - "tools/generate_policy.py"
+      - "win11_release_guard/**"
+
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Generate signed policy
+        env:
+          WIN11_RELEASE_GUARD_SIGNING_KEY: ${{ secrets.WIN11_RELEASE_GUARD_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${WIN11_RELEASE_GUARD_SIGNING_KEY:-}" ]; then
+            python tools/generate_policy.py \
+              --output-dir site \
+              --write-index \
+              --signing-key-env WIN11_RELEASE_GUARD_SIGNING_KEY
+          else
+            echo "WIN11_RELEASE_GUARD_SIGNING_KEY is not configured; publishing checked-in signed last-known-good policy."
+            mkdir -p site
+            cp win11_release_guard/data/windows-release-policy.json site/windows-release-policy.json
+            cp win11_release_guard/data/windows-release-policy.json.sig site/windows-release-policy.json.sig
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          policy = json.loads(Path("site/windows-release-policy.json").read_text(encoding="utf-8"))
+          target = policy.get("broad_target_existing_devices") or {}
+          target_text = f"{target.get('version', 'unknown')} build {target.get('baseline_build') or target.get('latest_build') or 'unknown'}"
+          Path("site/index.html").write_text(
+              "<!doctype html>\n"
+              "<html lang=\"en\">\n"
+              "<head><meta charset=\"utf-8\"><title>Windows release policy</title></head>\n"
+              "<body>\n"
+              "<h1>Windows release policy</h1>\n"
+              f"<p>Generated at: {policy.get('generated_at_utc', 'unknown')}</p>\n"
+              f"<p>Broad target for existing devices: {target_text}</p>\n"
+              "<p>Publisher: checked-in signed last-known-good policy.</p>\n"
+              "</body>\n"
+              "</html>\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+          fi
+          touch site/.nojekyll
+
+      - name: Validate policy and signature
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from win11_release_guard.policy_schema import validate_policy_document
+          from win11_release_guard.signing import verify_policy_signature
+
+          policy_path = Path("site/windows-release-policy.json")
+          signature_path = Path("site/windows-release-policy.json.sig")
+          policy_bytes = policy_path.read_bytes()
+          signature_bytes = signature_path.read_bytes()
+          validate_policy_document(json.loads(policy_bytes.decode("utf-8")))
+          if not verify_policy_signature(policy_bytes, signature_bytes):
+              raise SystemExit("published policy signature verification failed")
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
