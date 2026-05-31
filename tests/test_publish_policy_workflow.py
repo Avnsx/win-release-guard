@@ -60,6 +60,16 @@ def test_publish_policy_workflow_requires_signing_secret_and_never_falls_back_to
     assert "--allow-unsigned" not in text
 
 
+def test_publish_policy_workflow_does_not_echo_signing_secret_or_trace_shell() -> None:
+    text = _workflow_text()
+    echo_lines = [line for line in text.splitlines() if "echo" in line]
+
+    assert "set -x" not in text
+    assert f"${SECRET_NAME}" not in "\n".join(echo_lines)
+    assert f"${{{SECRET_NAME}}}" not in "\n".join(echo_lines)
+    assert f"${{{SECRET_NAME}:-}}" not in "\n".join(echo_lines)
+
+
 def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -> None:
     text = _workflow_text()
 

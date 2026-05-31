@@ -41,6 +41,18 @@ def test_secret_material_scanner_fails_private_key_pem(tmp_path: Path) -> None:
     assert any(finding.kind == "private_key_block" for finding in findings)
 
 
+def test_secret_material_scanner_fails_private_key_file_name_in_site(tmp_path: Path) -> None:
+    private_key_name = "private-" + "key.b64"
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    fixture = site_dir / private_key_name
+    fixture.write_text("not-real\n", encoding="utf-8")
+
+    findings = _scan(site_dir)
+
+    assert any(finding.kind == "private_key_file" for finding in findings)
+
+
 def test_secret_material_scanner_fails_classic_pat_like_token(tmp_path: Path) -> None:
     fixture = tmp_path / "config.txt"
     token = ("gh" + "p_") + ("A" * 36)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-outside-tmp",
         action="store_true",
-        help=f"Explicitly allow writing {PRIVATE_KEY_FILE_NAME} outside the repository .tmp/ directory.",
+        help=f"Explicitly allow writing {PRIVATE_KEY_FILE_NAME} under RUNNER_TEMP.",
     )
     return parser
 
@@ -60,6 +61,18 @@ def _is_under_repo_tmp(path: Path) -> bool:
     resolved = path.resolve()
     try:
         resolved.relative_to(repo_tmp)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_under_runner_temp(path: Path) -> bool:
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if not runner_temp:
+        return False
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(Path(runner_temp).resolve())
     except ValueError:
         return False
     return True
@@ -101,10 +114,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     out_dir = args.out_dir
-    if not args.allow_outside_tmp and not _is_under_repo_tmp(out_dir):
+    if not _is_under_repo_tmp(out_dir):
+        runner_temp_allowed = bool(args.allow_outside_tmp and _is_under_runner_temp(out_dir))
+    else:
+        runner_temp_allowed = True
+    if not runner_temp_allowed:
         print(
-            f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/. "
-            "Pass --allow-outside-tmp only for an explicitly controlled secure location.",
+            f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/ or RUNNER_TEMP. "
+            "Pass --allow-outside-tmp only for an explicitly controlled runner temp path.",
             file=sys.stderr,
         )
         return 2

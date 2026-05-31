@@ -68,7 +68,24 @@ def test_generate_signing_key_refuses_private_key_outside_tmp(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert code == 2
-    assert f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/" in captured.err
+    assert f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/ or RUNNER_TEMP" in captured.err
+
+
+def test_generate_signing_key_allows_explicit_runner_temp(monkeypatch, tmp_path):
+    runner_temp = tmp_path / "runner-temp"
+    out_dir = runner_temp / "signing-key"
+    monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
+
+    code = generate_signing_key.main([
+        "--out-dir",
+        str(out_dir),
+        "--allow-outside-tmp",
+        "--key-id",
+        "test-runner-temp-key",
+    ])
+
+    assert code == 0
+    assert (out_dir / PRIVATE_KEY_FILE_NAME).is_file()
 
 
 def test_wrong_key_corrupted_policy_and_corrupted_signature_fail():
@@ -109,6 +126,21 @@ def test_committed_public_key_file_contains_no_private_key_material():
     assert data["trusted_policy_keys"]
     assert all("public_key_b64" in record for record in data["trusted_policy_keys"])
     assert all("private_key_b64" not in record for record in data["trusted_policy_keys"])
+
+
+def test_data_directory_contains_only_public_policy_artifacts():
+    data_dir = Path("win11_release_guard/data")
+    allowed_names = {
+        "__init__.py",
+        "trusted_policy_keys.json",
+        "windows-release-policy.json",
+        "windows-release-policy.json.sig",
+    }
+    names = {path.name for path in data_dir.iterdir() if path.is_file()}
+
+    assert names == allowed_names
+    assert not any("private" in name.lower() for name in names)
+    assert not any(name.lower().endswith((".pem", ".key")) for name in names)
 
 
 def test_runtime_can_verify_policy_with_committed_trusted_key():
