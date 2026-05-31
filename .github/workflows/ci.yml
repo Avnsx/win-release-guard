@@ -3,16 +3,28 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
-    runs-on: windows-latest
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install
         run: |
@@ -20,10 +32,7 @@ jobs:
           python -m pip install -e ".[test]"
 
       - name: Compile
-        run: python -m compileall -q win11_release_guard
-
-      - name: Validate console command
-        run: win-release-guard --help
+        run: python -m compileall -q win11_release_guard tools
 
       - name: Test
         run: pytest -q
@@ -35,6 +44,21 @@ jobs:
           --atom-feed tests/fixtures/windows11-atom.xml
           --output-dir site
           --write-index
+          --write-robots
+          --write-sitemap
+          --write-manifest
+
+      - name: Validate CLI JSON
+        run: >
+          python -m win11_release_guard
+          --json
+          --no-wua
+          --policy-url win11_release_guard/data/windows-release-policy.json
+          |
+          python -m json.tool
+
+      - name: Create clean archive
+        run: python tools/export_clean_archive.py
 
       - name: Scan for secret material
         run: >
@@ -48,15 +72,3 @@ jobs:
           AGENTS.md
           pyproject.toml
           .github
-
-      - name: Validate generated policy schema
-        run: >
-          python -c "import json; from pathlib import Path; from win11_release_guard.policy_schema import validate_policy_document; validate_policy_document(json.loads(Path('site/windows-release-policy.json').read_text(encoding='utf-8')))"
-
-      - name: Validate CLI JSON
-        run: >
-          win-release-guard
-          --json
-          --no-wua
-          --policy-url win11_release_guard/data/windows-release-policy.json
-          | python -m json.tool

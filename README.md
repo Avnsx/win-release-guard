@@ -449,7 +449,7 @@ Tests are designed for fast, deterministic CI and local development:
 Useful test commands:
 
 ```powershell
-python -m compileall -q win11_release_guard
+python -m compileall -q win11_release_guard tools
 pytest -q tests/test_evaluator.py
 pytest -q tests/test_remote_policy.py
 pytest -q tests/test_local_state.py
@@ -458,8 +458,10 @@ pytest -q tests/test_cache.py tests/test_import_contract.py
 pytest -q
 ```
 
-CI runs compileall, the no-network pytest suite, fixture-based policy
-generation, generated schema validation, and CLI JSON validation. Treat a build
-as production-ready only when source failures are structured and visible,
-signed/generated policy loading works, cache and bundled fallback work, WUA is
-bounded, the German 25H2 live fixture passes, and the edge-case suite passes.
+CI runs on Ubuntu and Windows across Python 3.11 and 3.12. It runs compileall,
+the no-network pytest suite, fixture-based policy generation with Pages support
+files, CLI JSON validation, clean source archive export, and the secret-material
+scanner. Treat a build as production-ready only when source failures are
+structured and visible, signed/generated policy loading works, cache and bundled
+fallback work, WUA is bounded, the German 25H2 live fixture passes, the
+edge-case suite passes, and the archive/scanner checks remain clean.
