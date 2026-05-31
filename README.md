@@ -1,4 +1,4 @@
-# Windows 11 Release Guard
+# win-release-guard
 
 [![CI](https://github.com/Avnsx/win-release-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/ci.yml)
 [![Publish policy](https://github.com/Avnsx/win-release-guard/actions/workflows/publish-policy.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/publish-policy.yml)
@@ -7,8 +7,17 @@
 [![Dependency audit](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-audit.yml)
 [![Dependency freshness](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-freshness.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-freshness.yml)
 
-Standalone Python mini-module for evaluating whether a Windows 11 device is on
-the current broad-fleet target release and baseline build.
+Windows release policy guard for broad-fleet Windows 11 version checks.
+
+The badges above report the latest GitHub Actions workflow status only.
+`Dependency freshness` is a scheduled direct-dependency check, not an
+always-current dependency guarantee. The Pylint badge reports the workflow
+status for the current `--fail-under=8.0` gate, not a permanent quality
+guarantee.
+
+`win-release-guard` is a standalone Python mini-module for evaluating whether a
+Windows 11 device is on the current broad-fleet target release and baseline
+build.
 
 The repository, distribution package, and installed console command are named
 `win-release-guard`. The Python import package remains `win11_release_guard`
@@ -152,7 +161,9 @@ when `allow_runtime_release_health_html=True`.
 Trusted policy public keys are committed in
 `win11_release_guard/data/trusted_policy_keys.json` and selected by signature
 `key_id`. Runtime clients do not authenticate to GitHub; they fetch the public
-GitHub Pages JSON plus `.sig` and verify the Ed25519 signature locally.
+GitHub Pages JSON plus `.sig` and verify the Ed25519 signature locally. Clients
+do not need GitHub tokens, private repository access, or a paid signing
+certificate.
 
 Policy documents keep upstream Microsoft evidence URLs and public hosting URLs
 separate. `source_urls` is only for upstream Microsoft sources such as Release
@@ -237,6 +248,12 @@ audit workflow.
 CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub
 code scanning is disabled in repository settings, enable it under Settings,
 Code security and analysis.
+
+Workflows opt into GitHub JavaScript action execution on Node 24 with
+`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`. GitHub-owned first-party actions use
+audited major tags, and the local action-version audit forbids unapproved
+third-party actions unless they are explicitly allowlisted and pinned to a full
+commit SHA.
 
 Manual public endpoint checks:
 

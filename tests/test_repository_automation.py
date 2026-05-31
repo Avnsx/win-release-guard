@@ -98,6 +98,7 @@ def test_dependency_workflows_exist() -> None:
 
 def test_readme_contains_truthful_workflow_badges() -> None:
     text = _read(README)
+    lower_text = text.lower()
     badge_workflows = (
         "ci.yml",
         "publish-policy.yml",
@@ -111,9 +112,35 @@ def test_readme_contains_truthful_workflow_badges() -> None:
         assert f"https://github.com/Avnsx/win-release-guard/actions/workflows/{workflow}/badge.svg" in text
         assert f"https://github.com/Avnsx/win-release-guard/actions/workflows/{workflow}" in text
 
-    assert "fully up to date" not in text.lower()
+    assert "fully up to date" not in lower_text
     assert "Dependency freshness is checked by a scheduled workflow." in text
+    assert "Dependency freshness` is a scheduled direct-dependency check" in text
+    assert "always-current dependency guarantee" in text
     assert "direct dependency specifiers" in text
+    assert "The Pylint badge reports the workflow" in text
+    assert "current `--fail-under=8.0` gate" in text
+    assert "not a permanent quality" in text
+    assert "perfect code quality" not in lower_text
+
+
+def test_readme_documents_branding_and_runtime_trust_model() -> None:
+    text = _read(README)
+
+    assert text.startswith("# win-release-guard\n\n")
+    assert "Windows release policy guard for broad-fleet Windows 11 version checks." in text
+    assert "The Python import package remains `win11_release_guard`" in text
+    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json" in text
+    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig" in text
+    assert "https://avnsx.github.io/win-release-guard/policy-manifest.json" in text
+    assert "Runtime clients do not authenticate to GitHub" in text
+    assert "do not need GitHub tokens" in text
+    assert "private repository access" in text
+    assert "paid signing" in text
+    assert "diagnostics never override the policy verdict" in text
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "python -m win11_release_guard --check-policy-source" in text
+    assert "python -m win11_release_guard --check-public-pages" in text
+    assert "python tools/export_clean_archive.py" in text
 
 
 def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> None:
