@@ -30,6 +30,18 @@ def test_ci_workflow_runs_ubuntu_windows_and_python_312() -> None:
     assert "matrix.python-version" in text
 
 
+def test_ci_workflow_uses_node24_ready_actions() -> None:
+    text = _workflow_text()
+    insecure_node_opt_out = "ACTIONS_ALLOW_USE_" + "UNSECURE_NODE_VERSION"
+
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "actions/checkout@v6" in text
+    assert "actions/setup-python@v6" in text
+    assert "actions/checkout@" + "v4" not in text
+    assert "actions/setup-python@" + "v5" not in text
+    assert insecure_node_opt_out not in text
+
+
 def test_ci_workflow_runs_required_commands() -> None:
     text = _workflow_text()
 
