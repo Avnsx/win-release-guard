@@ -14,6 +14,7 @@ from .exceptions import PolicyFetchError, PolicyParseError
 from .models import QualityPolicy, ReleaseHistoryEntry, ReleasePolicy, ReleasePolicyEntry
 from .policy_schema import GENERATOR_VERSION, policy_document_to_json, validate_policy_document
 from .remote_policy import parse_windows11_release_health_html
+from .config import DEFAULT_TRUSTED_POLICY_KEY_ID
 from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 
 
@@ -450,8 +451,13 @@ def generate_policy_json(**kwargs: Any) -> str:
     return policy_document_to_json(policy.to_dict())
 
 
-def sign_policy_bytes(data: bytes, signing_key: str | bytes) -> dict[str, str]:
-    signature = sign_ed25519_policy_bytes(data, signing_key)
+def sign_policy_bytes(
+    data: bytes,
+    signing_key: str | bytes,
+    *,
+    key_id: str = DEFAULT_TRUSTED_POLICY_KEY_ID,
+) -> dict[str, str]:
+    signature = sign_ed25519_policy_bytes(data, signing_key, key_id=key_id)
     signature["signed_at_utc"] = _utc_now()
     return signature
 
@@ -461,6 +467,7 @@ def write_policy_outputs(
     *,
     output_dir: str | Path,
     signing_key: str | bytes | None = None,
+    key_id: str = DEFAULT_TRUSTED_POLICY_KEY_ID,
     write_index: bool = False,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
@@ -471,7 +478,7 @@ def write_policy_outputs(
     written = {"policy": policy_file}
 
     if signing_key:
-        signature = sign_policy_bytes(json_text.encode("utf-8"), signing_key)
+        signature = sign_policy_bytes(json_text.encode("utf-8"), signing_key, key_id=key_id)
         signature_file = output_path / "windows-release-policy.json.sig"
         signature_file.write_bytes((json.dumps(signature, indent=2, sort_keys=True) + "\n").encode("utf-8"))
         written["signature"] = signature_file

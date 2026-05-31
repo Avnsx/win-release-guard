@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from importlib import resources
 
-from .config import DEFAULT_TRUSTED_POLICY_PUBLIC_KEY
 from .signing import TrustedPolicy, load_trusted_policy
 
 
@@ -13,7 +12,7 @@ BUNDLED_POLICY_SIGNATURE_FILE = "windows-release-policy.json.sig"
 
 def load_bundled_policy(
     *,
-    public_key: str | bytes | None = DEFAULT_TRUSTED_POLICY_PUBLIC_KEY,
+    public_key: str | bytes | None = None,
     allow_unsigned: bool = False,
 ) -> TrustedPolicy:
     package_files = resources.files(BUNDLED_POLICY_PACKAGE)

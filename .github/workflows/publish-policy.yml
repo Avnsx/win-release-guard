@@ -38,16 +38,16 @@ jobs:
 
       - name: Generate signed policy
         env:
-          WIN11_RELEASE_GUARD_SIGNING_KEY: ${{ secrets.WIN11_RELEASE_GUARD_SIGNING_KEY }}
+          WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64: ${{ secrets.WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 }}
         run: |
           set -euo pipefail
-          if [ -n "${WIN11_RELEASE_GUARD_SIGNING_KEY:-}" ]; then
+          if [ -n "${WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64:-}" ]; then
             python tools/generate_policy.py \
               --output-dir site \
               --write-index \
-              --signing-key-env WIN11_RELEASE_GUARD_SIGNING_KEY
+              --signing-key-env WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64
           else
-            echo "WIN11_RELEASE_GUARD_SIGNING_KEY is not configured; publishing checked-in signed last-known-good policy."
+            echo "WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 is not configured; publishing checked-in signed last-known-good policy."
             mkdir -p site
             cp win11_release_guard/data/windows-release-policy.json site/windows-release-policy.json
             cp win11_release_guard/data/windows-release-policy.json.sig site/windows-release-policy.json.sig

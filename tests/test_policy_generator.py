@@ -140,6 +140,27 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     assert "preview_builds" in data
 
 
+def test_write_signed_policy_output_includes_key_id(tmp_path):
+    policy = build_policy_from_sources(
+        release_health_html_path=FIXTURES / "windows11-release-health.html",
+        atom_feed_path=FIXTURES / "windows11-atom.xml",
+        signature_status="valid",
+    )
+
+    written = write_policy_outputs(
+        policy,
+        output_dir=tmp_path,
+        signing_key="krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs=",
+        key_id="test-policy-key",
+    )
+    signature = json.loads(written["signature"].read_text(encoding="utf-8"))
+
+    assert signature["algorithm"] == "ed25519"
+    assert signature["key_id"] == "test-policy-key"
+    assert signature["signature"]
+    assert signature["signed_at_utc"]
+
+
 def test_fixture_with_26h1_25h2_24h2_chooses_25h2():
     policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
 

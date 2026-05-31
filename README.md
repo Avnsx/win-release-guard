@@ -142,6 +142,11 @@ unless `allow_unsigned_policy=True` or `--allow-unsigned-policy` is set. Runtime
 Microsoft Release Health HTML parsing is disabled by default and is only used
 when `allow_runtime_release_health_html=True`.
 
+Trusted policy public keys are committed in
+`win11_release_guard/data/trusted_policy_keys.json` and selected by signature
+`key_id`. Runtime clients do not authenticate to GitHub; they fetch the public
+GitHub Pages JSON plus `.sig` and verify the Ed25519 signature locally.
+
 The generator path derives policy from Microsoft Windows 11 Release Health HTML
 and enriches ambiguous update rows from the Microsoft Update History Atom feed.
 The parser supports the public tables for current versions and release history:
@@ -315,14 +320,26 @@ python tools/generate_policy.py `
 
 To emit `site/windows-release-policy.json.sig`, provide a signing key through
 `--signing-key-env` or `--signing-key-file`. Signing uses Ed25519; the key input
-can be PEM or a base64-encoded raw 32-byte Ed25519 seed.
+can be PEM or a base64-encoded raw 32-byte Ed25519 seed. New signatures include
+the trusted public-key `key_id`.
+
+Create a signing key pair in ignored local scratch space:
+
+```powershell
+python tools/generate_signing_key.py --out-dir .tmp/signing-key
+```
+
+Copy the contents of `.tmp/signing-key/private-key.b64` into the GitHub Actions
+Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. Do not commit private key
+material. Commit only reviewed public key records in
+`win11_release_guard/data/trusted_policy_keys.json`.
 
 The repository includes `.github/workflows/publish-policy.yml`, which runs on a
 six-hour schedule and publishes `site/` to GitHub Pages. When the repository
-secret `WIN11_RELEASE_GUARD_SIGNING_KEY` is configured, that workflow generates
-and signs fresh live policy from Microsoft sources. If the secret is absent, it
-publishes the checked-in signed last-known-good policy instead so the production
-endpoint still serves a verifiable policy.
+secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64` is configured, that workflow
+generates and signs fresh live policy from Microsoft sources. If the secret is
+absent, it publishes the checked-in signed last-known-good policy instead so the
+production endpoint still serves a verifiable policy.
 
 ## Trust Model
 
@@ -330,6 +347,12 @@ Remote generated JSON policies must have a valid adjacent
 `windows-release-policy.json.sig` signature unless `allow_unsigned_policy=True`
 or `--allow-unsigned-policy` is explicitly set. The runtime verifies the exact
 JSON bytes before accepting or caching a policy.
+
+Detached signatures are JSON objects with `algorithm`, `key_id`, and
+`signature`. The runtime chooses the matching Ed25519 public key from
+`win11_release_guard/data/trusted_policy_keys.json`; multiple records are
+allowed for key rotation. Legacy signatures without `key_id` are accepted only
+through the default trusted key during the transition.
 
 Fallback order is:
 

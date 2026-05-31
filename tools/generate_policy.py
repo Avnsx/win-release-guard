@@ -9,7 +9,11 @@ from typing import Sequence
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from win11_release_guard.config import DEFAULT_HTTP_TIMEOUT_SECONDS, DEFAULT_RELEASE_HEALTH_URL
+from win11_release_guard.config import (
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_RELEASE_HEALTH_URL,
+    DEFAULT_TRUSTED_POLICY_KEY_ID,
+)
 from win11_release_guard.exceptions import WindowsReleaseCheckerError
 from win11_release_guard.policy_generator import (
     DEFAULT_WINDOWS11_ATOM_FEED_URL,
@@ -41,6 +45,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="File containing an Ed25519 private key PEM or base64 raw seed.",
     )
+    parser.add_argument(
+        "--key-id",
+        default=DEFAULT_TRUSTED_POLICY_KEY_ID,
+        help="Trusted policy key id to write into windows-release-policy.json.sig.",
+    )
     return parser
 
 
@@ -70,6 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             policy,
             output_dir=args.output_dir,
             signing_key=signing_key,
+            key_id=args.key_id,
             write_index=args.write_index,
         )
     except (OSError, WindowsReleaseCheckerError) as exc:

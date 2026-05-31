@@ -4,19 +4,23 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
+from importlib import resources
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from .config import DEFAULT_TRUSTED_POLICY_PUBLIC_KEY
+from .config import DEFAULT_TRUSTED_POLICY_KEY_ID
 from .exceptions import PolicyTrustError
 from .models import ReleasePolicy
 from .remote_policy import load_policy_bytes
 
 
 SIGNATURE_ALGORITHM = "ed25519"
+TRUSTED_POLICY_KEYS_PACKAGE = "win11_release_guard.data"
+TRUSTED_POLICY_KEYS_FILE = "trusted_policy_keys.json"
+TRUSTED_POLICY_KEY_ALLOWED_STATUSES = frozenset({"active", "retiring", "retired"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,22 @@ class TrustedPolicy:
     signature_bytes: bytes | None
     signature_status: str
     source_url: str | None = None
+
+
+@dataclass(frozen=True)
+class TrustedPolicyKey:
+    key_id: str
+    algorithm: str
+    public_key_b64: str
+    created_at_utc: str
+    status: str
+
+
+@dataclass(frozen=True)
+class PolicySignature:
+    algorithm: str
+    signature: bytes
+    key_id: str | None = None
 
 
 def _bytes_from_text(value: str) -> bytes:
@@ -42,8 +62,8 @@ def _decode_key_material(value: str | bytes) -> bytes:
         return raw
 
 
-def load_public_key(public_key: str | bytes | None = None) -> Ed25519PublicKey:
-    key_material = _decode_key_material(public_key or DEFAULT_TRUSTED_POLICY_PUBLIC_KEY)
+def _public_key_from_material(value: str | bytes) -> Ed25519PublicKey:
+    key_material = _decode_key_material(value)
     if key_material.startswith(b"-----BEGIN"):
         loaded = serialization.load_pem_public_key(key_material)
         if not isinstance(loaded, Ed25519PublicKey):
@@ -52,6 +72,82 @@ def load_public_key(public_key: str | bytes | None = None) -> Ed25519PublicKey:
     if len(key_material) != 32:
         raise PolicyTrustError("Trusted policy public key must be 32 raw Ed25519 bytes or PEM.")
     return Ed25519PublicKey.from_public_bytes(key_material)
+
+
+def _trusted_key_records_from_mapping(data: Any) -> tuple[TrustedPolicyKey, ...]:
+    if not isinstance(data, dict):
+        raise PolicyTrustError("Trusted policy key file must be a JSON object.")
+    records = data.get("trusted_policy_keys")
+    if not isinstance(records, list) or not records:
+        raise PolicyTrustError("Trusted policy key file is missing non-empty 'trusted_policy_keys'.")
+
+    parsed: list[TrustedPolicyKey] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] must be an object.")
+        key_id = str(record.get("key_id") or "").strip()
+        algorithm = str(record.get("algorithm") or "").strip().lower()
+        public_key_b64 = str(record.get("public_key_b64") or "").strip()
+        created_at_utc = str(record.get("created_at_utc") or "").strip()
+        status = str(record.get("status") or "").strip().lower()
+        if not key_id:
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] is missing key_id.")
+        if algorithm != SIGNATURE_ALGORITHM:
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] uses unsupported algorithm {algorithm!r}.")
+        if not public_key_b64:
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] is missing public_key_b64.")
+        if not created_at_utc:
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] is missing created_at_utc.")
+        if status not in TRUSTED_POLICY_KEY_ALLOWED_STATUSES:
+            raise PolicyTrustError(f"trusted_policy_keys[{index}] status {status!r} is not trusted.")
+        _public_key_from_material(public_key_b64)
+        parsed.append(
+            TrustedPolicyKey(
+                key_id=key_id,
+                algorithm=algorithm,
+                public_key_b64=public_key_b64,
+                created_at_utc=created_at_utc,
+                status=status,
+            )
+        )
+    return tuple(parsed)
+
+
+def load_trusted_policy_keys() -> tuple[TrustedPolicyKey, ...]:
+    try:
+        key_text = resources.files(TRUSTED_POLICY_KEYS_PACKAGE).joinpath(TRUSTED_POLICY_KEYS_FILE).read_text(
+            encoding="utf-8"
+        )
+    except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
+        raise PolicyTrustError(f"Trusted policy key file is unavailable: {exc}") from exc
+    try:
+        data = json.loads(key_text)
+    except json.JSONDecodeError as exc:
+        raise PolicyTrustError(f"Trusted policy key file is malformed JSON: {exc}") from exc
+    return _trusted_key_records_from_mapping(data)
+
+
+def _trusted_public_key_record(key_id: str | None = None) -> TrustedPolicyKey:
+    keys = load_trusted_policy_keys()
+    if key_id:
+        for key in keys:
+            if key.key_id == key_id:
+                return key
+        raise PolicyTrustError(f"Policy signature key_id {key_id!r} is not trusted.")
+
+    for key in keys:
+        if key.key_id == DEFAULT_TRUSTED_POLICY_KEY_ID:
+            return key
+    for key in keys:
+        if key.status == "active":
+            return key
+    raise PolicyTrustError("Trusted policy key file contains no active Ed25519 policy key.")
+
+
+def load_public_key(public_key: str | bytes | None = None) -> Ed25519PublicKey:
+    if public_key is not None:
+        return _public_key_from_material(public_key)
+    return _public_key_from_material(_trusted_public_key_record().public_key_b64)
 
 
 def load_private_key(private_key: str | bytes) -> Ed25519PrivateKey:
@@ -77,7 +173,7 @@ def _decode_signature_value(value: str) -> bytes:
             raise PolicyTrustError("Policy signature is not valid base64 or hex.") from exc
 
 
-def decode_policy_signature(signature_bytes: bytes) -> bytes:
+def decode_policy_signature_metadata(signature_bytes: bytes) -> PolicySignature:
     stripped = signature_bytes.strip()
     if not stripped:
         raise PolicyTrustError("Policy signature is empty.")
@@ -86,8 +182,11 @@ def decode_policy_signature(signature_bytes: bytes) -> bytes:
         parsed: Any = json.loads(stripped.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         if len(stripped) == 64:
-            return bytes(stripped)
-        return _decode_signature_value(stripped.decode("utf-8"))
+            return PolicySignature(algorithm=SIGNATURE_ALGORITHM, signature=bytes(stripped))
+        return PolicySignature(
+            algorithm=SIGNATURE_ALGORITHM,
+            signature=_decode_signature_value(stripped.decode("utf-8")),
+        )
 
     if isinstance(parsed, dict):
         algorithm = str(parsed.get("algorithm") or "").lower()
@@ -96,19 +195,43 @@ def decode_policy_signature(signature_bytes: bytes) -> bytes:
         signature = parsed.get("signature")
         if not isinstance(signature, str):
             raise PolicyTrustError("Policy signature JSON is missing string field 'signature'.")
-        return _decode_signature_value(signature)
+        key_id = parsed.get("key_id")
+        if key_id is not None and not isinstance(key_id, str):
+            raise PolicyTrustError("Policy signature JSON field 'key_id' must be a string.")
+        normalized_key_id = key_id.strip() if isinstance(key_id, str) else None
+        return PolicySignature(
+            algorithm=algorithm or SIGNATURE_ALGORITHM,
+            signature=_decode_signature_value(signature),
+            key_id=normalized_key_id or None,
+        )
     if isinstance(parsed, str):
-        return _decode_signature_value(parsed)
+        return PolicySignature(algorithm=SIGNATURE_ALGORITHM, signature=_decode_signature_value(parsed))
     raise PolicyTrustError("Policy signature must be raw bytes, text, or a JSON object.")
 
 
-def sign_policy_bytes(policy_bytes: bytes, private_key: str | bytes) -> dict[str, str]:
+def decode_policy_signature(signature_bytes: bytes) -> bytes:
+    return decode_policy_signature_metadata(signature_bytes).signature
+
+
+def sign_policy_bytes(
+    policy_bytes: bytes,
+    private_key: str | bytes,
+    *,
+    key_id: str = DEFAULT_TRUSTED_POLICY_KEY_ID,
+) -> dict[str, str]:
     signer = load_private_key(private_key)
     signature = signer.sign(policy_bytes)
     return {
         "algorithm": SIGNATURE_ALGORITHM,
+        "key_id": key_id,
         "signature": base64.b64encode(signature).decode("ascii"),
     }
+
+
+def _verifier_for_signature(signature: PolicySignature, public_key: str | bytes | None) -> Ed25519PublicKey:
+    if public_key is not None:
+        return load_public_key(public_key)
+    return _public_key_from_material(_trusted_public_key_record(signature.key_id).public_key_b64)
 
 
 def verify_policy_signature(
@@ -116,9 +239,10 @@ def verify_policy_signature(
     signature_bytes: bytes,
     public_key: str | bytes | None = None,
 ) -> bool:
-    verifier = load_public_key(public_key)
     try:
-        verifier.verify(decode_policy_signature(signature_bytes), policy_bytes)
+        signature = decode_policy_signature_metadata(signature_bytes)
+        verifier = _verifier_for_signature(signature, public_key)
+        verifier.verify(signature.signature, policy_bytes)
     except (InvalidSignature, PolicyTrustError):
         return False
     return True
@@ -172,10 +296,16 @@ def load_trusted_policy(
 
 __all__ = [
     "SIGNATURE_ALGORITHM",
+    "TRUSTED_POLICY_KEYS_FILE",
+    "TRUSTED_POLICY_KEYS_PACKAGE",
+    "PolicySignature",
     "TrustedPolicy",
+    "TrustedPolicyKey",
     "decode_policy_signature",
+    "decode_policy_signature_metadata",
     "load_private_key",
     "load_public_key",
+    "load_trusted_policy_keys",
     "load_trusted_policy",
     "sign_policy_bytes",
     "verify_policy_signature",

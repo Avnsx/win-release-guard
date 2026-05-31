@@ -26,6 +26,7 @@ EXCLUDED_DIR_NAMES = {
     ".pytest_cache",
     "__pycache__",
     ".cache",
+    ".tmp",
     "build",
     "dist",
 }
@@ -57,8 +58,11 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "win11_release_guard/__init__.py",
     "win11_release_guard/data/windows-release-policy.json",
     "win11_release_guard/data/windows-release-policy.json.sig",
+    "win11_release_guard/data/trusted_policy_keys.json",
     "tools/generate_policy.py",
+    "tools/generate_signing_key.py",
     "tools/export_clean_archive.py",
+    "docs/policy-signing.md",
 }
 
 
@@ -118,7 +122,7 @@ def validate_archive(archive_path: Path) -> list[str]:
     forbidden: list[str] = []
     for name in names:
         path = Path(name)
-        if set(path.parts).intersection({".git", ".pytest_cache", "__pycache__", ".cache", "build", "dist"}):
+        if set(path.parts).intersection({".git", ".pytest_cache", "__pycache__", ".cache", ".tmp", "build", "dist"}):
             forbidden.append(name)
             continue
         if path.name == "out.json" or path.name == LEGACY_PROTOTYPE_NAME or path.suffix == ".pyc":

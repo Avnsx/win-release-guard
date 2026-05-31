@@ -4,6 +4,7 @@
 __pycache__/
 .pytest_cache/
 .cache/
+.tmp/
 /site/
 /build/
 /dist/

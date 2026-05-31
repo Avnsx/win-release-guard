@@ -237,3 +237,17 @@ Mismatch:
 - Decide whether `source_urls` should include the hosted policy artifact URL. If yes, update policy generation so the production URL is listed and the live warning goes away.
 - Refresh `docs/source-learnings.md` if it should describe current implementation rather than historical planning.
 - Decide whether to restore or intentionally omit `docs/handover-prompt18.md`.
+
+## Prompt 3 Signing Update
+
+Prompt 3 superseded the signing-secret details above. Current signing
+management uses:
+
+- private key secret: `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`
+- committed trusted public-key file:
+  `win11_release_guard/data/trusted_policy_keys.json`
+- new signature field: `key_id`
+- local key-generation helper: `python tools/generate_signing_key.py --out-dir .tmp/signing-key`
+
+Any earlier reference in this handover to `WIN11_RELEASE_GUARD_SIGNING_KEY` is
+historical Prompt 1 state, not the current workflow contract.

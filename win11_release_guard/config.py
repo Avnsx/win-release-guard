@@ -15,6 +15,7 @@ DEFAULT_CACHE_FILE_NAME = "windows-release-policy.json"
 DEFAULT_QUALITY_POLICY = "b_release_only"
 DEFAULT_CACHE_MAX_AGE_HOURS = 72
 DEFAULT_STALE_CACHE_MAX_AGE_HOURS = 720
+DEFAULT_TRUSTED_POLICY_KEY_ID = "win-release-guard-policy-2026-01"
 DEFAULT_TRUSTED_POLICY_PUBLIC_KEY = "5OoJIhKvOGLJ72+/EZiQHX51m0gEczh5CctQjW7wPHk="
 DEFAULT_HTTP_TIMEOUT_SECONDS = 12.0
 DEFAULT_WUA_TIMEOUT_SECONDS = 8.0
@@ -47,7 +48,7 @@ class ReleaseCheckerConfig:
     panther_tail_max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES
     allow_runtime_release_health_html: bool = False
     allow_unsigned_policy: bool = False
-    trusted_policy_public_key: str | None = DEFAULT_TRUSTED_POLICY_PUBLIC_KEY
+    trusted_policy_public_key: str | None = None
     use_bundled_policy_fallback: bool = True
     source_check_required_for_green: bool = False
     allow_major_upgrade_recommendation: bool = False
@@ -103,6 +104,7 @@ __all__ = [
     "DEFAULT_QUALITY_POLICY",
     "DEFAULT_RELEASE_HEALTH_URL",
     "DEFAULT_STALE_CACHE_MAX_AGE_HOURS",
+    "DEFAULT_TRUSTED_POLICY_KEY_ID",
     "DEFAULT_TRUSTED_POLICY_PUBLIC_KEY",
     "DEFAULT_USER_AGENT",
     "DEFAULT_WUA_MAX_HISTORY",
