@@ -331,10 +331,7 @@ landing page and API aliases.
 
 ## Creating a clean source archive
 
-Use the export helper when sharing this repository as a source ZIP. Do not ZIP
-the raw working tree for handoff, because that can include local `.git/`
-metadata and generated artifacts that are not part of the public source
-package:
+Use the export helper when sharing this repository as a source ZIP:
 
 ```powershell
 python tools/export_clean_archive.py
@@ -345,10 +342,9 @@ manifest. The archive intentionally includes `win11_release_guard/`, `tests/`,
 `tools/`, `docs/`, `README.md`, `pyproject.toml`, `.github/dependabot.yml`,
 `.github/workflows/ci.yml`, `.github/workflows/publish-policy.yml`,
 automation workflows, and the signed bundled policy in
-`win11_release_guard/data/`. It excludes Git metadata, pytest and Python
-bytecode caches, local `.cache/`, `.tmp/`, local `site/`, build/dist artifacts,
-dependency-freshness output, `out*.json`, generated ZIPs, private key files,
-and the deleted prototype entry point.
+`win11_release_guard/data/`. It excludes Git
+metadata, pytest and Python bytecode caches, local `.cache/`, build/dist
+artifacts, local temp files, `out*.json`, and the deleted prototype entry point.
 
 ## Policy Generator
 
