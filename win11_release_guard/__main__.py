@@ -961,6 +961,12 @@ def _policy_source_success_payload(
     }
 
 
+def _print_public_policy_source_line(text: str) -> None:
+    # codeql[py/clear-text-logging-sensitive-data]
+    # This CLI mode prints public policy feed diagnostics; it does not print secrets.
+    print(text)
+
+
 def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, object], bool]:
     policy_url, _source = _policy_url_from_args(args)
     if policy_url is None:
@@ -1124,82 +1130,83 @@ def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, ob
 
 
 def _print_policy_source_payload(payload: dict[str, object]) -> None:
-    print(f"Policy source: {payload['status']}")
+    emit = _print_public_policy_source_line
+    emit(f"Policy source: {payload['status']}")
     if payload.get("policy_url"):
-        print(f"Policy URL: {payload['policy_url']}")
+        emit(f"Policy URL: {payload['policy_url']}")
     if payload.get("signature_url"):
-        print(f"Signature URL: {payload['signature_url']}")
+        emit(f"Signature URL: {payload['signature_url']}")
     if not payload.get("ok"):
-        print(f"Error: {payload['error']}")
+        emit(f"Error: {payload['error']}")
         if payload.get("exception_type"):
-            print(f"Exception type: {payload['exception_type']}")
+            emit(f"Exception type: {payload['exception_type']}")
         return
 
-    print(f"Signature: {payload['signature_status']}")
-    print(f"Generated at UTC: {payload['generated_at_utc'] or 'unknown'}")
+    emit(f"Signature: {payload['signature_status']}")
+    emit(f"Generated at UTC: {payload['generated_at_utc'] or 'unknown'}")
     if payload.get("manifest_url"):
-        print(f"Manifest URL: {payload['manifest_url']}")
-        print(f"Manifest: {payload.get('manifest_status') or 'unknown'}")
+        emit(f"Manifest URL: {payload['manifest_url']}")
+        emit(f"Manifest: {payload.get('manifest_status') or 'unknown'}")
         if payload.get("manifest_policy_sha256"):
-            print(f"Manifest policy SHA-256: {payload['manifest_policy_sha256']}")
+            emit(f"Manifest policy SHA-256: {payload['manifest_policy_sha256']}")
     elif payload.get("manifest_status"):
-        print(f"Manifest: {payload['manifest_status']}")
+        emit(f"Manifest: {payload['manifest_status']}")
     if payload.get("policy_sha256"):
-        print(f"Policy SHA-256: {payload['policy_sha256']}")
-    print("Source URLs:")
+        emit(f"Policy SHA-256: {payload['policy_sha256']}")
+    emit("Source URLs:")
     for source_url in payload.get("source_urls") or []:
-        print(f"- {source_url}")
+        emit(f"- {source_url}")
     published_urls = payload.get("published_urls") or {}
     if isinstance(published_urls, dict) and published_urls:
-        print("Published URLs:")
+        emit("Published URLs:")
         for key, url in published_urls.items():
-            print(f"- {key}: {url}")
+            emit(f"- {key}: {url}")
 
     broad_target = payload.get("broad_target")
     if isinstance(broad_target, dict):
-        print(
+        emit(
             "Broad target: "
             f"{broad_target.get('version')} / "
             f"{broad_target.get('build_family')} / "
             f"{broad_target.get('latest_build') or 'unknown'}"
         )
     else:
-        print("Broad target: unknown")
-    print(f"Baseline: {payload.get('baseline') or 'unknown'}")
+        emit("Broad target: unknown")
+    emit(f"Baseline: {payload.get('baseline') or 'unknown'}")
 
-    print("Excluded releases:")
+    emit("Excluded releases:")
     excluded_releases = payload.get("excluded_releases") or []
     if excluded_releases:
         for entry in excluded_releases:
             if isinstance(entry, dict):
                 reason = f" / {entry['reason']}" if entry.get("reason") else ""
-                print(f"- {entry.get('version')} / {entry.get('build_family')}{reason}")
+                emit(f"- {entry.get('version')} / {entry.get('build_family')}{reason}")
     else:
-        print("- none")
+        emit("- none")
 
     warnings = payload.get("validation_warnings") or []
     manifest_warning = payload.get("manifest_warning")
     if manifest_warning:
         warnings = [*warnings, manifest_warning]
     if warnings:
-        print("Warnings:")
+        emit("Warnings:")
         for warning in warnings:
-            print(f"- {warning}")
+            emit(f"- {warning}")
 
     public_pages = payload.get("public_pages")
     if isinstance(public_pages, dict):
-        print(f"Public Pages: {public_pages.get('status') or 'unknown'}")
+        emit(f"Public Pages: {public_pages.get('status') or 'unknown'}")
         for check in public_pages.get("checks") or []:
             if not isinstance(check, dict):
                 continue
             status = "OK" if check.get("ok") else "FAILED"
             status_code = check.get("status_code")
             suffix = f" HTTP {status_code}" if status_code is not None else ""
-            print(f"- {check.get('name')}: {status}{suffix} {check.get('url')}")
+            emit(f"- {check.get('name')}: {status}{suffix} {check.get('url')}")
             for error in check.get("errors") or []:
-                print(f"  - {error}")
+                emit(f"  - {error}")
             if check.get("error"):
-                print(f"  - {check['error']}")
+                emit(f"  - {check['error']}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

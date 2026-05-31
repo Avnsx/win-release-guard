@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
+from urllib.parse import urlparse
 
 from tools import generate_policy as generate_policy_cli
 from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
 from win11_release_guard.models import QualityPolicy
 from win11_release_guard.policy_generator import (
+    _source_label,
     build_policy_from_sources,
     generate_policy,
     parse_atom_feed,
@@ -31,6 +33,20 @@ def _html() -> str:
 
 def _atom() -> str:
     return (FIXTURES / "windows11-atom.xml").read_text(encoding="utf-8")
+
+
+def test_source_label_requires_exact_upstream_hosts() -> None:
+    release_health_url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+    atom_url = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+    spoofed_release_health_url = (
+        "https://learn.microsoft.com.attacker.invalid/en-us/windows/release-health/windows11-release-information"
+    )
+    spoofed_atom_url = "https://support.microsoft.com.attacker.invalid/en-us/feed/atom/example"
+
+    assert _source_label(release_health_url) == "Microsoft Release Health"
+    assert _source_label(atom_url) == "Microsoft Atom feed"
+    assert _source_label(spoofed_release_health_url) == spoofed_release_health_url
+    assert _source_label(spoofed_atom_url) == spoofed_atom_url
 
 
 def _with_26h2_ga(html: str) -> str:
@@ -358,7 +374,8 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert manifest["published_urls"]["api_policy"].endswith("/api/v1/policy.json")
     assert generated_policy["published_urls"] == DEFAULT_PUBLISHED_POLICY_URLS
     assert DEFAULT_RELEASE_HEALTH_URL in generated_policy["source_urls"]
-    assert not any("github.io" in url for url in generated_policy["source_urls"])
+    source_hosts = {urlparse(url).hostname for url in generated_policy["source_urls"]}
+    assert "avnsx.github.io" not in source_hosts
 
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "<title>win-release-guard</title>" in index

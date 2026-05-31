@@ -152,7 +152,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"public_key: {public_key_file}")
     print(f"trusted_policy_keys: {trusted_keys_file}")
     print()
-    print(f"Copy the full contents of {private_key_file} into GitHub Actions Secret {PRIVATE_KEY_SECRET_NAME}.")
+    print(
+        "Copy the generated private key file contents into GitHub Actions Secret "
+        f"{PRIVATE_KEY_SECRET_NAME}."
+    )
     print(f"Do not commit {PRIVATE_KEY_FILE_NAME} or any private signing key material.")
     print("Commit only the public trusted_policy_keys.json after reviewing key_id and status.")
     return 0

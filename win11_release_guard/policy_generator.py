@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from .config import (
@@ -543,6 +544,18 @@ def sign_policy_bytes(
     return signature
 
 
+def _write_public_artifact_bytes(path: Path, data: bytes) -> None:
+    # codeql[py/clear-text-storage-sensitive-data]
+    # Detached signatures and policy manifests are public Pages artifacts, not secrets.
+    path.write_bytes(data)
+
+
+def _write_public_artifact_text(path: Path, text: str) -> None:
+    # codeql[py/clear-text-storage-sensitive-data]
+    # Generated Pages text files contain public policy metadata only.
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def write_policy_outputs(
     policy: ReleasePolicy,
     *,
@@ -559,7 +572,7 @@ def write_policy_outputs(
     policy_file = output_path / "windows-release-policy.json"
     json_text = policy_document_to_json(policy.to_dict())
     policy_bytes = json_text.encode("utf-8")
-    policy_file.write_bytes(policy_bytes)
+    _write_public_artifact_bytes(policy_file, policy_bytes)
     written = {"policy": policy_file}
 
     signature: dict[str, str] | None = None
@@ -568,31 +581,30 @@ def write_policy_outputs(
         signature = sign_policy_bytes(policy_bytes, signing_key, key_id=key_id)
         signature_file = output_path / "windows-release-policy.json.sig"
         signature_bytes = (json.dumps(signature, indent=2, sort_keys=True) + "\n").encode("utf-8")
-        signature_file.write_bytes(signature_bytes)
+        _write_public_artifact_bytes(signature_file, signature_bytes)
         written["signature"] = signature_file
 
     manifest_text: str | None = None
     if write_index:
         index_file = output_path / "index.html"
-        index_file.write_text(
+        _write_public_artifact_text(
+            index_file,
             render_policy_index(
                 policy,
                 policy_bytes=policy_bytes,
                 signature=signature,
             ),
-            encoding="utf-8",
-            newline="\n",
         )
         written["index"] = index_file
 
     if write_robots:
         robots_file = output_path / "robots.txt"
-        robots_file.write_text(render_robots_txt(), encoding="utf-8", newline="\n")
+        _write_public_artifact_text(robots_file, render_robots_txt())
         written["robots"] = robots_file
 
     if write_sitemap:
         sitemap_file = output_path / "sitemap.xml"
-        sitemap_file.write_text(render_sitemap_xml(policy), encoding="utf-8", newline="\n")
+        _write_public_artifact_text(sitemap_file, render_sitemap_xml(policy))
         written["sitemap"] = sitemap_file
 
     if write_manifest:
@@ -603,12 +615,12 @@ def write_policy_outputs(
             signature_bytes=signature_bytes,
             signature=signature,
         )
-        manifest_file.write_text(manifest_text, encoding="utf-8", newline="\n")
+        _write_public_artifact_text(manifest_file, manifest_text)
         written["manifest"] = manifest_file
 
     if any((write_index, write_robots, write_sitemap, write_manifest)):
         nojekyll_file = output_path / ".nojekyll"
-        nojekyll_file.write_text("", encoding="utf-8", newline="\n")
+        _write_public_artifact_text(nojekyll_file, "")
         written["nojekyll"] = nojekyll_file
 
     if write_manifest:
@@ -619,11 +631,11 @@ def write_policy_outputs(
         written["api_policy"] = policy_alias
         if signature_bytes is not None:
             signature_alias = api_dir / "policy.sig"
-            signature_alias.write_bytes(signature_bytes)
+            _write_public_artifact_bytes(signature_alias, signature_bytes)
             written["api_signature"] = signature_alias
         if manifest_text is not None:
             manifest_alias = api_dir / "manifest.json"
-            manifest_alias.write_text(manifest_text, encoding="utf-8", newline="\n")
+            _write_public_artifact_text(manifest_alias, manifest_text)
             written["api_manifest"] = manifest_alias
 
     return written
@@ -666,9 +678,12 @@ def _excluded_release_summary(entry: ReleasePolicyEntry) -> str:
 
 
 def _source_label(url: str) -> str:
-    if "learn.microsoft.com" in url and "release-health" in url:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    path = parsed.path.lower()
+    if host == "learn.microsoft.com" and path.startswith("/en-us/windows/release-health/"):
         return "Microsoft Release Health"
-    if "support.microsoft.com" in url and "feed/atom" in url:
+    if host == "support.microsoft.com" and path.startswith("/en-us/feed/atom/"):
         return "Microsoft Atom feed"
     return url
 
