@@ -24,11 +24,11 @@ def _generated_at(*, hours_ago: int = 1) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).replace(microsecond=0).isoformat()
 
 
-def test_distribution_name_and_console_script_are_hyphenated():
+def test_distribution_name_and_console_script_match_import_namespace():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
 
-    assert 'name = "win-release-guard"' in pyproject
-    assert 'win-release-guard = "win11_release_guard.__main__:main"' in pyproject
+    assert 'name = "win11_release_guard"' in pyproject
+    assert 'win11_release_guard = "win11_release_guard.__main__:main"' in pyproject
     assert 'include = ["win11_release_guard*"]' in pyproject
 
 

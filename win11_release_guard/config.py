@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 DEFAULT_RELEASE_HEALTH_URL = (
     "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
 )
-DEFAULT_POLICY_URL = "https://avnsx.github.io/win-release-guard/windows-release-policy.json"
-DEFAULT_PAGES_BASE_URL = "https://avnsx.github.io/win-release-guard"
+DEFAULT_POLICY_URL = "https://avnsx.github.io/win11_release_guard/windows-release-policy.json"
+DEFAULT_PAGES_BASE_URL = "https://avnsx.github.io/win11_release_guard"
 DEFAULT_PUBLISHED_POLICY_URLS = {
     "landing": f"{DEFAULT_PAGES_BASE_URL}/",
     "policy": DEFAULT_POLICY_URL,
@@ -20,13 +20,13 @@ DEFAULT_PUBLISHED_POLICY_URLS = {
 }
 POLICY_URL_ENV_VAR = "WIN11_RELEASE_GUARD_POLICY_URL"
 
-DEFAULT_USER_AGENT = "win-release-guard/0.2"
+DEFAULT_USER_AGENT = "win11_release_guard/0.2"
 DEFAULT_CACHE_FILE_NAME = "windows-release-policy.json"
 DEFAULT_QUALITY_POLICY = "b_release_only"
 DEFAULT_CACHE_MAX_AGE_HOURS = 72
 DEFAULT_STALE_CACHE_MAX_AGE_HOURS = 720
-DEFAULT_TRUSTED_POLICY_KEY_ID = "win-release-guard-policy-2026-05"
-DEFAULT_TRUSTED_POLICY_PUBLIC_KEY = "oOvCkJFdWubWs55StqbyG8AYRFPU5DVrPnHugrtKI/0="
+DEFAULT_TRUSTED_POLICY_KEY_ID = "win11_release_guard-policy-2026-05"
+DEFAULT_TRUSTED_POLICY_PUBLIC_KEY = "EyYjpk2UGyF2uutZg3PE5+p6gN2sMmSl6mRscTmmz9s="
 DEFAULT_HTTP_TIMEOUT_SECONDS = 12.0
 DEFAULT_WUA_TIMEOUT_SECONDS = 8.0
 DEFAULT_DISM_TIMEOUT_SECONDS = 10.0

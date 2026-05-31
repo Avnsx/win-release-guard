@@ -1,6 +1,6 @@
 # Policy Signing
 
-`win-release-guard` policy feeds are public static JSON plus a detached
+`win11_release_guard` policy feeds are public static JSON plus a detached
 Ed25519 signature. Runtime clients never authenticate to GitHub and never need
 GitHub tokens.
 
@@ -8,7 +8,7 @@ GitHub tokens.
 
 - Private signing keys are never committed.
 - The private key is stored only as GitHub Actions Secret
-  `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
+  `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
 - Trusted public keys are committed in
   `win11_release_guard/data/trusted_policy_keys.json`.
 - Signatures carry `key_id`; runtime verification selects the matching public
@@ -31,7 +31,7 @@ The tool writes:
 - `.tmp/signing-key/trusted_policy_keys.json`
 
 Copy the complete contents of the generated private key file into GitHub
-Actions Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
+Actions Secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
 
 Do not commit generated private signing key material. Commit only reviewed public
 key records in `win11_release_guard/data/trusted_policy_keys.json`.
@@ -54,7 +54,7 @@ New detached signatures are JSON:
 ```json
 {
   "algorithm": "ed25519",
-  "key_id": "win-release-guard-policy-2026-05",
+  "key_id": "win11_release_guard-policy-2026-05",
   "signature": "base64-ed25519-signature",
   "signed_at_utc": "2026-05-31T00:00:00+00:00"
 }
@@ -63,6 +63,10 @@ New detached signatures are JSON:
 The signature covers the exact bytes of `windows-release-policy.json`. The
 signature file itself is not part of the signed payload, so adding metadata such
 as `key_id` does not change the policy signature.
+
+The signed bundled policy JSON may retain legacy generator metadata until the
+bundled policy is regenerated and re-signed; editing signed bundled JSON bytes
+without regenerating its detached signature would invalidate verification.
 
 Legacy signatures without `key_id` are accepted only through the default trusted
 key during the transition.

@@ -18,7 +18,7 @@ if __package__ in {None, ""}:
 from win11_release_guard.config import DEFAULT_TRUSTED_POLICY_KEY_ID
 
 
-PRIVATE_KEY_SECRET_NAME = "WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64"
+PRIVATE_KEY_SECRET_NAME = "WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64"
 PRIVATE_KEY_FILE_NAME = "private-" + "key.b64"
 
 
@@ -27,7 +27,7 @@ def _utc_now() -> str:
 
 
 def _default_key_id() -> str:
-    return f"win-release-guard-policy-{datetime.now(timezone.utc):%Y-%m}"
+    return f"win11_release_guard-policy-{datetime.now(timezone.utc):%Y-%m}"
 
 
 def _build_parser() -> argparse.ArgumentParser:

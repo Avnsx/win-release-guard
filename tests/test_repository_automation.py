@@ -99,6 +99,8 @@ def test_dependency_workflows_exist() -> None:
 def test_readme_contains_truthful_workflow_badges() -> None:
     text = _read(README)
     lower_text = text.lower()
+    repository_url = "https://github.com/Avnsx/win11_release_guard"
+    old_repository_url = "https://github.com/Avnsx/" + ("win" + "-release-guard")
     badge_workflows = (
         "ci.yml",
         "publish-policy.yml",
@@ -109,9 +111,10 @@ def test_readme_contains_truthful_workflow_badges() -> None:
     )
 
     for workflow in badge_workflows:
-        assert f"https://github.com/Avnsx/win-release-guard/actions/workflows/{workflow}/badge.svg" in text
-        assert f"https://github.com/Avnsx/win-release-guard/actions/workflows/{workflow}" in text
+        assert f"{repository_url}/actions/workflows/{workflow}/badge.svg" in text
+        assert f"{repository_url}/actions/workflows/{workflow}" in text
 
+    assert old_repository_url not in text
     assert "fully up to date" not in lower_text
     assert "Dependency freshness is checked by a scheduled workflow." in text
     assert "Dependency freshness` is a scheduled direct-dependency check" in text
@@ -125,13 +128,19 @@ def test_readme_contains_truthful_workflow_badges() -> None:
 
 def test_readme_documents_branding_and_runtime_trust_model() -> None:
     text = _read(README)
+    normalized = " ".join(text.split())
 
-    assert text.startswith("# win-release-guard\n\n")
+    assert text.startswith("# win11_release_guard\n\n")
     assert "Windows release policy guard for broad-fleet Windows 11 version checks." in text
-    assert "The Python import package remains `win11_release_guard`" in text
-    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json" in text
-    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig" in text
-    assert "https://avnsx.github.io/win-release-guard/policy-manifest.json" in text
+    assert "installed console command, and Python import package use the same `win11_release_guard` name" in normalized
+    assert "GitHub repo: `https://github.com/Avnsx/win11_release_guard`" in text
+    assert "Public feed: `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`" in text
+    assert "Python entry point: `python -m win11_release_guard`" in text
+    assert "Console script: `win11_release_guard`" in text
+    assert "Do not reintroduce the old prototype script named by joining `windows`" in text
+    assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
+    assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json.sig" in text
+    assert "https://avnsx.github.io/win11_release_guard/policy-manifest.json" in text
     assert "Runtime clients do not authenticate to GitHub" in text
     assert "do not need GitHub tokens" in text
     assert "private repository access" in text

@@ -37,35 +37,42 @@ EXCLUDED_PARTS = {
     "dist",
     "site",
 }
+EXCLUDED_RELATIVE_FILES = {
+    Path("win11_release_guard/data/windows-release-policy.json"),
+}
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 FORBIDDEN_STALE_PATTERNS = (
     "w11_" + "versioning" + "_api_controller",
     "w11" + "-versioning-api-controller",
     "versioning" + "_api_controller",
+    "win" + "-release-guard",
     "win11" + "-release-guard",
 )
 FAKE_DOMAIN = "example" + ".invalid"
 
 
-def _iter_source_files() -> list[Path]:
+def _iter_source_files(*, include_signed_policy: bool = False) -> list[Path]:
     files: list[Path] = []
     for target in SCAN_TARGETS:
         if not target.exists():
             continue
         candidates = [target] if target.is_file() else [path for path in target.rglob("*") if path.is_file()]
         for path in candidates:
+            relative_path = path.relative_to(ROOT)
+            if not include_signed_policy and relative_path in EXCLUDED_RELATIVE_FILES:
+                continue
             if "handover" in path.name and path.suffix.lower() == ".md":
                 continue
-            if set(path.relative_to(ROOT).parts).intersection(EXCLUDED_PARTS):
+            if set(relative_path.parts).intersection(EXCLUDED_PARTS):
                 continue
             if path.suffix.lower() in TEXT_SUFFIXES:
                 files.append(path)
     return sorted(files)
 
 
-def _line_findings(patterns: tuple[str, ...]) -> list[str]:
+def _line_findings(patterns: tuple[str, ...], *, include_signed_policy: bool = False) -> list[str]:
     findings: list[str] = []
-    for path in _iter_source_files():
+    for path in _iter_source_files(include_signed_policy=include_signed_policy):
         text = path.read_text(encoding="utf-8", errors="replace")
         for line_number, line in enumerate(text.splitlines(), start=1):
             for pattern in patterns:
@@ -78,10 +85,32 @@ def test_public_brand_and_python_namespace_are_fixed() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert "win-release-guard" in readme
-    assert "win-release-guard" in pyproject
+    assert "win11_release_guard" in readme
+    assert "win11_release_guard" in pyproject
     assert (ROOT / "win11_release_guard").is_dir()
-    assert not (ROOT / "win-release-guard").exists()
+    assert not (ROOT / ("win" + "-release-guard")).exists()
+
+
+def test_default_public_pages_urls_use_renamed_repository_path() -> None:
+    from win11_release_guard.config import (
+        DEFAULT_PAGES_BASE_URL,
+        DEFAULT_POLICY_URL,
+        DEFAULT_PUBLISHED_POLICY_URLS,
+    )
+
+    base_url = "https://avnsx.github.io/win11_release_guard"
+
+    assert DEFAULT_PAGES_BASE_URL == base_url
+    assert DEFAULT_POLICY_URL == f"{base_url}/windows-release-policy.json"
+    assert DEFAULT_PUBLISHED_POLICY_URLS == {
+        "landing": f"{base_url}/",
+        "policy": f"{base_url}/windows-release-policy.json",
+        "signature": f"{base_url}/windows-release-policy.json.sig",
+        "manifest": f"{base_url}/policy-manifest.json",
+        "api_policy": f"{base_url}/api/v1/policy.json",
+        "api_signature": f"{base_url}/api/v1/policy.sig",
+        "api_manifest": f"{base_url}/api/v1/manifest.json",
+    }
 
 
 def test_removed_prototype_entrypoint_is_absent() -> None:
@@ -90,6 +119,27 @@ def test_removed_prototype_entrypoint_is_absent() -> None:
 
 def test_no_stale_package_or_project_identities() -> None:
     assert _line_findings(FORBIDDEN_STALE_PATTERNS + (LEGACY_PROTOTYPE_NAME,)) == []
+
+
+def test_signed_bundled_policy_json_is_only_legacy_identity_exception() -> None:
+    from win11_release_guard.signing import verify_policy_signature
+
+    policy_path = ROOT / "win11_release_guard" / "data" / "windows-release-policy.json"
+    signature_path = policy_path.with_name(policy_path.name + ".sig")
+    allowed_path = Path("win11_release_guard/data/windows-release-policy.json")
+    old_project_name = "win" + "-release-guard"
+    old_repo_name = "Avnsx/" + old_project_name
+    old_pages_root = "avnsx.github.io/" + old_project_name
+    old_hyphenated_import = "win11" + "-release-guard"
+
+    findings = _line_findings(
+        (old_project_name, old_hyphenated_import, old_repo_name, old_pages_root),
+        include_signed_policy=True,
+    )
+
+    assert len(findings) == 2
+    assert all(finding.startswith(f"{allowed_path}:") for finding in findings)
+    assert verify_policy_signature(policy_path.read_bytes(), signature_path.read_bytes())
 
 
 def test_fake_invalid_domains_are_limited_to_fixtures() -> None:

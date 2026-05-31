@@ -18,7 +18,7 @@ def _policy_json() -> dict:
     return {
         "schema_version": 1,
         "generated_at_utc": "2026-05-28T00:00:00Z",
-        "generator_version": "win-release-guard/0.2",
+        "generator_version": "win11_release_guard/0.2",
         "source_urls": [
             DEFAULT_RELEASE_HEALTH_URL,
         ],
@@ -307,15 +307,15 @@ def test_check_public_pages_validates_pages_and_aliases(monkeypatch, capsys):
     monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
 
     page_bytes = {
-        DEFAULT_PUBLISHED_POLICY_URLS["landing"]: b"<html><title>win-release-guard</title></html>",
+        DEFAULT_PUBLISHED_POLICY_URLS["landing"]: b"<html><title>win11_release_guard</title></html>",
         DEFAULT_POLICY_URL: policy_bytes,
         f"{DEFAULT_POLICY_URL}.sig": signature_bytes,
         DEFAULT_PUBLISHED_POLICY_URLS["manifest"]: manifest_bytes,
         DEFAULT_PUBLISHED_POLICY_URLS["api_policy"]: policy_bytes,
         DEFAULT_PUBLISHED_POLICY_URLS["api_signature"]: signature_bytes,
         DEFAULT_PUBLISHED_POLICY_URLS["api_manifest"]: manifest_bytes,
-        "https://avnsx.github.io/win-release-guard/robots.txt": b"User-agent: *\nAllow: /\n",
-        "https://avnsx.github.io/win-release-guard/sitemap.xml": b"<?xml version=\"1.0\"?><urlset></urlset>",
+        "https://avnsx.github.io/win11_release_guard/robots.txt": b"User-agent: *\nAllow: /\n",
+        "https://avnsx.github.io/win11_release_guard/sitemap.xml": b"<?xml version=\"1.0\"?><urlset></urlset>",
     }
 
     def fake_public_url(url, *, timeout):

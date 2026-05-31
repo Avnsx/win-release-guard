@@ -40,6 +40,9 @@ jobs:
       - name: Audit GitHub action versions
         run: python tools/check_github_action_versions.py
 
+      - name: Check project identity
+        run: python tools/check_project_identity.py
+
       - name: Test
         run: pytest -q
 
@@ -62,6 +65,9 @@ jobs:
           --policy-url win11_release_guard/data/windows-release-policy.json
           |
           python -m json.tool
+
+      - name: Check generated project identity
+        run: python tools/check_project_identity.py
 
       - name: Create clean archive
         run: python tools/export_clean_archive.py

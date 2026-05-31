@@ -14,16 +14,20 @@ def test_agents_contract_exists() -> None:
 def test_agents_contract_locks_public_and_import_names() -> None:
     text = _agents_text()
 
-    assert "win-release-guard" in text
+    assert "win11_release_guard" in text
     assert "win11_release_guard" in text
     assert "must not revert naming" in text
+    assert "https://github.com/Avnsx/win11_release_guard" in text
+    assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
+    assert "Console script: `win11_release_guard`" in text
+    assert "python -m win11_release_guard" in text
 
 
 def test_agents_contract_locks_secret_and_token_rules() -> None:
     text = _agents_text()
     lower_text = text.lower()
 
-    assert "WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64" in text
+    assert "WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64" in text
     assert "clients must not contain github tokens" in lower_text
     assert "private signing keys must not be committed" in lower_text
 

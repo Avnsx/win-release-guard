@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import zipfile
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from tools import export_clean_archive
 
 
 def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path) -> None:
-    archive_path = tmp_path / "win-release-guard-source.zip"
+    archive_path = tmp_path / "win11_release_guard-source.zip"
 
     created = export_clean_archive.create_archive(export_clean_archive.REPO_ROOT, archive_path)
     names = export_clean_archive.validate_archive(created)
@@ -30,6 +31,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert "tools/check_dependency_freshness.py" in names
     assert "tools/check_commit_message.py" in names
     assert "tools/check_github_action_versions.py" in names
+    assert "tools/check_project_identity.py" in names
     assert "tools/export_clean_archive.py" in names
     assert "docs/security-automation.md" in names
     assert any(name.startswith("tests/") for name in names)
@@ -66,3 +68,38 @@ def test_export_clean_archive_cli_self_check(tmp_path: Path, capsys) -> None:
     assert "Created" in captured.out
     with zipfile.ZipFile(archive_path) as archive:
         assert "tools/export_clean_archive.py" in archive.namelist()
+
+
+def test_export_clean_archive_rejects_old_repo_path_and_archive_name(tmp_path: Path) -> None:
+    archive_path = tmp_path / "bad.zip"
+    old_project_name = "win" + "-release-guard"
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in sorted(export_clean_archive.REQUIRED_ARCHIVE_ENTRIES):
+            content = "placeholder\n"
+            if entry == "README.md":
+                content = (
+                    f"https://github.com/Avnsx/{old_project_name}\n"
+                    f"https://avnsx.github.io/{old_project_name}/\n"
+                    f"dist/{old_project_name}-source.zip\n"
+                )
+            archive.writestr(entry, content)
+
+    with pytest.raises(RuntimeError, match="stale repo/path identity"):
+        export_clean_archive.validate_archive(archive_path, run_tests=False)
+
+
+def test_export_clean_archive_allows_legacy_name_only_in_signed_bundled_policy_json(tmp_path: Path) -> None:
+    archive_path = tmp_path / "allowed-bundled-policy.zip"
+    old_project_name = "win" + "-release-guard"
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in sorted(export_clean_archive.REQUIRED_ARCHIVE_ENTRIES):
+            content = "placeholder\n"
+            if entry == "win11_release_guard/data/windows-release-policy.json":
+                content = f'{{"generator_version": "{old_project_name}/0.2"}}\n'
+            archive.writestr(entry, content)
+
+    names = export_clean_archive.validate_archive(archive_path, run_tests=False)
+
+    assert "win11_release_guard/data/windows-release-policy.json" in names

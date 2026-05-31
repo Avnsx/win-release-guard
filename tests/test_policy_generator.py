@@ -23,7 +23,7 @@ FIXTURES = Path("tests/fixtures")
 EXPECTED_ROBOTS_TXT = (
     "User-agent: *\n"
     "Allow: /\n"
-    "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml\n"
+    "Sitemap: https://avnsx.github.io/win11_release_guard/sitemap.xml\n"
 )
 
 
@@ -384,7 +384,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "avnsx.github.io" not in source_hosts
 
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert "<title>win-release-guard</title>" in index
+    assert "<title>win11_release_guard</title>" in index
     assert "Windows release policy feed" in index
     assert "Policy current" in index
     assert "25H2" in index
@@ -420,6 +420,6 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert (tmp_path / "robots.txt").read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")
 
     sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
-    assert "https://avnsx.github.io/win-release-guard/" in sitemap
-    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json" in sitemap
-    assert "https://avnsx.github.io/win-release-guard/policy-manifest.json" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/policy-manifest.json" in sitemap

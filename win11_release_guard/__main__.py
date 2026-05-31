@@ -77,7 +77,7 @@ class PublicFetchResult:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="win-release-guard",
+        prog="win11_release_guard",
         description="Evaluate Windows 11 release compliance against broad-fleet policy.",
         epilog="Source-tree entry point: python -m win11_release_guard",
     )
@@ -470,7 +470,7 @@ def _policy_url_from_args(args: argparse.Namespace) -> tuple[str | None, str]:
 
 def _package_version() -> str:
     try:
-        return metadata.version("win-release-guard")
+        return metadata.version("win11_release_guard")
     except metadata.PackageNotFoundError:
         pass
 

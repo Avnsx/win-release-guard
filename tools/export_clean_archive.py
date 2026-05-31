@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ARCHIVE_PATH = Path("dist") / "win-release-guard-source.zip"
+DEFAULT_ARCHIVE_PATH = Path("dist") / "win11_release_guard-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 REQUIRED_README_PUBLIC_SOURCES_STATEMENT = (
     "The production generator uses public Microsoft Release Health and Atom sources only; "
@@ -100,6 +100,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "tools/check_commit_message.py",
     "tools/check_dependency_freshness.py",
     "tools/check_github_action_versions.py",
+    "tools/check_project_identity.py",
     "tools/export_clean_archive.py",
     "docs/policy-signing.md",
     "docs/security-automation.md",
@@ -112,6 +113,14 @@ FORBIDDEN_PACKAGE_IDENTITY_PATTERNS = (
     "versioning" + "_api_controller",
     "win11" + "-release-guard",
 )
+FORBIDDEN_RENAMED_REPO_PATTERNS = (
+    "https://github.com/Avnsx/" + ("win" + "-release-guard"),
+    "Avnsx/" + ("win" + "-release-guard"),
+    "https://avnsx.github.io/" + ("win" + "-release-guard"),
+    "avnsx.github.io/" + ("win" + "-release-guard"),
+    ("win" + "-release-guard") + "-source.zip",
+)
+SIGNED_BUNDLED_POLICY_ENTRY = "win11_release_guard/data/windows-release-policy.json"
 FORBIDDEN_ACTIVE_AUTH_PATTERNS = (
     "Microsoft " + "Graph",
     "Az" + "ure",
@@ -211,6 +220,11 @@ def _validate_archive_content(archive_path: Path) -> None:
             for pattern in FORBIDDEN_PACKAGE_IDENTITY_PATTERNS:
                 if pattern in identity_text:
                     findings.append(f"{name}: stale package identity {pattern!r}")
+            for pattern in FORBIDDEN_RENAMED_REPO_PATTERNS:
+                if pattern in identity_text:
+                    findings.append(f"{name}: stale repo/path identity {pattern!r}")
+            if name != SIGNED_BUNDLED_POLICY_ENTRY and ("win" + "-release-guard") in identity_text:
+                findings.append(f"{name}: stale project identity after rename")
 
             auth_text = text
             if name in ALLOWED_HISTORICAL_AUTH_FILES:
@@ -228,7 +242,7 @@ def _validate_archive_content(archive_path: Path) -> None:
 
 
 def _validate_archive_extracts_and_tests_run(archive_path: Path) -> None:
-    with tempfile.TemporaryDirectory(prefix="win-release-guard-archive-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="win11_release_guard-archive-") as temp_dir:
         extract_root = Path(temp_dir) / "source"
         with zipfile.ZipFile(archive_path) as archive:
             archive.extractall(extract_root)
@@ -256,6 +270,17 @@ def _validate_archive_extracts_and_tests_run(archive_path: Path) -> None:
             output = "\n".join(part for part in (scan_result.stdout, scan_result.stderr) if part)
             raise RuntimeError(f"Archive contains private key material or token-like secrets:\n{output}")
 
+        identity_result = subprocess.run(
+            [sys.executable, "tools/check_project_identity.py"],
+            cwd=extract_root,
+            text=True,
+            capture_output=True,
+            timeout=60,
+        )
+        if identity_result.returncode != 0:
+            output = "\n".join(part for part in (identity_result.stdout, identity_result.stderr) if part)
+            raise RuntimeError(f"Archive contains stale project identity:\n{output}")
+
         required_test_paths = (
             extract_root / "pyproject.toml",
             extract_root / "tests",
@@ -269,7 +294,7 @@ def _validate_archive_extracts_and_tests_run(archive_path: Path) -> None:
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONPATH"] = str(extract_root)
-        env["WIN_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH"] = "1"
+        env["WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH"] = "1"
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-q"],
             cwd=extract_root,
@@ -312,13 +337,13 @@ def validate_archive(archive_path: Path, *, run_tests: bool = True) -> list[str]
     if forbidden:
         raise RuntimeError(f"Archive contains forbidden entries: {', '.join(sorted(forbidden))}")
     _validate_archive_content(archive_path)
-    if run_tests and not os.environ.get("WIN_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH"):
+    if run_tests and not os.environ.get("WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH"):
         _validate_archive_extracts_and_tests_run(archive_path)
     return names
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Create a clean win-release-guard source archive.")
+    parser = argparse.ArgumentParser(description="Create a clean win11_release_guard source archive.")
     parser.add_argument(
         "--output",
         type=Path,

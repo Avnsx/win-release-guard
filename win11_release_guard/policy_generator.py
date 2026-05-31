@@ -34,7 +34,7 @@ PAGES_TIMEZONE = "Europe/Berlin"
 ROBOTS_TXT = (
     "User-agent: *\n"
     "Allow: /\n"
-    "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml\n"
+    "Sitemap: https://avnsx.github.io/win11_release_guard/sitemap.xml\n"
 )
 CURATED_EXCLUDED_RELEASE_SUMMARIES = {
     "26H1": (
@@ -741,7 +741,7 @@ def render_policy_index(
         "<head>\n"
         "  <meta charset=\"utf-8\">\n"
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "  <title>win-release-guard</title>\n"
+        "  <title>win11_release_guard</title>\n"
         "  <style>\n"
         "    :root{color-scheme:light;--bg:#f6f8fb;--ink:#182230;--muted:#667085;--line:#d7dee8;--panel:#ffffff;--accent:#0f766e;--warn:#b45309;--code:#0b4a6f}\n"
         "    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.45}\n"
@@ -759,7 +759,7 @@ def render_policy_index(
         "<body>\n"
         "  <main>\n"
         "    <header>\n"
-        "      <div><h1>win-release-guard</h1><p class=\"subtitle\">Windows release policy feed</p></div>\n"
+        "      <div><h1>win11_release_guard</h1><p class=\"subtitle\">Windows release policy feed</p></div>\n"
         f"      <div class=\"badge {status_class}\">{escape(status)}</div>\n"
         "    </header>\n"
         "    <section class=\"grid\">\n"

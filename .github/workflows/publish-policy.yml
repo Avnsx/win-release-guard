@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/publish-policy.yml"
       - "tools/generate_policy.py"
+      - "tools/check_project_identity.py"
       - "tools/scan_for_secret_material.py"
       - "win11_release_guard/**"
 
@@ -48,11 +49,11 @@ jobs:
 
       - name: Generate signed policy
         env:
-          WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64: ${{ secrets.WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 }}
+          WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64: ${{ secrets.WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 }}
         run: |
           set -euo pipefail
-          if [ -z "${WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64:-}" ]; then
-            echo "::error::WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 is required for production policy publishing."
+          if [ -z "${WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64:-}" ]; then
+            echo "::error::WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 is required for production policy publishing."
             exit 1
           fi
           python tools/generate_policy.py \
@@ -61,7 +62,7 @@ jobs:
             --write-robots \
             --write-sitemap \
             --write-manifest \
-            --signing-key-env WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64
+            --signing-key-env WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64
           touch site/.nojekyll
 
       - name: Validate policy and signature
@@ -81,6 +82,9 @@ jobs:
           if not verify_policy_signature(policy_bytes, signature_bytes):
               raise SystemExit("published policy signature verification failed")
           PY
+
+      - name: Check project identity
+        run: python tools/check_project_identity.py
 
       - name: Scan for secret material
         run: >

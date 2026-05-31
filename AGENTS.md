@@ -4,8 +4,8 @@ This repository is public software for Windows administrators. Future agents mus
 
 ## Non-Revertible Architecture Rules
 
-1. The user-facing project, repository, distribution, CLI, and site name is `win-release-guard`.
-2. The Python import package remains `win11_release_guard` because Python import names cannot use hyphens.
+1. The user-facing project, repository, distribution, CLI, and site name is `win11_release_guard`.
+2. The Python import package remains `win11_release_guard`.
 3. Do not rename the import package unless the user explicitly instructs that change.
 4. Future agents must not revert naming back to old project/package identities.
 5. Do not reintroduce the removed root prototype script; the supported source-tree entry point is `python -m win11_release_guard`.
@@ -14,13 +14,19 @@ This repository is public software for Windows administrators. Future agents mus
 8. Do not make the runtime client authenticate to GitHub.
 9. Runtime clients fetch public GitHub Pages JSON plus the detached `.sig` file.
 10. Runtime clients verify Ed25519 signatures with committed public keys.
-11. The private policy signing key lives only in GitHub Actions Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
+11. The private policy signing key lives only in GitHub Actions Secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
 12. GitHub Pages output is public static non-secret data.
 13. WUA is secondary evidence only and must never override the signed policy verdict.
 14. The production generator uses only public Microsoft Release Health HTML and public Microsoft Update History Atom feed sources.
 15. Historical research about authenticated Microsoft metadata APIs may remain only in `deep-research-report.md` or `docs/source-learnings.md` when explicitly marked out of scope, not active architecture instructions.
 16. `.git` is never included in clean archives.
 17. The source of truth is current code, tests, workflows, docs, and tools, not handover text.
+
+Canonical repository and feed:
+
+- GitHub repo: `https://github.com/Avnsx/win11_release_guard`
+- Public feed: `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`
+- Console script: `win11_release_guard`
 
 ## Operational Notes
 
@@ -29,6 +35,7 @@ This repository is public software for Windows administrators. Future agents mus
 - Keep WUA, Panther, DISM, and local system evidence subordinate to signed policy truth.
 - CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub code scanning is disabled in repository settings, enable it under Settings, Code security and analysis.
 - Handover files are temporary local artifacts. Do not commit or publish `*handover*.md`; they are ignored and excluded from clean archives.
+- The signed bundled policy JSON may retain legacy generator metadata until it is regenerated and re-signed; editing signed bundled JSON bytes without regenerating its detached signature would invalidate verification.
 
 ## GitHub Actions Pinning Policy
 

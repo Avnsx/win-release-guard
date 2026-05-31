@@ -84,7 +84,7 @@ def read_latest_commit_message(repo_root: Path) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate win-release-guard commit message hygiene.")
+    parser = argparse.ArgumentParser(description="Validate win11_release_guard commit message hygiene.")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--message", help="Commit message text to validate.")
     source.add_argument("--message-file", type=Path, help="File containing a commit message to validate.")

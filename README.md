@@ -1,11 +1,11 @@
-# win-release-guard
+# win11_release_guard
 
-[![CI](https://github.com/Avnsx/win-release-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/ci.yml)
-[![Publish policy](https://github.com/Avnsx/win-release-guard/actions/workflows/publish-policy.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/publish-policy.yml)
-[![CodeQL](https://github.com/Avnsx/win-release-guard/actions/workflows/codeql.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/codeql.yml)
-[![Pylint](https://github.com/Avnsx/win-release-guard/actions/workflows/pylint.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/pylint.yml)
-[![Dependency audit](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-audit.yml)
-[![Dependency freshness](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-freshness.yml/badge.svg)](https://github.com/Avnsx/win-release-guard/actions/workflows/dependency-freshness.yml)
+[![CI](https://github.com/Avnsx/win11_release_guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/ci.yml)
+[![Publish policy](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml)
+[![CodeQL](https://github.com/Avnsx/win11_release_guard/actions/workflows/codeql.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/codeql.yml)
+[![Pylint](https://github.com/Avnsx/win11_release_guard/actions/workflows/pylint.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/pylint.yml)
+[![Dependency audit](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-audit.yml)
+[![Dependency freshness](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml)
 
 Windows release policy guard for broad-fleet Windows 11 version checks.
 
@@ -15,13 +15,22 @@ always-current dependency guarantee. The Pylint badge reports the workflow
 status for the current `--fail-under=8.0` gate, not a permanent quality
 guarantee.
 
-`win-release-guard` is a standalone Python mini-module for evaluating whether a
+`win11_release_guard` is a standalone Python mini-module for evaluating whether a
 Windows 11 device is on the current broad-fleet target release and baseline
-build.
+build. The repository, distribution package, installed console command, and
+Python import package use the same `win11_release_guard` name.
 
-The repository, distribution package, and installed console command are named
-`win-release-guard`. The Python import package remains `win11_release_guard`
-because Python import statements cannot use hyphens.
+Project metadata:
+
+- Project name: `win11_release_guard`
+- GitHub repo: `https://github.com/Avnsx/win11_release_guard`
+- Public feed: `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`
+- Python entry point: `python -m win11_release_guard`
+- Console script: `win11_release_guard`
+
+Do not reintroduce the old prototype script named by joining `windows`,
+`releases`, and `info` with underscores and adding `.py`; do not revert naming
+back to the previous hyphenated project identity.
 
 ## Project Goal
 
@@ -145,7 +154,7 @@ Runtime is JSON-first. By default, `check_current_system()` uses the production
 signed policy endpoint published from this repository:
 
 ```text
-https://avnsx.github.io/win-release-guard/windows-release-policy.json
+https://avnsx.github.io/win11_release_guard/windows-release-policy.json
 ```
 
 If that endpoint is unavailable, runtime falls back to verified cache, stale
@@ -192,7 +201,7 @@ server/unknown scopes.
 A generated JSON policy can be cached locally and reused if the live policy
 fetch fails. Default cache path:
 
-- Windows: `%LOCALAPPDATA%\win-release-guard\windows-release-policy.json`
+- Windows: `%LOCALAPPDATA%\win11_release_guard\windows-release-policy.json`
 - Other/fallback: `.cache/windows-release-policy.json` under the current working
   directory
 
@@ -204,7 +213,7 @@ production default. Local policy file paths are accepted and report
 is also available as a manual override:
 
 ```text
-https://raw.githubusercontent.com/Avnsx/win-release-guard/main/win11_release_guard/data/windows-release-policy.json
+https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/win11_release_guard/data/windows-release-policy.json
 ```
 
 ## Readiness Checks
@@ -258,10 +267,10 @@ commit SHA.
 Manual public endpoint checks:
 
 ```powershell
-curl -I https://avnsx.github.io/win-release-guard/
-curl -I https://avnsx.github.io/win-release-guard/windows-release-policy.json
-curl -I https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig
-curl https://avnsx.github.io/win-release-guard/robots.txt
+curl -I https://avnsx.github.io/win11_release_guard/
+curl -I https://avnsx.github.io/win11_release_guard/windows-release-policy.json
+curl -I https://avnsx.github.io/win11_release_guard/windows-release-policy.json.sig
+curl https://avnsx.github.io/win11_release_guard/robots.txt
 ```
 
 ## Python Example
@@ -291,34 +300,34 @@ are called.
 
 ## CLI Examples
 
-After installation, use the hyphenated command:
+After installation, use the console command:
 
 ```powershell
-win-release-guard --json
-win-release-guard --json-pretty
-win-release-guard --json --unicode
-win-release-guard --json --output release-check.json
-win-release-guard --pretty
-win-release-guard --policy-url https://avnsx.github.io/win-release-guard/windows-release-policy.json
-win-release-guard --diagnose-config
-win-release-guard --allow-runtime-release-health-html
-win-release-guard --allow-unsigned-policy
-win-release-guard --trusted-policy-public-key <base64-ed25519-public-key>
-win-release-guard --allow-major-upgrade-recommendation
-win-release-guard --allow-server-evaluation
-win-release-guard --disallow-preview-installed
-win-release-guard --no-preview-installed-warning
-win-release-guard --explicit-target-release 25H2
-win-release-guard --quality-policy b_release_only
-win-release-guard --timeout-seconds 12
-win-release-guard --wua --wua-timeout-seconds 8
-win-release-guard --with-wua
-win-release-guard --no-wua
-win-release-guard --json --include-raw-wua-history
-win-release-guard --diagnose-config --check-source
-win-release-guard --self-test
-win-release-guard --check-policy-source
-win-release-guard --check-public-pages
+win11_release_guard --json
+win11_release_guard --json-pretty
+win11_release_guard --json --unicode
+win11_release_guard --json --output release-check.json
+win11_release_guard --pretty
+win11_release_guard --policy-url https://avnsx.github.io/win11_release_guard/windows-release-policy.json
+win11_release_guard --diagnose-config
+win11_release_guard --allow-runtime-release-health-html
+win11_release_guard --allow-unsigned-policy
+win11_release_guard --trusted-policy-public-key <base64-ed25519-public-key>
+win11_release_guard --allow-major-upgrade-recommendation
+win11_release_guard --allow-server-evaluation
+win11_release_guard --disallow-preview-installed
+win11_release_guard --no-preview-installed-warning
+win11_release_guard --explicit-target-release 25H2
+win11_release_guard --quality-policy b_release_only
+win11_release_guard --timeout-seconds 12
+win11_release_guard --wua --wua-timeout-seconds 8
+win11_release_guard --with-wua
+win11_release_guard --no-wua
+win11_release_guard --json --include-raw-wua-history
+win11_release_guard --diagnose-config --check-source
+win11_release_guard --self-test
+win11_release_guard --check-policy-source
+win11_release_guard --check-public-pages
 ```
 
 For source-tree use without installing the console script,
@@ -354,7 +363,7 @@ Use the export helper when sharing this repository as a source ZIP:
 python tools/export_clean_archive.py
 ```
 
-It writes `dist/win-release-guard-source.zip` and self-checks the archive
+It writes `dist/win11_release_guard-source.zip` and self-checks the archive
 manifest. The archive intentionally includes `win11_release_guard/`, `tests/`,
 `tools/`, `docs/`, `README.md`, `pyproject.toml`, `.github/dependabot.yml`,
 `.github/workflows/ci.yml`, `.github/workflows/publish-policy.yml`,
@@ -391,7 +400,7 @@ python tools/generate_signing_key.py --out-dir .tmp/signing-key
 ```
 
 Copy the contents of the generated private key file into the GitHub Actions
-Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. Do not commit private key
+Secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. Do not commit private key
 material. Commit only reviewed public key records in
 `win11_release_guard/data/trusted_policy_keys.json`.
 
@@ -409,7 +418,7 @@ signature, `policy-manifest.json`, byte-identical API aliases under
 The repository includes `.github/workflows/publish-policy.yml`, which runs on a
 twice-daily schedule and publishes `site/` to GitHub Pages through the same
 repository's Pages artifact deployment. The workflow requires repository secret
-`WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`; if that secret is absent, production
+`WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`; if that secret is absent, production
 publishing fails before upload and the previous Pages deployment remains
 untouched. It does not use PATs, `contents: write`, branch commits, or
 `gh-pages` branch publishing.
@@ -423,12 +432,12 @@ JSON bytes before accepting or caching a policy.
 
 The public Pages feed exposes these stable programmatic paths:
 
-- `https://avnsx.github.io/win-release-guard/windows-release-policy.json`
-- `https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig`
-- `https://avnsx.github.io/win-release-guard/policy-manifest.json`
-- `https://avnsx.github.io/win-release-guard/api/v1/policy.json`
-- `https://avnsx.github.io/win-release-guard/api/v1/policy.sig`
-- `https://avnsx.github.io/win-release-guard/api/v1/manifest.json`
+- `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`
+- `https://avnsx.github.io/win11_release_guard/windows-release-policy.json.sig`
+- `https://avnsx.github.io/win11_release_guard/policy-manifest.json`
+- `https://avnsx.github.io/win11_release_guard/api/v1/policy.json`
+- `https://avnsx.github.io/win11_release_guard/api/v1/policy.sig`
+- `https://avnsx.github.io/win11_release_guard/api/v1/manifest.json`
 
 These public feed paths belong in `published_urls`, not `source_urls`.
 `source_urls` remains reserved for upstream Microsoft pages and feeds used to
@@ -489,7 +498,7 @@ Exit codes:
   "source_status": "REMOTE_POLICY_OK",
   "is_source_check_complete": true,
   "policy_age_hours": 2.5,
-  "policy_source_url": "https://avnsx.github.io/win-release-guard/windows-release-policy.json",
+  "policy_source_url": "https://avnsx.github.io/win11_release_guard/windows-release-policy.json",
   "policy_source_kind": "remote_json",
   "policy_signature_status": "valid",
   "warnings": [],

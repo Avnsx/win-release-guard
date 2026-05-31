@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(".github/workflows/publish-policy.yml")
-SECRET_NAME = "WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64"
+SECRET_NAME = "WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64"
 
 
 def _workflow_text() -> str:
@@ -21,6 +21,7 @@ def test_publish_policy_workflow_exists_and_has_expected_triggers() -> None:
     assert "push:" in text
     assert ".github/workflows/publish-policy.yml" in text
     assert "tools/generate_policy.py" in text
+    assert "tools/check_project_identity.py" in text
     assert "win11_release_guard/**" in text
 
 
@@ -54,11 +55,22 @@ def test_publish_policy_workflow_requires_signing_secret_and_never_falls_back_to
     assert SECRET_NAME in text
     assert f'[ -z "${{{SECRET_NAME}:-}}" ]' in text
     assert "exit 1" in text
-    assert "--signing-key-env WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64" in text
+    assert "--signing-key-env WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64" in text
     assert "last-known-good" not in text
     assert "checked-in signed" not in text
     assert "cp win11_release_guard/data/windows-release-policy.json" not in text
     assert "--allow-unsigned" not in text
+
+
+def test_publish_policy_workflow_does_not_reference_old_signing_secret_names() -> None:
+    text = _workflow_text()
+    old_secret_names = (
+        "WIN_" + "RELEASE_GUARD_POLICY_SIGNING_KEY_B64",
+        "WIN_" + "RELEASE_GUARD_SIGNING_KEY",
+    )
+
+    for secret_name in old_secret_names:
+        assert secret_name not in text
 
 
 def test_publish_policy_workflow_does_not_echo_signing_secret_or_trace_shell() -> None:
@@ -86,6 +98,7 @@ def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -
     assert "--write-manifest" in text
     assert "validate_policy_document" in text
     assert "verify_policy_signature" in text
+    assert "python tools/check_project_identity.py" in text
     assert "python tools/scan_for_secret_material.py" in text
 
 

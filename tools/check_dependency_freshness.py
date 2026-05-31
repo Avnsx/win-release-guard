@@ -79,7 +79,7 @@ def parse_direct_dependencies(pyproject: dict[str, Any]) -> list[DirectDependenc
 def fetch_pypi_json(name: str, *, timeout_seconds: float) -> dict[str, Any]:
     request = urllib.request.Request(
         PYPI_JSON_URL.format(name=_normalize_name(name)),
-        headers={"Accept": "application/json", "User-Agent": "win-release-guard-dependency-freshness"},
+        headers={"Accept": "application/json", "User-Agent": "win11_release_guard-dependency-freshness"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:

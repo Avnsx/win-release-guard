@@ -115,6 +115,14 @@ def test_unknown_key_id_fails_without_public_key_override():
     assert not verify_policy_signature(policy_bytes, json.dumps(signature).encode("utf-8"))
 
 
+def test_default_generated_signature_uses_current_policy_key_id():
+    policy_bytes = b'{"schema_version":1}\n'
+    signature = sign_policy_bytes(policy_bytes, TEST_PRIVATE_KEY)
+
+    assert DEFAULT_TRUSTED_POLICY_KEY_ID == "win11_release_guard-policy-2026-05"
+    assert signature["key_id"] == DEFAULT_TRUSTED_POLICY_KEY_ID
+
+
 def test_committed_public_key_file_contains_no_private_key_material():
     key_file = Path("win11_release_guard/data/trusted_policy_keys.json")
     data = json.loads(key_file.read_text(encoding="utf-8"))
@@ -146,8 +154,9 @@ def test_data_directory_contains_only_public_policy_artifacts():
 def test_runtime_can_verify_policy_with_committed_trusted_key():
     trusted = load_bundled_policy()
     trusted_keys = load_trusted_policy_keys()
+    keys_by_id = {key.key_id: key for key in trusted_keys}
 
     assert trusted.signature_status == "valid"
     assert trusted.policy.broad_target_existing_devices is not None
-    assert any(key.key_id == "win-release-guard-policy-2026-01" for key in trusted_keys)
-    assert any(key.key_id == DEFAULT_TRUSTED_POLICY_KEY_ID and key.status == "active" for key in trusted_keys)
+    assert keys_by_id["win11_release_guard-policy-2026-01"].status == "retiring"
+    assert keys_by_id[DEFAULT_TRUSTED_POLICY_KEY_ID].status == "active"
