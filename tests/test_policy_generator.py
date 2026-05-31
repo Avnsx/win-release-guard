@@ -11,12 +11,18 @@ from win11_release_guard.policy_generator import (
     build_policy_from_sources,
     generate_policy,
     parse_atom_feed,
+    render_robots_txt,
     write_policy_outputs,
 )
 from win11_release_guard.policy_schema import validate_policy_document
 
 
 FIXTURES = Path("tests/fixtures")
+EXPECTED_ROBOTS_TXT = (
+    "User-agent: *\n"
+    "Allow: /\n"
+    "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml\n"
+)
 
 
 def _html() -> str:
@@ -147,7 +153,7 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     assert written["manifest"].name == "policy-manifest.json"
     assert written["nojekyll"].name == ".nojekyll"
     assert json.loads(written["policy"].read_text(encoding="utf-8"))["broad_target_existing_devices"]["version"] == "25H2"
-    assert "Sitemap:" in written["robots"].read_text(encoding="utf-8")
+    assert written["robots"].read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")
     assert "windows-release-policy.json" in written["sitemap"].read_text(encoding="utf-8")
     assert json.loads(written["manifest"].read_text(encoding="utf-8"))["broad_target_existing_devices"]["version"] == "25H2"
     assert data["source_fetch_status"]["release_health_html"]["status"] == "ok"
@@ -294,6 +300,7 @@ def test_generator_cli_writes_pages_support_files(tmp_path):
     assert (output_dir / "api/v1/policy.json").exists()
     assert (output_dir / "api/v1/manifest.json").exists()
     assert (output_dir / ".nojekyll").exists()
+    assert (output_dir / "robots.txt").read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")
 
 
 def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_path):
@@ -374,10 +381,8 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "https://cdn" not in index.lower()
     assert "<script" not in index.lower()
 
-    robots = (tmp_path / "robots.txt").read_text(encoding="utf-8")
-    assert "User-agent: *" in robots
-    assert "Allow: /" in robots
-    assert "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml" in robots
+    assert render_robots_txt() == EXPECTED_ROBOTS_TXT
+    assert (tmp_path / "robots.txt").read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")
 
     sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
     assert "https://avnsx.github.io/win-release-guard/" in sitemap

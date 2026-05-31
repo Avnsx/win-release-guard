@@ -30,6 +30,11 @@ from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 
 DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
 PAGES_TIMEZONE = "Europe/Berlin"
+ROBOTS_TXT = (
+    "User-agent: *\n"
+    "Allow: /\n"
+    "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml\n"
+)
 
 
 @dataclass(frozen=True)
@@ -757,12 +762,8 @@ def render_policy_index(
     )
 
 
-def render_robots_txt(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
-    return (
-        "User-agent: *\n"
-        "Allow: /\n"
-        f"Sitemap: {base_url}/sitemap.xml\n"
-    )
+def render_robots_txt() -> str:
+    return ROBOTS_TXT
 
 
 def render_sitemap_xml(policy: ReleasePolicy, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
