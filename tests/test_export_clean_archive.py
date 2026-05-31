@@ -13,8 +13,11 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     names = export_clean_archive.validate_archive(created)
 
     assert created == archive_path
+    assert "AGENTS.md" in names
     assert "README.md" in names
     assert "pyproject.toml" in names
+    assert ".gitignore" in names
+    assert ".gitattributes" in names
     assert ".github/workflows/ci.yml" in names
     assert ".github/workflows/publish-policy.yml" in names
     assert "win11_release_guard/data/windows-release-policy.json" in names
@@ -32,8 +35,14 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert "build" not in parts
         assert "dist" not in parts
         assert not name.endswith(".pyc")
+        assert not name.endswith(".pem")
+        assert not name.endswith(".key")
+        assert not name.endswith(".zip")
         assert Path(name).name != "out.json"
+        assert not Path(name).match("site/*")
         assert Path(name).name != export_clean_archive.LEGACY_PROTOTYPE_NAME
+        assert Path(name).name != "private-key.b64"
+        assert "private" not in Path(name).name.lower() or "key" not in Path(name).name.lower()
 
 
 def test_export_clean_archive_cli_self_check(tmp_path: Path, capsys) -> None:

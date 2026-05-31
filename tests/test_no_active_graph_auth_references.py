@@ -6,14 +6,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_README_STATEMENT = (
     "The production generator uses public Microsoft Release Health and Atom sources only; "
-    "it does not use Microsoft Graph, Azure, OIDC, or token-authenticated Microsoft APIs."
+    "it does not use Microsoft "
+    "Graph, Az"
+    "ure, OI"
+    "DC, or token-authenticated Microsoft APIs."
 )
 FORBIDDEN_PATTERNS = (
-    "Microsoft Graph",
-    "Azure",
-    "OIDC",
-    "allow-no-subscriptions",
-    "WindowsUpdates.Read.All",
+    "Microsoft " + "Graph",
+    "Az" + "ure",
+    "OI" + "DC",
+    "allow-no-" + "subscriptions",
+    "WindowsUpdates" + ".Read.All",
 )
 SCAN_TARGETS = (
     ROOT / "README.md",
@@ -68,7 +71,7 @@ def test_readme_states_public_sources_only() -> None:
     assert REQUIRED_README_STATEMENT in readme
 
 
-def test_no_active_graph_azure_oidc_references() -> None:
+def test_no_active_authenticated_microsoft_api_references() -> None:
     findings: list[str] = []
     for path in _iter_scanned_files():
         text = path.read_text(encoding="utf-8", errors="replace")
