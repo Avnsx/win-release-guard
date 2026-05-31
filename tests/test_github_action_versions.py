@@ -90,6 +90,53 @@ def test_audit_fails_missing_node24_force_env(tmp_path: Path) -> None:
     assert "does not set FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in findings[0].message
 
 
+def test_audit_fails_unknown_first_party_action(tmp_path: Path) -> None:
+    workflow = _write_workflow(tmp_path, _minimal_workflow("actions/cache@v4"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert len(findings) == 1
+    assert "not in the audited first-party action version map" in findings[0].message
+
+
+def test_audit_fails_unallowlisted_third_party_action(tmp_path: Path) -> None:
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    workflow = _write_workflow(tmp_path, _minimal_workflow(f"third-party/example@{sha}"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert len(findings) == 1
+    assert "must be explicitly allowlisted before use" in findings[0].message
+
+
+def test_audit_fails_allowlisted_third_party_action_without_full_sha(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        check_github_action_versions,
+        "ALLOWED_THIRD_PARTY_ACTIONS",
+        {"third-party/example": "test fixture"},
+    )
+    workflow = _write_workflow(tmp_path, _minimal_workflow("third-party/example@v1"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert len(findings) == 1
+    assert "must be pinned to a full 40-character commit SHA" in findings[0].message
+
+
+def test_audit_allows_allowlisted_third_party_action_with_full_sha(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        check_github_action_versions,
+        "ALLOWED_THIRD_PARTY_ACTIONS",
+        {"third-party/example": "test fixture"},
+    )
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    workflow = _write_workflow(tmp_path, _minimal_workflow(f"third-party/example@{sha}"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert findings == []
+
+
 def test_audit_cli_returns_nonzero_for_stale_fixture(tmp_path: Path, capsys) -> None:
     workflow = _write_workflow(tmp_path, _minimal_workflow("actions/setup-python@" + "v5"))
 

@@ -29,6 +29,24 @@ Settings -> Code security and analysis -> Code scanning
 GitHub UI settings are not fully controlled by repository files. If code
 scanning is disabled in settings, enable it there after the workflow is present.
 
+## GitHub Actions Pinning
+
+The repository uses a pragmatic action-pinning policy:
+
+- GitHub-owned first-party actions may use audited major tags.
+- The audited major tags are enforced by `tools/check_github_action_versions.py`.
+- Third-party actions are forbidden unless explicitly allowlisted and pinned to
+  a full 40-character commit SHA.
+- Adding any third-party action requires updating the audit tool, tests, and
+  this document with the reason for the exception.
+- Workflow permissions stay minimal; production publishing must not request
+  `contents: write`.
+
+Dependabot covers the `github-actions` ecosystem so GitHub-owned action majors
+are reviewed through normal dependency update flow. Full SHA pinning remains an
+available stricter enterprise option, but it has a higher maintenance cost and
+is not the current policy for GitHub-owned first-party actions.
+
 ## Workflow Badges
 
 README badges are GitHub Actions workflow status badges. They reflect the latest

@@ -130,6 +130,18 @@ def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> Non
             assert pattern.lower() not in lowered
 
 
+def test_security_automation_documents_action_pinning_policy() -> None:
+    doc = ROOT / "docs" / "security-automation.md"
+    text = _read(doc)
+
+    assert "GitHub Actions Pinning" in text
+    assert "GitHub-owned first-party actions may use audited major tags" in text
+    assert "Third-party actions are forbidden unless explicitly allowlisted" in text
+    assert "full 40-character commit SHA" in text
+    assert "tools/check_github_action_versions.py" in text
+    assert "contents: write" in text
+
+
 def test_security_automation_doc_exists_and_explains_ui_limits() -> None:
     doc = ROOT / "docs" / "security-automation.md"
     text = _read(doc)

@@ -13,6 +13,7 @@ DEFAULT_WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 NODE24_FORCE_ENV = "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24"
 INSECURE_NODE_OPT_OUT = "ACTIONS_ALLOW_USE_" + "UNSECURE_NODE_VERSION"
 USES_RE = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<quote>['\"]?)(?P<ref>[^'\"\s#]+)")
+FULL_LENGTH_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 REQUIRED_ACTIONS = {
     "actions/checkout": "v6",
@@ -25,6 +26,11 @@ ALLOWED_ACTIONS = {
     "github/codeql-action/init": {"v4"},
     "github/codeql-action/analyze": {"v4"},
 }
+ALLOWED_THIRD_PARTY_ACTIONS: dict[str, str] = {}
+
+
+def _is_github_owned_action(action: str) -> bool:
+    return action.startswith("actions/") or action.startswith("github/codeql-action/")
 
 
 @dataclass(frozen=True)
@@ -133,6 +139,48 @@ def audit_workflow(path: Path) -> list[Finding]:
                     path=path,
                     line_number=use.line_number,
                     message=f"{use.action} must use documented allowed version {allowed}, found {use.version}",
+                )
+            )
+            continue
+
+        if required_version is not None or allowed_versions is not None:
+            continue
+
+        if _is_github_owned_action(use.action):
+            findings.append(
+                Finding(
+                    path=path,
+                    line_number=use.line_number,
+                    message=(
+                        f"{use.action} is a GitHub-owned action but is not in the "
+                        "audited first-party action version map"
+                    ),
+                )
+            )
+            continue
+
+        if use.action not in ALLOWED_THIRD_PARTY_ACTIONS:
+            findings.append(
+                Finding(
+                    path=path,
+                    line_number=use.line_number,
+                    message=(
+                        f"{use.action} is a third-party action and must be explicitly "
+                        "allowlisted before use"
+                    ),
+                )
+            )
+            continue
+
+        if FULL_LENGTH_SHA_RE.fullmatch(use.version) is None:
+            findings.append(
+                Finding(
+                    path=path,
+                    line_number=use.line_number,
+                    message=(
+                        f"{use.action} is a third-party action and must be pinned to "
+                        "a full 40-character commit SHA"
+                    ),
                 )
             )
 

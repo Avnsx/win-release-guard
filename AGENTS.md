@@ -30,6 +30,15 @@ This repository is public software for Windows administrators. Future agents mus
 - CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub code scanning is disabled in repository settings, enable it under Settings, Code security and analysis.
 - Handover files are temporary local artifacts. Do not commit or publish `*handover*.md`; they are ignored and excluded from clean archives.
 
+## GitHub Actions Pinning Policy
+
+- GitHub-owned first-party actions may use audited major tags only when listed in `tools/check_github_action_versions.py`.
+- Current audited first-party actions are `actions/checkout@v6`, `actions/setup-python@v6`, `actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`, and `github/codeql-action/*@v4`.
+- Third-party actions are forbidden unless explicitly allowlisted in the audit tool and pinned to a full 40-character commit SHA.
+- Do not add third-party actions without updating the audit tool, tests, and security automation docs with the reason.
+- Keep workflow token permissions minimal; the publish workflow must not request `contents: write`.
+- Dependabot covers `github-actions` updates for GitHub-owned action majors.
+
 ## Deployment-Affecting Live Verification Gate
 
 Deployment-affecting changes include workflow changes, policy generator changes,
