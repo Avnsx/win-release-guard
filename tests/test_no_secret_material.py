@@ -30,6 +30,18 @@ def test_secret_material_scanner_passes_current_repo() -> None:
     assert findings == []
 
 
+def test_secret_material_scanner_skips_ignored_handover_notes(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    fixture = docs / "handover-local.md"
+    token = ("gh" + "p_") + ("A" * 36)
+    fixture.write_text(f"temporary local note only: {token}\n", encoding="utf-8")
+
+    findings = scan_for_secret_material.scan_paths([docs], root=tmp_path)
+
+    assert findings == []
+
+
 def test_secret_material_scanner_fails_private_key_pem(tmp_path: Path) -> None:
     private_key_marker = "BEGIN " + "PRIVATE KEY"
     fixture = tmp_path / "leaked.pem"

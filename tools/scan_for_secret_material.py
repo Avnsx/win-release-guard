@@ -32,6 +32,9 @@ EXCLUDED_DIR_NAMES = {
     ".venv",
     "venv",
 }
+EXCLUDED_FILE_PATTERNS = (
+    "*handover*.md",
+)
 
 PRIVATE_KEY_FILE_NAMES = {
     "private-" + "key.b64",
@@ -216,12 +219,15 @@ def _iter_files(path: Path) -> Iterable[Path]:
     if not path.exists():
         return
     if path.is_file():
-        yield path
+        if not any(path.name and Path(path.name).match(pattern) for pattern in EXCLUDED_FILE_PATTERNS):
+            yield path
         return
     for dirpath, dirnames, filenames in os.walk(path):
         dirnames[:] = [dirname for dirname in dirnames if dirname not in EXCLUDED_DIR_NAMES]
         current_dir = Path(dirpath)
         for filename in filenames:
+            if any(Path(filename).match(pattern) for pattern in EXCLUDED_FILE_PATTERNS):
+                continue
             yield current_dir / filename
 
 

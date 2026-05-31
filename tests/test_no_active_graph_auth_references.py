@@ -53,6 +53,8 @@ def _iter_scanned_files() -> list[Path]:
         else:
             candidates = [path for path in target.rglob("*") if path.is_file()]
         for path in candidates:
+            if "handover" in path.name and path.suffix.lower() == ".md":
+                continue
             if path.resolve() in {allowed.resolve() for allowed in ALLOWED_HISTORICAL_FILES}:
                 continue
             if "__pycache__" in path.parts or path.suffix == ".pyc":

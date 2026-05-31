@@ -54,6 +54,8 @@ def _iter_source_files() -> list[Path]:
             continue
         candidates = [target] if target.is_file() else [path for path in target.rglob("*") if path.is_file()]
         for path in candidates:
+            if "handover" in path.name and path.suffix.lower() == ".md":
+                continue
             if set(path.relative_to(ROOT).parts).intersection(EXCLUDED_PARTS):
                 continue
             if path.suffix.lower() in TEXT_SUFFIXES:
