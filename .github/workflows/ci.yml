@@ -36,6 +36,19 @@ jobs:
           --output-dir site
           --write-index
 
+      - name: Scan for secret material
+        run: >
+          python tools/scan_for_secret_material.py
+          site
+          win11_release_guard
+          tests
+          tools
+          docs
+          README.md
+          AGENTS.md
+          pyproject.toml
+          .github
+
       - name: Validate generated policy schema
         run: >
           python -c "import json; from pathlib import Path; from win11_release_guard.policy_schema import validate_policy_document; validate_policy_document(json.loads(Path('site/windows-release-policy.json').read_text(encoding='utf-8')))"

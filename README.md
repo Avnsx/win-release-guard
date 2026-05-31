@@ -334,6 +334,13 @@ Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. Do not commit private key
 material. Commit only reviewed public key records in
 `win11_release_guard/data/trusted_policy_keys.json`.
 
+Before publishing or exporting, scan source and generated Pages output for
+committed secret material:
+
+```powershell
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+```
+
 The repository includes `.github/workflows/publish-policy.yml`, which runs on a
 six-hour schedule and publishes `site/` to GitHub Pages. When the repository
 secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64` is configured, that workflow

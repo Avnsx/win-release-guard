@@ -8,6 +8,10 @@ __pycache__/
 /site/
 /build/
 /dist/
+*.pem
+*.key
+*private*key*
+private-key.b64
 *.egg-info/
 *.pyc
 out*.json

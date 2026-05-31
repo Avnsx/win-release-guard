@@ -61,8 +61,10 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "win11_release_guard/data/trusted_policy_keys.json",
     "tools/generate_policy.py",
     "tools/generate_signing_key.py",
+    "tools/scan_for_secret_material.py",
     "tools/export_clean_archive.py",
     "docs/policy-signing.md",
+    "tests/test_no_secret_material.py",
 }
 
 

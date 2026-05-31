@@ -94,6 +94,19 @@ jobs:
               raise SystemExit("published policy signature verification failed")
           PY
 
+      - name: Scan for secret material
+        run: >
+          python tools/scan_for_secret_material.py
+          site
+          win11_release_guard
+          tests
+          tools
+          docs
+          README.md
+          AGENTS.md
+          pyproject.toml
+          .github
+
       - uses: actions/configure-pages@v5
         with:
           enablement: true
