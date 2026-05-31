@@ -344,6 +344,10 @@ committed secret material:
 python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
 ```
 
+Generated Pages output includes the landing dashboard, policy JSON, detached
+signature, `policy-manifest.json`, byte-identical API aliases under
+`api/v1/`, `robots.txt`, `sitemap.xml`, and `.nojekyll`.
+
 The repository includes `.github/workflows/publish-policy.yml`, which runs on a
 twice-daily schedule and publishes `site/` to GitHub Pages through the same
 repository's Pages artifact deployment. The workflow requires repository secret
@@ -358,6 +362,15 @@ Remote generated JSON policies must have a valid adjacent
 `windows-release-policy.json.sig` signature unless `allow_unsigned_policy=True`
 or `--allow-unsigned-policy` is explicitly set. The runtime verifies the exact
 JSON bytes before accepting or caching a policy.
+
+The public Pages feed exposes these stable programmatic paths:
+
+- `https://avnsx.github.io/win-release-guard/windows-release-policy.json`
+- `https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig`
+- `https://avnsx.github.io/win-release-guard/policy-manifest.json`
+- `https://avnsx.github.io/win-release-guard/api/v1/policy.json`
+- `https://avnsx.github.io/win-release-guard/api/v1/policy.sig`
+- `https://avnsx.github.io/win-release-guard/api/v1/manifest.json`
 
 Detached signatures are JSON objects with `algorithm`, `key_id`, and
 `signature`. The runtime chooses the matching Ed25519 public key from

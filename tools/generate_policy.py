@@ -36,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-index", action="store_true", help="Write site/index.html summary.")
     parser.add_argument("--write-robots", action="store_true", help="Write site/robots.txt.")
     parser.add_argument("--write-sitemap", action="store_true", help="Write site/sitemap.xml.")
-    parser.add_argument("--write-manifest", action="store_true", help="Write site/manifest.json.")
+    parser.add_argument("--write-manifest", action="store_true", help="Write site/policy-manifest.json and API aliases.")
     parser.add_argument(
         "--signing-key-env",
         default=None,

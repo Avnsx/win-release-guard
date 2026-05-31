@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 from tools import generate_policy as generate_policy_cli
@@ -142,7 +143,8 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     assert written["index"].name == "index.html"
     assert written["robots"].name == "robots.txt"
     assert written["sitemap"].name == "sitemap.xml"
-    assert written["manifest"].name == "manifest.json"
+    assert written["manifest"].name == "policy-manifest.json"
+    assert written["nojekyll"].name == ".nojekyll"
     assert json.loads(written["policy"].read_text(encoding="utf-8"))["broad_target_existing_devices"]["version"] == "25H2"
     assert "Sitemap:" in written["robots"].read_text(encoding="utf-8")
     assert "windows-release-policy.json" in written["sitemap"].read_text(encoding="utf-8")
@@ -154,9 +156,10 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
 
 
 def test_write_signed_policy_output_includes_key_id(tmp_path):
-    policy = build_policy_from_sources(
-        release_health_html_path=FIXTURES / "windows11-release-health.html",
-        atom_feed_path=FIXTURES / "windows11-atom.xml",
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom(),
+        generated_at_utc="2026-05-31T14:11:50+00:00",
         signature_status="valid",
     )
 
@@ -286,4 +289,91 @@ def test_generator_cli_writes_pages_support_files(tmp_path):
     assert (output_dir / "index.html").exists()
     assert (output_dir / "robots.txt").exists()
     assert (output_dir / "sitemap.xml").exists()
-    assert (output_dir / "manifest.json").exists()
+    assert (output_dir / "policy-manifest.json").exists()
+    assert (output_dir / "api/v1/policy.json").exists()
+    assert (output_dir / "api/v1/manifest.json").exists()
+    assert (output_dir / ".nojekyll").exists()
+
+
+def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_path):
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom(),
+        generated_at_utc="2026-05-31T14:11:50+00:00",
+        signature_status="valid",
+    )
+    written = write_policy_outputs(
+        policy,
+        output_dir=tmp_path,
+        signing_key="krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs=",
+        key_id="test-policy-key",
+        write_index=True,
+        write_robots=True,
+        write_sitemap=True,
+        write_manifest=True,
+    )
+
+    expected = {
+        "index.html",
+        "windows-release-policy.json",
+        "windows-release-policy.json.sig",
+        "policy-manifest.json",
+        "api/v1/policy.json",
+        "api/v1/policy.sig",
+        "api/v1/manifest.json",
+        "robots.txt",
+        "sitemap.xml",
+        ".nojekyll",
+    }
+    actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()}
+
+    assert expected <= actual
+    assert (tmp_path / "api/v1/policy.json").read_bytes() == (tmp_path / "windows-release-policy.json").read_bytes()
+    assert (tmp_path / "api/v1/policy.sig").read_bytes() == (tmp_path / "windows-release-policy.json.sig").read_bytes()
+    assert (tmp_path / "api/v1/manifest.json").read_bytes() == (tmp_path / "policy-manifest.json").read_bytes()
+
+    policy_bytes = (tmp_path / "windows-release-policy.json").read_bytes()
+    signature_bytes = (tmp_path / "windows-release-policy.json.sig").read_bytes()
+    manifest = json.loads((tmp_path / "policy-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["policy_sha256"] == hashlib.sha256(policy_bytes).hexdigest()
+    assert manifest["signature_sha256"] == hashlib.sha256(signature_bytes).hexdigest()
+    assert manifest["signature_algorithm"] == "ed25519"
+    assert manifest["key_id"] == "test-policy-key"
+    assert manifest["timezone"] == "Europe/Berlin"
+    assert manifest["status"] == "Policy current"
+    assert manifest["published_urls"]["api_policy"].endswith("/api/v1/policy.json")
+
+    index = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "<title>win-release-guard</title>" in index
+    assert "Windows release policy feed" in index
+    assert "Policy current" in index
+    assert "25H2" in index
+    assert "26200" in index
+    assert "26200.8457" in index
+    assert "b_release_only" in index
+    assert "26H1 excluded for existing devices" in index
+    assert "Microsoft Release Health" in index
+    assert "Microsoft Atom feed" in index
+    assert "Ed25519" in index or "ed25519" in index
+    assert "test-policy-key" in index
+    assert "/windows-release-policy.json" in index
+    assert "/windows-release-policy.json.sig" in index
+    assert "/policy-manifest.json" in index
+    assert "/api/v1/policy.json" in index
+    assert "Europe/Berlin" not in index
+    assert "Sunday, 31 May 2026, 16:11:50 CEST" in index
+    assert "auth" not in index.lower()
+    assert "token" not in index.lower()
+    assert "http://cdn" not in index.lower()
+    assert "https://cdn" not in index.lower()
+    assert "<script" not in index.lower()
+
+    robots = (tmp_path / "robots.txt").read_text(encoding="utf-8")
+    assert "User-agent: *" in robots
+    assert "Allow: /" in robots
+    assert "Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml" in robots
+
+    sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
+    assert "https://avnsx.github.io/win-release-guard/" in sitemap
+    assert "https://avnsx.github.io/win-release-guard/windows-release-policy.json" in sitemap
+    assert "https://avnsx.github.io/win-release-guard/policy-manifest.json" in sitemap
