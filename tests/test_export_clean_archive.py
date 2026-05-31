@@ -32,7 +32,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert "dist" not in parts
         assert not name.endswith(".pyc")
         assert Path(name).name != "out.json"
-        assert Path(name).name != "windows_releases_info.py"
+        assert Path(name).name != export_clean_archive.LEGACY_PROTOTYPE_NAME
 
 
 def test_export_clean_archive_cli_self_check(tmp_path: Path, capsys) -> None:

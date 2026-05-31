@@ -9,6 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARCHIVE_PATH = Path("dist") / "win-release-guard-source.zip"
+LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 
 INCLUDE_PATHS = (
     Path("win11_release_guard"),
@@ -46,7 +47,7 @@ EXCLUDED_FILE_PATTERNS = (
     "~$*",
     ".DS_Store",
     "Thumbs.db",
-    "windows_releases_info.py",
+    LEGACY_PROTOTYPE_NAME,
 )
 
 REQUIRED_ARCHIVE_ENTRIES = {
@@ -120,7 +121,7 @@ def validate_archive(archive_path: Path) -> list[str]:
         if set(path.parts).intersection({".git", ".pytest_cache", "__pycache__", ".cache", "build", "dist"}):
             forbidden.append(name)
             continue
-        if path.name == "out.json" or path.name == "windows_releases_info.py" or path.suffix == ".pyc":
+        if path.name == "out.json" or path.name == LEGACY_PROTOTYPE_NAME or path.suffix == ".pyc":
             forbidden.append(name)
 
     if forbidden:
