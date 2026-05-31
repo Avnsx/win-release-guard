@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from tools import generate_signing_key
 from win11_release_guard.bundled_policy import load_bundled_policy
+from win11_release_guard.config import DEFAULT_TRUSTED_POLICY_KEY_ID
 from win11_release_guard.signing import (
     decode_policy_signature_metadata,
     load_trusted_policy_keys,
@@ -116,3 +117,4 @@ def test_runtime_can_verify_policy_with_committed_trusted_key():
     assert trusted.signature_status == "valid"
     assert trusted.policy.broad_target_existing_devices is not None
     assert any(key.key_id == "win-release-guard-policy-2026-01" for key in trusted_keys)
+    assert any(key.key_id == DEFAULT_TRUSTED_POLICY_KEY_ID and key.status == "active" for key in trusted_keys)

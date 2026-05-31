@@ -54,7 +54,7 @@ New detached signatures are JSON:
 ```json
 {
   "algorithm": "ed25519",
-  "key_id": "win-release-guard-policy-2026-01",
+  "key_id": "win-release-guard-policy-2026-05",
   "signature": "base64-ed25519-signature",
   "signed_at_utc": "2026-05-31T00:00:00+00:00"
 }
