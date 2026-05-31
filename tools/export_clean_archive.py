@@ -63,6 +63,7 @@ EXCLUDED_FILE_PATTERNS = (
     "test-output*.json",
     "cli-output*.json",
     "local-output*.json",
+    "dependency-freshness.json",
     "*handover*.md",
     "*.tmp",
     "*.temp",
@@ -303,6 +304,7 @@ def validate_archive(archive_path: Path, *, run_tests: bool = True) -> list[str]
         if (
             path.name == "out.json"
             or path.name == LEGACY_PROTOTYPE_NAME
+            or path.name == "dependency-freshness.json"
             or path.suffix in {".pyc", ".pem", ".key", ".zip"}
             or fnmatch.fnmatchcase(path.name, "out*.json")
             or fnmatch.fnmatchcase(path.name, "*private*key*")

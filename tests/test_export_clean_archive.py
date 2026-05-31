@@ -49,6 +49,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert not name.endswith(".zip")
         assert not Path(name).match("*handover*.md")
         assert Path(name).name != "out.json"
+        assert Path(name).name != "dependency-freshness.json"
         assert not Path(name).match("site/*")
         assert Path(name).name != export_clean_archive.LEGACY_PROTOTYPE_NAME
         assert Path(name).name != ("private-" + "key.b64")
@@ -66,3 +67,17 @@ def test_export_clean_archive_cli_self_check(tmp_path: Path, capsys) -> None:
     assert "Created" in captured.out
     with zipfile.ZipFile(archive_path) as archive:
         assert "tools/export_clean_archive.py" in archive.namelist()
+
+
+def test_export_clean_archive_never_contains_git_metadata(tmp_path: Path) -> None:
+    archive_path = tmp_path / "source.zip"
+    created = export_clean_archive.create_archive(export_clean_archive.REPO_ROOT, archive_path)
+
+    with zipfile.ZipFile(created) as archive:
+        names = archive.namelist()
+
+    assert ".git/" not in names
+    assert not any(
+        name == ".git" or name.startswith(".git/") or "/.git/" in name
+        for name in names
+    )
