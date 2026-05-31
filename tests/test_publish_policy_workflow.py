@@ -27,6 +27,7 @@ def test_publish_policy_workflow_exists_and_has_expected_triggers() -> None:
 def test_publish_policy_workflow_uses_minimum_pages_permissions() -> None:
     text = _workflow_text()
 
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
     assert "contents: read" in text
     assert "pages: write" in text
     assert "id-token: write" in text
@@ -91,7 +92,9 @@ def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -
 def test_publish_policy_workflow_uses_pages_artifact_deployment_actions() -> None:
     text = _workflow_text()
 
-    assert "actions/configure-pages@v5" in text
-    assert "actions/upload-pages-artifact@v4" in text
+    assert "actions/checkout@v6" in text
+    assert "actions/setup-python@v6" in text
+    assert "actions/configure-pages@v6" in text
+    assert "actions/upload-pages-artifact@v5" in text
     assert "actions/upload-pages-artifact@v3" not in text
-    assert "actions/deploy-pages@v4" in text
+    assert "actions/deploy-pages@v5" in text

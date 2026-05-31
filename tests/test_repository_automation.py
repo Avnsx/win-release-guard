@@ -51,6 +51,8 @@ def test_codeql_workflow_exists_and_uses_codeql_actions() -> None:
     assert "security-events: write" in text
     assert "contents: read" in text
     assert "actions: read" in text
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "actions/checkout@v6" in text
     assert "github/codeql-action/init@v4" in text
     assert "github/codeql-action/analyze@v4" in text
     assert "languages: python" in text
@@ -65,6 +67,9 @@ def test_pylint_workflow_exists_and_lints_package_and_tools() -> None:
     assert "push:" in text
     assert "pull_request:" in text
     assert "workflow_dispatch:" in text
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "actions/checkout@v6" in text
+    assert "actions/setup-python@v6" in text
     assert 'python-version: "3.12"' in text
     assert 'python -m pip install -e ".[test]" pylint' in text
     assert "pylint --fail-under=8.0 win11_release_guard tools" in text
@@ -77,11 +82,17 @@ def test_dependency_workflows_exist() -> None:
     assert "name: Dependency freshness" in freshness
     assert "workflow_dispatch:" in freshness
     assert "schedule:" in freshness
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in freshness
+    assert "actions/checkout@v6" in freshness
+    assert "actions/setup-python@v6" in freshness
     assert "python tools/check_dependency_freshness.py --output dependency-freshness.json" in freshness
 
     assert "name: Dependency audit" in audit
     assert "workflow_dispatch:" in audit
     assert "schedule:" in audit
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in audit
+    assert "actions/checkout@v6" in audit
+    assert "actions/setup-python@v6" in audit
     assert "pip-audit --local" in audit
 
 
@@ -113,6 +124,8 @@ def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> Non
         assert "contents: write" not in text
         assert "pull-requests: write" not in text
         assert "issues: write" not in text
+        insecure_node_opt_out = "ACTIONS_ALLOW_USE_" + "UNSECURE_NODE_VERSION"
+        assert insecure_node_opt_out not in text
         for pattern in BAD_TOKEN_PATTERNS:
             assert pattern.lower() not in lowered
 
