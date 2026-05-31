@@ -208,15 +208,27 @@ passes, and an update schedule exists. Check the hosted or local signed policy
 without local Windows probes:
 
 ```powershell
-python -m win11_release_guard --check-policy-source --policy-url https://avnsx.github.io/win-release-guard/windows-release-policy.json
+python -m win11_release_guard --check-policy-source
+python -m win11_release_guard --check-public-pages
 ```
 
 This prints the policy source status, upstream source URLs, published URLs,
-`generated_at_utc`, broad target, baseline, and excluded releases. It exits `0`
-when the policy source is valid and `2` when the policy or signature is
-unavailable, invalid, or untrusted. The command verifies the hosted signed
-policy artifact; generator workflow health and the update schedule are verified
-through the repository's GitHub Actions and Pages configuration.
+manifest hash status, `generated_at_utc`, broad target, baseline, and excluded
+releases. It exits `0` when the policy source is valid and `2` when the policy
+or signature is unavailable, invalid, or untrusted. `--check-public-pages`
+also checks the landing page, robots.txt, sitemap, canonical JSON/signature,
+and `/api/v1/` aliases. These modes run no local Windows probes and no WUA.
+Generator workflow health and the update schedule are verified through the
+repository's GitHub Actions and Pages configuration.
+
+Manual public endpoint checks:
+
+```powershell
+curl -I https://avnsx.github.io/win-release-guard/
+curl -I https://avnsx.github.io/win-release-guard/windows-release-policy.json
+curl -I https://avnsx.github.io/win-release-guard/windows-release-policy.json.sig
+curl https://avnsx.github.io/win-release-guard/robots.txt
+```
 
 ## Python Example
 
@@ -271,7 +283,8 @@ win-release-guard --no-wua
 win-release-guard --json --include-raw-wua-history
 win-release-guard --diagnose-config --check-source
 win-release-guard --self-test
-win-release-guard --check-policy-source --policy-url https://avnsx.github.io/win-release-guard/windows-release-policy.json
+win-release-guard --check-policy-source
+win-release-guard --check-public-pages
 ```
 
 For source-tree use without installing the console script,
@@ -292,9 +305,12 @@ fingerprint, probe defaults, source-check setting, and platform summary. It
 does not fetch the remote policy unless `--check-source` is also passed.
 `--self-test` imports the package, loads and verifies the bundled signed
 policy, parses the policy schema, and performs no WUA or remote fetch by
-default. `--check-policy-source` fetches only the configured policy JSON and
-its `.sig` file, verifies the signature, validates the schema, and prints feed
-metadata without running local Windows probes.
+default. `--check-policy-source` fetches only the configured policy JSON, its
+`.sig` file, and the manifest when a public manifest URL is listed. It verifies
+the signature, validates the schema, checks the manifest policy hash when the
+manifest is reachable, and prints feed metadata without running local Windows
+probes. `--check-public-pages` adds HTTP checks for the public GitHub Pages
+landing page and API aliases.
 
 ## Creating a clean source archive
 

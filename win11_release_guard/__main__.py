@@ -7,10 +7,13 @@ import json
 import platform
 import sys
 import traceback
+import urllib.error
+import urllib.request
 from collections import Counter
+from dataclasses import dataclass
 from importlib import metadata, resources
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from cryptography.hazmat.primitives import serialization
 
@@ -27,8 +30,10 @@ from .config import (
     DEFAULT_EVENT_LOG_MAX_EVENTS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_POLICY_URL,
+    DEFAULT_PUBLISHED_POLICY_URLS,
     DEFAULT_QUALITY_POLICY,
     DEFAULT_STALE_CACHE_MAX_AGE_HOURS,
+    DEFAULT_USER_AGENT,
     DEFAULT_WUA_MAX_HISTORY,
     DEFAULT_WUA_MAX_RELEVANT_UPDATES,
     DEFAULT_WUA_TIMEOUT_SECONDS,
@@ -44,6 +49,7 @@ from .models import (
     InstalledBuildClassification,
     InstalledBuildOrigin,
 )
+from .policy_schema import validate_policy_document
 from .remote_policy import fetch_policy_bytes
 from .signing import load_public_key, load_trusted_policy
 
@@ -53,6 +59,20 @@ EXIT_UPDATE_REQUIRED = 1
 EXIT_UNKNOWN_OR_POLICY_ERROR = 2
 EXIT_ABOVE_BROAD_TARGET = 3
 EXIT_ARGUMENT_ERROR = 10
+
+
+@dataclass(frozen=True)
+class PublicFetchResult:
+    url: str
+    status_code: int
+    content: bytes
+    content_type: str | None = None
+    headers: Mapping[str, str] | None = None
+
+    @property
+    def auth_challenge(self) -> bool:
+        headers = {str(key).lower(): str(value) for key, value in dict(self.headers or {}).items()}
+        return self.status_code == 401 or "www-authenticate" in headers
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -92,6 +112,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--check-policy-source",
         action="store_true",
         help="Fetch and verify the configured signed policy source without local Windows probes.",
+    )
+    parser.add_argument(
+        "--check-public-pages",
+        action="store_true",
+        help="Validate the public GitHub Pages landing page and API aliases after policy source checks.",
     )
     parser.add_argument("--cache-file", type=Path, default=None, help="Optional policy cache path.")
     parser.add_argument(
@@ -628,6 +653,236 @@ def _policy_signature_source(policy_url: str) -> str:
     return f"{policy_url}.sig"
 
 
+def _is_http_url(value: str | None) -> bool:
+    return bool(value and str(value).lower().startswith(("http://", "https://")))
+
+
+def _fetch_public_url(url: str, *, timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS) -> PublicFetchResult:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": DEFAULT_USER_AGENT,
+            "Accept": "*/*",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            headers = {str(key): str(value) for key, value in response.headers.items()}
+            content_type = response.headers.get("Content-Type")
+            return PublicFetchResult(
+                url=url,
+                status_code=int(getattr(response, "status", 200)),
+                content=response.read(),
+                content_type=content_type,
+                headers=headers,
+            )
+    except urllib.error.HTTPError as exc:
+        headers = {str(key): str(value) for key, value in exc.headers.items()} if exc.headers else {}
+        return PublicFetchResult(
+            url=url,
+            status_code=int(exc.code),
+            content=exc.read(),
+            content_type=headers.get("Content-Type"),
+            headers=headers,
+        )
+    except Exception as exc:
+        raise PolicyFetchError(f"Failed to fetch public Pages URL {url}: {exc}") from exc
+
+
+def _decode_json_bytes(data: bytes, *, label: str) -> Mapping[str, Any]:
+    try:
+        decoded = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PolicyParseError(f"{label} is malformed JSON: {exc}") from exc
+    if not isinstance(decoded, Mapping):
+        raise PolicyParseError(f"{label} top-level value must be an object.")
+    return decoded
+
+
+def _manifest_url_for_policy(policy_url: str, policy) -> str | None:
+    if not _is_http_url(policy_url):
+        return None
+    published_urls = dict(policy.published_urls or {})
+    if policy_url == published_urls.get("api_policy"):
+        return published_urls.get("api_manifest") or DEFAULT_PUBLISHED_POLICY_URLS["api_manifest"]
+    return published_urls.get("manifest") or DEFAULT_PUBLISHED_POLICY_URLS["manifest"]
+
+
+def _manifest_check_payload(
+    *,
+    policy_url: str,
+    policy,
+    policy_bytes: bytes,
+    timeout_seconds: float,
+) -> tuple[dict[str, object], bool]:
+    manifest_url = _manifest_url_for_policy(policy_url, policy)
+    if manifest_url is None:
+        return (
+            {
+                "manifest_url": None,
+                "manifest_status": "not_checked",
+                "manifest_warning": None,
+                "policy_sha256": hashlib.sha256(policy_bytes).hexdigest(),
+            },
+            True,
+        )
+
+    try:
+        manifest_bytes, _manifest_content_type = fetch_policy_bytes(manifest_url, timeout=timeout_seconds)
+    except Exception as exc:
+        return (
+            {
+                "manifest_url": manifest_url,
+                "manifest_status": "unavailable",
+                "manifest_warning": f"Manifest unavailable: {exc}",
+                "policy_sha256": hashlib.sha256(policy_bytes).hexdigest(),
+            },
+            True,
+        )
+
+    try:
+        manifest = _decode_json_bytes(manifest_bytes, label="Policy manifest")
+    except PolicyParseError as exc:
+        return (
+            {
+                "manifest_url": manifest_url,
+                "manifest_status": "invalid",
+                "manifest_warning": str(exc),
+                "policy_sha256": hashlib.sha256(policy_bytes).hexdigest(),
+            },
+            False,
+        )
+
+    actual_policy_sha256 = hashlib.sha256(policy_bytes).hexdigest()
+    expected_policy_sha256 = str(manifest.get("policy_sha256") or "")
+    if not expected_policy_sha256:
+        return (
+            {
+                "manifest_url": manifest_url,
+                "manifest_status": "invalid",
+                "manifest_warning": "Policy manifest is missing policy_sha256.",
+                "policy_sha256": actual_policy_sha256,
+            },
+            False,
+        )
+    if expected_policy_sha256 != actual_policy_sha256:
+        return (
+            {
+                "manifest_url": manifest_url,
+                "manifest_status": "sha256_mismatch",
+                "manifest_warning": "Policy manifest policy_sha256 does not match fetched policy bytes.",
+                "policy_sha256": actual_policy_sha256,
+                "manifest_policy_sha256": expected_policy_sha256,
+            },
+            False,
+        )
+
+    return (
+        {
+            "manifest_url": manifest_url,
+            "manifest_status": "ok",
+            "manifest_warning": None,
+            "policy_sha256": actual_policy_sha256,
+            "manifest_policy_sha256": expected_policy_sha256,
+        },
+        True,
+    )
+
+
+def _public_pages_urls(policy) -> dict[str, str]:
+    published_urls = dict(DEFAULT_PUBLISHED_POLICY_URLS)
+    published_urls.update(dict(policy.published_urls or {}))
+    landing = published_urls["landing"].rstrip("/")
+    return {
+        "landing": published_urls["landing"],
+        "policy": published_urls["policy"],
+        "signature": published_urls["signature"],
+        "manifest": published_urls["manifest"],
+        "api_policy": published_urls["api_policy"],
+        "api_signature": published_urls["api_signature"],
+        "api_manifest": published_urls["api_manifest"],
+        "robots": f"{landing}/robots.txt",
+        "sitemap": f"{landing}/sitemap.xml",
+    }
+
+
+def _check_public_page_url(
+    *,
+    name: str,
+    url: str,
+    timeout_seconds: float,
+    expect_json: bool = False,
+    expect_signature: bool = False,
+    expect_robots: bool = False,
+) -> dict[str, object]:
+    try:
+        response = _fetch_public_url(url, timeout=timeout_seconds)
+    except Exception as exc:
+        return {
+            "name": name,
+            "url": url,
+            "ok": False,
+            "status_code": None,
+            "error": str(exc),
+        }
+
+    errors: list[str] = []
+    if response.status_code != 200:
+        errors.append(f"HTTP {response.status_code}")
+    if response.auth_challenge:
+        errors.append("auth challenge present")
+
+    if expect_json and not errors:
+        try:
+            _decode_json_bytes(response.content, label=f"{name} endpoint")
+        except PolicyParseError as exc:
+            errors.append(str(exc))
+
+    if expect_signature and not errors:
+        try:
+            signature = _decode_json_bytes(response.content, label=f"{name} signature")
+            if not signature.get("signature"):
+                errors.append("signature field is missing")
+        except PolicyParseError as exc:
+            errors.append(str(exc))
+
+    if expect_robots and not errors:
+        text = response.content.decode("utf-8", errors="replace")
+        if "User-agent: *" not in text or "Allow: /" not in text:
+            errors.append("robots.txt does not allow all")
+
+    return {
+        "name": name,
+        "url": url,
+        "ok": not errors,
+        "status_code": response.status_code,
+        "errors": errors,
+    }
+
+
+def _check_public_pages_payload(policy, *, timeout_seconds: float) -> tuple[dict[str, object], bool]:
+    urls = _public_pages_urls(policy)
+    checks = [
+        _check_public_page_url(name="landing", url=urls["landing"], timeout_seconds=timeout_seconds),
+        _check_public_page_url(name="policy", url=urls["policy"], timeout_seconds=timeout_seconds, expect_json=True),
+        _check_public_page_url(name="signature", url=urls["signature"], timeout_seconds=timeout_seconds, expect_signature=True),
+        _check_public_page_url(name="manifest", url=urls["manifest"], timeout_seconds=timeout_seconds, expect_json=True),
+        _check_public_page_url(name="api_policy", url=urls["api_policy"], timeout_seconds=timeout_seconds, expect_json=True),
+        _check_public_page_url(name="api_signature", url=urls["api_signature"], timeout_seconds=timeout_seconds, expect_signature=True),
+        _check_public_page_url(name="api_manifest", url=urls["api_manifest"], timeout_seconds=timeout_seconds, expect_json=True),
+        _check_public_page_url(name="robots", url=urls["robots"], timeout_seconds=timeout_seconds, expect_robots=True),
+        _check_public_page_url(name="sitemap", url=urls["sitemap"], timeout_seconds=timeout_seconds),
+    ]
+    ok = all(bool(check.get("ok")) for check in checks)
+    return (
+        {
+            "status": "OK" if ok else "FAILED",
+            "checks": checks,
+        },
+        ok,
+    )
+
+
 def _policy_source_failure_payload(
     *,
     status: str,
@@ -646,7 +901,15 @@ def _policy_source_failure_payload(
     }
 
 
-def _policy_source_success_payload(policy_url: str, signature_url: str, trusted_signature_status: str, policy) -> dict[str, object]:
+def _policy_source_success_payload(
+    policy_url: str,
+    signature_url: str,
+    trusted_signature_status: str,
+    policy,
+    *,
+    manifest_payload: Mapping[str, object],
+    public_pages_payload: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     target = policy.broad_target_existing_devices
     broad_target = None
     baseline = None
@@ -670,16 +933,27 @@ def _policy_source_success_payload(policy_url: str, signature_url: str, trusted_
         }
         for entry in policy.excluded_for_existing_devices
     ]
+    status = "OK"
+    if manifest_payload.get("manifest_status") in {"invalid", "sha256_mismatch"}:
+        status = "INVALID"
+    if public_pages_payload and public_pages_payload.get("status") != "OK":
+        status = "PUBLIC_PAGES_FAILED"
 
     return {
         "ok": True,
-        "status": "OK",
+        "status": status,
         "policy_url": policy_url,
         "signature_url": signature_url,
         "signature_status": trusted_signature_status,
         "generated_at_utc": policy.generated_at_utc,
         "source_urls": list(policy.source_urls),
         "published_urls": dict(policy.published_urls),
+        "manifest_url": manifest_payload.get("manifest_url"),
+        "manifest_status": manifest_payload.get("manifest_status"),
+        "manifest_warning": manifest_payload.get("manifest_warning"),
+        "policy_sha256": manifest_payload.get("policy_sha256"),
+        "manifest_policy_sha256": manifest_payload.get("manifest_policy_sha256"),
+        "public_pages": dict(public_pages_payload) if public_pages_payload else None,
         "broad_target": broad_target,
         "baseline": baseline,
         "excluded_releases": excluded_releases,
@@ -807,14 +1081,45 @@ def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, ob
             False,
         )
 
+    try:
+        validate_policy_document(trusted.policy.to_dict())
+    except PolicyParseError as exc:
+        return (
+            _policy_source_failure_payload(
+                status="INVALID",
+                policy_url=policy_url,
+                signature_url=signature_url,
+                message=f"Policy schema invalid: {exc}",
+                exc=exc,
+            ),
+            False,
+        )
+
+    manifest_payload, manifest_ok = _manifest_check_payload(
+        policy_url=policy_url,
+        policy=trusted.policy,
+        policy_bytes=policy_bytes,
+        timeout_seconds=args.timeout_seconds,
+    )
+
+    public_pages_payload = None
+    public_pages_ok = True
+    if args.check_public_pages:
+        public_pages_payload, public_pages_ok = _check_public_pages_payload(
+            trusted.policy,
+            timeout_seconds=args.timeout_seconds,
+        )
+
     return (
         _policy_source_success_payload(
             policy_url,
             signature_url,
             trusted.signature_status,
             trusted.policy,
+            manifest_payload=manifest_payload,
+            public_pages_payload=public_pages_payload,
         ),
-        True,
+        manifest_ok and public_pages_ok,
     )
 
 
@@ -832,6 +1137,15 @@ def _print_policy_source_payload(payload: dict[str, object]) -> None:
 
     print(f"Signature: {payload['signature_status']}")
     print(f"Generated at UTC: {payload['generated_at_utc'] or 'unknown'}")
+    if payload.get("manifest_url"):
+        print(f"Manifest URL: {payload['manifest_url']}")
+        print(f"Manifest: {payload.get('manifest_status') or 'unknown'}")
+        if payload.get("manifest_policy_sha256"):
+            print(f"Manifest policy SHA-256: {payload['manifest_policy_sha256']}")
+    elif payload.get("manifest_status"):
+        print(f"Manifest: {payload['manifest_status']}")
+    if payload.get("policy_sha256"):
+        print(f"Policy SHA-256: {payload['policy_sha256']}")
     print("Source URLs:")
     for source_url in payload.get("source_urls") or []:
         print(f"- {source_url}")
@@ -864,10 +1178,28 @@ def _print_policy_source_payload(payload: dict[str, object]) -> None:
         print("- none")
 
     warnings = payload.get("validation_warnings") or []
+    manifest_warning = payload.get("manifest_warning")
+    if manifest_warning:
+        warnings = [*warnings, manifest_warning]
     if warnings:
         print("Warnings:")
         for warning in warnings:
             print(f"- {warning}")
+
+    public_pages = payload.get("public_pages")
+    if isinstance(public_pages, dict):
+        print(f"Public Pages: {public_pages.get('status') or 'unknown'}")
+        for check in public_pages.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            status = "OK" if check.get("ok") else "FAILED"
+            status_code = check.get("status_code")
+            suffix = f" HTTP {status_code}" if status_code is not None else ""
+            print(f"- {check.get('name')}: {status}{suffix} {check.get('url')}")
+            for error in check.get("errors") or []:
+                print(f"  - {error}")
+            if check.get("error"):
+                print(f"  - {check['error']}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -889,7 +1221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True))
         return 0 if ok else EXIT_UNKNOWN_OR_POLICY_ERROR
 
-    if args.check_policy_source:
+    if args.check_policy_source or args.check_public_pages:
         payload, ok = _check_policy_source_payload(args)
         _print_policy_source_payload(payload)
         return 0 if ok else EXIT_UNKNOWN_OR_POLICY_ERROR
