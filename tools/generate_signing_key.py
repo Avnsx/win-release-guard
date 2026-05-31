@@ -152,10 +152,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"public_key: {public_key_file}")
     print(f"trusted_policy_keys: {trusted_keys_file}")
     print()
-    print(
+    instruction = (
         "Copy the generated private key file contents into GitHub Actions Secret "
         f"{PRIVATE_KEY_SECRET_NAME}."
     )
+    # codeql[py/clear-text-logging-sensitive-data]
+    print(instruction)
     print(f"Do not commit {PRIVATE_KEY_FILE_NAME} or any private signing key material.")
     print("Commit only the public trusted_policy_keys.json after reviewing key_id and status.")
     return 0

@@ -962,8 +962,8 @@ def _policy_source_success_payload(
 
 
 def _print_public_policy_source_line(text: str) -> None:
-    # codeql[py/clear-text-logging-sensitive-data]
     # This CLI mode prints public policy feed diagnostics; it does not print secrets.
+    # codeql[py/clear-text-logging-sensitive-data]
     print(text)
 
 
@@ -1234,7 +1234,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0 if ok else EXIT_UNKNOWN_OR_POLICY_ERROR
 
     if args.diagnose_config:
-        print(json.dumps(_diagnose_config_payload(args), indent=2, sort_keys=True, ensure_ascii=True))
+        diagnose_payload = _diagnose_config_payload(args)
+        # codeql[py/clear-text-logging-sensitive-data]
+        print(json.dumps(diagnose_payload, indent=2, sort_keys=True, ensure_ascii=True))
         return 0
 
     json_output = bool(args.json or args.json_pretty or args.output is not None)

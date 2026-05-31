@@ -545,14 +545,14 @@ def sign_policy_bytes(
 
 
 def _write_public_artifact_bytes(path: Path, data: bytes) -> None:
-    # codeql[py/clear-text-storage-sensitive-data]
     # Detached signatures and policy manifests are public Pages artifacts, not secrets.
+    # codeql[py/clear-text-storage-sensitive-data]
     path.write_bytes(data)
 
 
 def _write_public_artifact_text(path: Path, text: str) -> None:
-    # codeql[py/clear-text-storage-sensitive-data]
     # Generated Pages text files contain public policy metadata only.
+    # codeql[py/clear-text-storage-sensitive-data]
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
