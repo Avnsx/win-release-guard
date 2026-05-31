@@ -25,6 +25,7 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `tests/test_commit_message_hygiene.py`
 - `tests/test_export_clean_archive.py`
 - `tests/test_import_contract.py`
+- `tests/test_live_verification_gate_docs.py`
 - `tests/test_no_active_graph_auth_references.py`
 - `tests/test_no_secret_material.py`
 - `tests/test_pages_landing.py`
@@ -50,14 +51,18 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `14ad217 Polish public policy feed landing page`
 - `457a2e0 Clarify excluded release summaries on Pages dashboard`
 - `7ea5315 Document final Pages policy feed hardening`
-- `Enforce descriptive commit message hygiene`
+- `88d40f1 Enforce descriptive commit message hygiene`
+- `1b08ebd Add live verification gate for Pages feed changes`
+- `Record final production readiness audit`
 
 ## Final Commands Run
 
 - `git -c safe.directory=* status --short`
 - `python -m compileall -q win11_release_guard tools`
 - `python tools/check_commit_message.py --message "Enforce descriptive commit message hygiene"`
+- `python tools/check_commit_message.py --message "Add live verification gate for Pages feed changes"`
 - `pytest -q tests/test_commit_message_hygiene.py tests/test_agents_contract.py tests/test_export_clean_archive.py`
+- `pytest -q tests/test_agents_contract.py tests/test_live_verification_gate_docs.py`
 - `pytest -q`
 - `python -m win11_release_guard --self-test`
 - `python -m win11_release_guard --diagnose-config`
@@ -66,22 +71,32 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `python -m win11_release_guard --json-pretty --no-wua | python -m json.tool`
 - `python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github`
 - `python tools/export_clean_archive.py`
-- `gh run view 26720624585 --repo Avnsx/win-release-guard --json status,conclusion,url`
+- stale project/prototype identity scan across the repository
+- active authenticated Microsoft API reference scan across README, AGENTS, docs, package, tools, and workflows
+- GitHub token and private-key marker scan across source and generated site paths
+- `gh run list --repo Avnsx/win-release-guard --workflow "CI" --branch main --limit 1 --json databaseId,status,conclusion,headSha,url,createdAt`
+- `gh run list --repo Avnsx/win-release-guard --workflow "Publish policy" --branch main --limit 1 --json databaseId,status,conclusion,headSha,url,createdAt`
 - `gh secret list --repo Avnsx/win-release-guard`
 
 ## Final Verification Results
 
 - `python -m compileall -q win11_release_guard tools`: passed.
 - `python tools/check_commit_message.py --message "Enforce descriptive commit message hygiene"`: passed.
+- `python tools/check_commit_message.py --message "Add live verification gate for Pages feed changes"`: passed.
 - `pytest -q tests/test_commit_message_hygiene.py tests/test_agents_contract.py tests/test_export_clean_archive.py`: `10 passed`.
-- `pytest -q`: `249 passed`.
+- `pytest -q tests/test_agents_contract.py tests/test_live_verification_gate_docs.py`: `6 passed`.
+- `pytest -q`: `251 passed`.
 - `python -m win11_release_guard --self-test`: passed, package import ok, bundled policy loaded, bundled signature valid, policy schema ok, no remote fetch, no WUA probe.
 - `python -m win11_release_guard --diagnose-config`: passed, remote fetch not performed, bundled policy present, bundled signature valid.
 - `python -m win11_release_guard --check-policy-source`: passed.
 - `python -m win11_release_guard --check-public-pages`: passed.
 - `python -m win11_release_guard --json-pretty --no-wua | python -m json.tool`: passed; parsed JSON was written to a temporary file for validation.
 - `python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github`: passed after this handover was created.
-- `python tools/export_clean_archive.py`: passed after this handover was created; archive had `66` entries.
+- `python tools/export_clean_archive.py`: passed; archive had `69` entries.
+- Stale prototype/package identity search: no matches.
+- Active authenticated Microsoft API reference search across active paths: no matches.
+- GitHub token/private-key block search across source/site paths: no matches.
+- Explicit private-key filename check in source and `.tmp/`: no private key files found after removing the local ignored signing-test key.
 
 ## Live Endpoint Results
 
@@ -106,9 +121,9 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - Publish policy workflow for latest Pages dashboard commit: success.
   - Run: `https://github.com/Avnsx/win-release-guard/actions/runs/26720624598`
   - Commit: `457a2e09be73fd8e2567570153cf008cba08c2c2`
-- CI workflow for latest Pages dashboard commit: success.
-  - Run: `https://github.com/Avnsx/win-release-guard/actions/runs/26720624585`
-  - Commit: `457a2e09be73fd8e2567570153cf008cba08c2c2`
+- CI workflow for latest pushed hardening commit: success.
+  - Run: `https://github.com/Avnsx/win-release-guard/actions/runs/26721003945`
+  - Commit: `1b08ebd40b9819605596ae18d79c7ae8acf4c3ee`
 
 ## Signing And Secrets
 
@@ -147,8 +162,8 @@ Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml
 
 ## Clean Archive
 
-- Clean archive command passed after the commit-message hygiene files were added.
-- `dist/win-release-guard-source.zip` contains `68` entries after the commit-message hygiene files were added.
+- Clean archive command passed after the live-gate and final audit updates.
+- `dist/win-release-guard-source.zip` contains `69` entries.
 - Archive excludes `.git/`, `.pytest_cache/`, `__pycache__/`, `.cache/`, `.tmp/`, `dist/`, local `site/`, generated ZIPs, `out*.json`, old prototype files, and private key file names.
 - Ignored local generated artifacts may still exist after verification:
   - `site/`
