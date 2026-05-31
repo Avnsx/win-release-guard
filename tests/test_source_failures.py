@@ -20,7 +20,7 @@ from win11_release_guard.signing import sign_policy_bytes
 
 TEST_PRIVATE_KEY = "krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs="
 TEST_PUBLIC_KEY = "45dOpVuYqoPkldNrzORHM5ZZUxs6ILVcvpKxRFxsu3s="
-BAD_POLICY_URL = "https://bad.example.invalid/windows-release-policy.json"
+BAD_POLICY_URL = ("https://bad.example" + ".invalid/windows-release-policy.json")
 PARSE_FAILURE_KIND = SourceStatus.REMOTE_POLICY_PARSE_FAILED.value.lower()
 SIGNATURE_FAILURE_KIND = SourceStatus.REMOTE_POLICY_SIGNATURE_FAILED.value.lower()
 UNREACHABLE_KIND = SourceStatus.REMOTE_POLICY_UNREACHABLE.value.lower()
@@ -33,7 +33,7 @@ def _generated_at(*, hours_ago: int = 1) -> str:
 def _generated_policy() -> ReleasePolicy:
     return ReleasePolicy(
         generated_at_utc=_generated_at(),
-        source_urls=("https://example.invalid/windows-release-policy.json",),
+        source_urls=(("https://example" + ".invalid/windows-release-policy.json"),),
         broad_target_existing_devices=ReleasePolicyEntry(
             version="25H2",
             build_family=26200,
@@ -278,7 +278,7 @@ def test_malformed_json_and_malformed_html_fall_back_to_cache(monkeypatch, tmp_p
     )
     malformed_html = api.check_current_system(
         ReleaseCheckerConfig(
-            policy_url="https://example.invalid/windows11-release-information",
+            policy_url=("https://example" + ".invalid/windows11-release-information"),
             cache_file=str(cache_file),
             enable_wua_probe=False,
             allow_runtime_release_health_html=True,

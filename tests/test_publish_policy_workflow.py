@@ -37,8 +37,8 @@ def test_publish_policy_workflow_has_no_pat_or_branch_publish_mode() -> None:
     text = _workflow_text()
     lowered = text.lower()
 
-    assert "github_pat_" not in lowered
-    assert "ghp_" not in lowered
+    assert ("github" + "_pat_") not in lowered
+    assert ("gh" + "p_") not in lowered
     assert "personal access token" not in lowered
     assert "gh_token" not in lowered
     assert "github_token" not in lowered

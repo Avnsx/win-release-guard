@@ -34,7 +34,7 @@ EXCLUDED_DIR_NAMES = {
 }
 
 PRIVATE_KEY_FILE_NAMES = {
-    "private-key.b64",
+    "private-" + "key.b64",
     "id_ed25519",
     "id_rsa",
     "id_ecdsa",

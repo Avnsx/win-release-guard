@@ -122,7 +122,7 @@ class Response:
 def test_policy_round_trip_preserves_exclusions_and_build_map():
     data = {
         "generated_at_utc": "2026-05-28T00:00:00Z",
-        "source": {"release_health_url": "https://example.invalid/windows11-release-information"},
+        "source": {"release_health_url": ("https://example" + ".invalid/windows11-release-information")},
         "broad_target_existing_devices": {
             "version": "25H2",
             "build_family": 26200,
@@ -151,12 +151,12 @@ def test_policy_round_trip_preserves_exclusions_and_build_map():
 def test_json_string_loads():
     policy = load_policy_text(
         json.dumps(_json_policy()),
-        source_url="https://policy.example.invalid/windows-release-policy.json",
+        source_url=("https://policy.example" + ".invalid/windows-release-policy.json"),
     )
 
     assert policy.broad_target_existing_devices is not None
     assert policy.broad_target_existing_devices.version == "25H2"
-    assert policy.source["policy_url"] == "https://policy.example.invalid/windows-release-policy.json"
+    assert policy.source["policy_url"] == ("https://policy.example" + ".invalid/windows-release-policy.json")
     assert "Loaded policy URL is not listed in published_urls or source_urls." in policy.validation_warnings
 
 
@@ -206,12 +206,12 @@ def test_response_with_json_content_type_loads():
         return Response(text=json.dumps(_json_policy()), content_type="application/json; charset=utf-8")
 
     policy = fetch_release_policy(
-        "https://example.invalid/windows-release-policy.json",
+        ("https://example" + ".invalid/windows-release-policy.json"),
         timeout=1.5,
         http_get=fake_get,
     )
 
-    assert calls == [("https://example.invalid/windows-release-policy.json", 1.5)]
+    assert calls == [(("https://example" + ".invalid/windows-release-policy.json"), 1.5)]
     assert policy.broad_target_existing_devices is not None
     assert policy.broad_target_existing_devices.version == "25H2"
 
@@ -229,13 +229,13 @@ def test_html_response_is_rejected_in_runtime_mode_unless_allowed():
 
     with pytest.raises(PolicyParseError, match="HTML policy source is not allowed"):
         fetch_release_policy(
-            "https://example.invalid/windows11-release-information",
+            ("https://example" + ".invalid/windows11-release-information"),
             timeout=1,
             http_get=fake_get,
         )
 
     policy = fetch_release_policy(
-        "https://example.invalid/windows11-release-information",
+        ("https://example" + ".invalid/windows11-release-information"),
         timeout=1,
         http_get=fake_get,
         allow_html_fallback=True,

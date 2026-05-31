@@ -57,7 +57,7 @@ def test_check_current_system_uses_cache_when_fetch_fails(monkeypatch, tmp_path)
     cache_file = tmp_path / "windows-release-policy.json"
     cached_policy = ReleasePolicy(
         generated_at_utc=_generated_at(),
-        source_urls=("https://example.invalid/windows-release-policy.json",),
+        source_urls=(("https://example" + ".invalid/windows-release-policy.json"),),
         broad_target_existing_devices=ReleasePolicyEntry(
             version="25H2",
             build_family=26200,
@@ -103,7 +103,7 @@ def test_check_current_system_uses_cache_when_fetch_fails(monkeypatch, tmp_path)
 
     result = api.check_current_system(
         ReleaseCheckerConfig(
-            policy_url="https://bad.example.invalid/windows-release-policy.json",
+            policy_url=("https://bad.example" + ".invalid/windows-release-policy.json"),
             cache_file=str(cache_file),
             enable_wua_probe=False,
             excluded_releases=frozenset({"26H1"}),

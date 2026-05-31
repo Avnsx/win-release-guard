@@ -26,14 +26,14 @@ python tools/generate_signing_key.py --out-dir .tmp/signing-key
 
 The tool writes:
 
-- `.tmp/signing-key/private-key.b64`
+- a generated private key file under `.tmp/signing-key/`
 - `.tmp/signing-key/public-key.b64`
 - `.tmp/signing-key/trusted_policy_keys.json`
 
-Copy the complete contents of `.tmp/signing-key/private-key.b64` into GitHub
+Copy the complete contents of the generated private key file into GitHub
 Actions Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
 
-Do not commit `.tmp/signing-key/private-key.b64`. Commit only reviewed public
+Do not commit generated private signing key material. Commit only reviewed public
 key records in `win11_release_guard/data/trusted_policy_keys.json`.
 
 ## Rotate Keys

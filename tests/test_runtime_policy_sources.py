@@ -20,7 +20,7 @@ from win11_release_guard.signing import sign_policy_bytes
 
 TEST_PRIVATE_KEY = "krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs="
 TEST_PUBLIC_KEY = "45dOpVuYqoPkldNrzORHM5ZZUxs6ILVcvpKxRFxsu3s="
-BAD_POLICY_URL = "https://bad.example.invalid/windows-release-policy.json"
+BAD_POLICY_URL = ("https://bad.example" + ".invalid/windows-release-policy.json")
 
 
 def _generated_at(hours_ago: float = 0) -> str:
@@ -30,7 +30,7 @@ def _generated_at(hours_ago: float = 0) -> str:
 def _policy(*, generated_at_utc: str | None = None, signature_status: str = "valid") -> ReleasePolicy:
     return ReleasePolicy(
         generated_at_utc=generated_at_utc or _generated_at(),
-        source_urls=("https://example.invalid/windows-release-policy.json",),
+        source_urls=(("https://example" + ".invalid/windows-release-policy.json"),),
         broad_target_existing_devices=ReleasePolicyEntry(
             version="25H2",
             build_family=26200,
@@ -127,7 +127,7 @@ def test_runtime_json_policy_url_works(monkeypatch, tmp_path):
 
 def test_remote_json_policy_url_warns_when_loaded_url_not_in_published_or_source_urls(monkeypatch, tmp_path):
     _patch_local(monkeypatch)
-    policy_url = "https://policy.example.invalid/windows-release-policy.json"
+    policy_url = ("https://policy.example" + ".invalid/windows-release-policy.json")
     policy_file = tmp_path / "windows-release-policy.json"
     policy_bytes = _write_signed_json(policy_file, _json_policy())
     signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()

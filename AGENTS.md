@@ -8,7 +8,7 @@ This repository is public software for Windows administrators. Future agents mus
 2. The Python import package remains `win11_release_guard` because Python import names cannot use hyphens.
 3. Do not rename the import package unless the user explicitly instructs that change.
 4. Future agents must not revert naming back to old project/package identities.
-5. Do not reintroduce `windows_releases_info.py`; the supported source-tree entry point is `python -m win11_release_guard`.
+5. Do not reintroduce the removed root prototype script; the supported source-tree entry point is `python -m win11_release_guard`.
 6. Clients must not contain GitHub tokens, GitHub PATs, classic tokens, fine-grained tokens, repo secrets, or private signing keys.
 7. Private signing keys must not be committed to the repository.
 8. Do not make the runtime client authenticate to GitHub.

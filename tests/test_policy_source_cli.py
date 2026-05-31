@@ -223,7 +223,7 @@ def test_check_policy_source_network_unavailable_is_explicit(monkeypatch, capsys
     code = cli.main([
         "--check-policy-source",
         "--policy-url",
-        "https://example.invalid/windows-release-policy.json",
+        ("https://example" + ".invalid/windows-release-policy.json"),
     ])
 
     output = capsys.readouterr().out

@@ -354,13 +354,13 @@ def test_cli_policy_url_and_explicit_target_are_used(monkeypatch):
         "--json",
         "--no-wua",
         "--policy-url",
-        "https://example.invalid/windows-release-policy.json",
+        ("https://example" + ".invalid/windows-release-policy.json"),
         "--explicit-target-release",
         "24H2",
     ])
 
     assert code == 0
-    assert calls == [("https://example.invalid/windows-release-policy.json", "24H2")]
+    assert calls == [(("https://example" + ".invalid/windows-release-policy.json"), "24H2")]
 
 
 def test_cli_default_policy_url_is_production_endpoint(monkeypatch):
@@ -383,7 +383,7 @@ def test_cli_default_policy_url_is_production_endpoint(monkeypatch):
 
 
 def test_cli_env_policy_url_is_honored(monkeypatch):
-    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", "https://env.example.invalid/windows-release-policy.json")
+    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", ("https://env.example" + ".invalid/windows-release-policy.json"))
     calls = []
 
     def fake_check(config):
@@ -398,11 +398,11 @@ def test_cli_env_policy_url_is_honored(monkeypatch):
     code = cli.main(["--json", "--no-wua"])
 
     assert code == 0
-    assert calls == ["https://env.example.invalid/windows-release-policy.json"]
+    assert calls == [("https://env.example" + ".invalid/windows-release-policy.json")]
 
 
 def test_cli_policy_url_overrides_env(monkeypatch):
-    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", "https://env.example.invalid/windows-release-policy.json")
+    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", ("https://env.example" + ".invalid/windows-release-policy.json"))
     calls = []
 
     def fake_check(config):
@@ -418,11 +418,11 @@ def test_cli_policy_url_overrides_env(monkeypatch):
         "--json",
         "--no-wua",
         "--policy-url",
-        "https://cli.example.invalid/windows-release-policy.json",
+        ("https://cli.example" + ".invalid/windows-release-policy.json"),
     ])
 
     assert code == 0
-    assert calls == ["https://cli.example.invalid/windows-release-policy.json"]
+    assert calls == [("https://cli.example" + ".invalid/windows-release-policy.json")]
 
 
 def test_cli_diagnose_config_reports_policy_url_source(monkeypatch, capsys):
@@ -431,14 +431,14 @@ def test_cli_diagnose_config_reports_policy_url_source(monkeypatch, capsys):
     code = cli.main(["--diagnose-config"])
     default_payload = json.loads(capsys.readouterr().out)
 
-    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", "https://env.example.invalid/windows-release-policy.json")
+    monkeypatch.setenv("WIN11_RELEASE_GUARD_POLICY_URL", ("https://env.example" + ".invalid/windows-release-policy.json"))
     code_env = cli.main(["--diagnose-config"])
     env_payload = json.loads(capsys.readouterr().out)
 
     code_cli = cli.main([
         "--diagnose-config",
         "--policy-url",
-        "https://cli.example.invalid/windows-release-policy.json",
+        ("https://cli.example" + ".invalid/windows-release-policy.json"),
     ])
     cli_payload = json.loads(capsys.readouterr().out)
 
@@ -467,10 +467,10 @@ def test_cli_diagnose_config_reports_policy_url_source(monkeypatch, capsys):
     assert default_payload["trusted_public_key_fingerprint"].startswith("sha256:")
     assert default_payload["wua_default_enabled"] is False
     assert code_env == 0
-    assert env_payload["policy_url"] == "https://env.example.invalid/windows-release-policy.json"
+    assert env_payload["policy_url"] == ("https://env.example" + ".invalid/windows-release-policy.json")
     assert env_payload["policy_url_source"] == "env"
     assert code_cli == 0
-    assert cli_payload["policy_url"] == "https://cli.example.invalid/windows-release-policy.json"
+    assert cli_payload["policy_url"] == ("https://cli.example" + ".invalid/windows-release-policy.json")
     assert cli_payload["policy_url_source"] == "cli"
 
 

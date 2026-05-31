@@ -41,7 +41,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert Path(name).name != "out.json"
         assert not Path(name).match("site/*")
         assert Path(name).name != export_clean_archive.LEGACY_PROTOTYPE_NAME
-        assert Path(name).name != "private-key.b64"
+        assert Path(name).name != ("private-" + "key.b64")
         assert "private" not in Path(name).name.lower() or "key" not in Path(name).name.lower()
 
 

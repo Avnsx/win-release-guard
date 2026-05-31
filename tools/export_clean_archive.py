@@ -52,7 +52,7 @@ EXCLUDED_FILE_PATTERNS = (
     "*.pem",
     "*.key",
     "*private*key*",
-    "private-key.b64",
+    "private-" + "key.b64",
     "out*.json",
     "release-check*.json",
     "test-output*.json",

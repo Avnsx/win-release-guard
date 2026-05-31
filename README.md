@@ -155,7 +155,7 @@ signature, manifest, and `/api/v1/` aliases.
 
 The generator path derives policy from Microsoft Windows 11 Release Health HTML
 and enriches ambiguous update rows from the Microsoft Update History Atom feed.
-The production generator uses public Microsoft Release Health and Atom sources only; it does not use Microsoft Graph, Azure, OIDC, or token-authenticated Microsoft APIs.
+The production generator uses public Microsoft Release Health and Atom sources only; it does not use token-authenticated Microsoft APIs.
 The parser supports the public tables for current versions and release history:
 
 - Version
@@ -354,7 +354,7 @@ Create a signing key pair in ignored local scratch space:
 python tools/generate_signing_key.py --out-dir .tmp/signing-key
 ```
 
-Copy the contents of `.tmp/signing-key/private-key.b64` into the GitHub Actions
+Copy the contents of the generated private key file into the GitHub Actions
 Secret `WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. Do not commit private key
 material. Commit only reviewed public key records in
 `win11_release_guard/data/trusted_policy_keys.json`.

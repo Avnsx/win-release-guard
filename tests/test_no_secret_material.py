@@ -41,7 +41,7 @@ def test_secret_material_scanner_fails_private_key_pem(tmp_path: Path) -> None:
     assert any(finding.kind == "private_key_block" for finding in findings)
 
 
-def test_secret_material_scanner_fails_github_pat_like_token(tmp_path: Path) -> None:
+def test_secret_material_scanner_fails_classic_pat_like_token(tmp_path: Path) -> None:
     fixture = tmp_path / "config.txt"
     token = ("gh" + "p_") + ("A" * 36)
     fixture.write_text(f"token = {token}\n", encoding="utf-8")

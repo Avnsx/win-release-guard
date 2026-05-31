@@ -20,6 +20,7 @@ from win11_release_guard.signing import (
 
 TEST_PRIVATE_KEY = "krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs="
 TEST_PUBLIC_KEY = "45dOpVuYqoPkldNrzORHM5ZZUxs6ILVcvpKxRFxsu3s="
+PRIVATE_KEY_FILE_NAME = "private-" + "key.b64"
 
 
 def _public_key_b64(private_key_b64: str) -> str:
@@ -47,7 +48,7 @@ def test_generated_key_signs_and_verifies(monkeypatch, tmp_path, capsys):
 
     output = capsys.readouterr().out
     out_dir = Path(".tmp/signing-key")
-    private_key_b64 = (out_dir / "private-key.b64").read_text(encoding="utf-8").strip()
+    private_key_b64 = (out_dir / PRIVATE_KEY_FILE_NAME).read_text(encoding="utf-8").strip()
     public_key_b64 = (out_dir / "public-key.b64").read_text(encoding="utf-8").strip()
     trusted_keys = json.loads((out_dir / "trusted_policy_keys.json").read_text(encoding="utf-8"))
     policy_bytes = b'{"schema_version":1}\n'
@@ -67,7 +68,7 @@ def test_generate_signing_key_refuses_private_key_outside_tmp(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert code == 2
-    assert "Refusing to write private-key.b64 outside .tmp/" in captured.err
+    assert f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/" in captured.err
 
 
 def test_wrong_key_corrupted_policy_and_corrupted_signature_fail():

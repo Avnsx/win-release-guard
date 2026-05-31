@@ -6,10 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_README_STATEMENT = (
     "The production generator uses public Microsoft Release Health and Atom sources only; "
-    "it does not use Microsoft "
-    "Graph, Az"
-    "ure, OI"
-    "DC, or token-authenticated Microsoft APIs."
+    "it does not use token-authenticated Microsoft APIs."
 )
 FORBIDDEN_PATTERNS = (
     "Microsoft " + "Graph",

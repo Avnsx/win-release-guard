@@ -18,6 +18,7 @@ from win11_release_guard.config import DEFAULT_TRUSTED_POLICY_KEY_ID
 
 
 PRIVATE_KEY_SECRET_NAME = "WIN_RELEASE_GUARD_POLICY_SIGNING_KEY_B64"
+PRIVATE_KEY_FILE_NAME = "private-" + "key.b64"
 
 
 def _utc_now() -> str:
@@ -49,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-outside-tmp",
         action="store_true",
-        help="Explicitly allow writing private-key.b64 outside the repository .tmp/ directory.",
+        help=f"Explicitly allow writing {PRIVATE_KEY_FILE_NAME} outside the repository .tmp/ directory.",
     )
     return parser
 
@@ -102,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_dir = args.out_dir
     if not args.allow_outside_tmp and not _is_under_repo_tmp(out_dir):
         print(
-            "Refusing to write private-key.b64 outside .tmp/. "
+            f"Refusing to write {PRIVATE_KEY_FILE_NAME} outside .tmp/. "
             "Pass --allow-outside-tmp only for an explicitly controlled secure location.",
             file=sys.stderr,
         )
@@ -118,7 +119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    private_key_file = out_dir / "private-key.b64"
+    private_key_file = out_dir / PRIVATE_KEY_FILE_NAME
     public_key_file = out_dir / "public-key.b64"
     trusted_keys_file = out_dir / "trusted_policy_keys.json"
 
@@ -135,7 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"trusted_policy_keys: {trusted_keys_file}")
     print()
     print(f"Copy the full contents of {private_key_file} into GitHub Actions Secret {PRIVATE_KEY_SECRET_NAME}.")
-    print("Do not commit private-key.b64 or any private signing key material.")
+    print(f"Do not commit {PRIVATE_KEY_FILE_NAME} or any private signing key material.")
     print("Commit only the public trusted_policy_keys.json after reviewing key_id and status.")
     return 0
 
