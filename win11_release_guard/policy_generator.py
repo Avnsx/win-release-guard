@@ -680,10 +680,18 @@ def _excluded_release_summary(entry: ReleasePolicyEntry) -> str:
 def _source_label(url: str) -> str:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower().rstrip(".")
-    path = parsed.path.lower()
-    if host == "learn.microsoft.com" and path.startswith("/en-us/windows/release-health/"):
+    path_segments = [segment for segment in parsed.path.lower().split("/") if segment]
+    has_release_health_path = any(
+        left == "windows" and right == "release-health"
+        for left, right in zip(path_segments, path_segments[1:])
+    )
+    has_atom_feed_path = any(
+        left == "feed" and right == "atom"
+        for left, right in zip(path_segments, path_segments[1:])
+    )
+    if host == "learn.microsoft.com" and has_release_health_path:
         return "Microsoft Release Health"
-    if host == "support.microsoft.com" and path.startswith("/en-us/feed/atom/"):
+    if host == "support.microsoft.com" and has_atom_feed_path:
         return "Microsoft Atom feed"
     return url
 

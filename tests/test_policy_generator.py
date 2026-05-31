@@ -37,14 +37,20 @@ def _atom() -> str:
 
 def test_source_label_requires_exact_upstream_hosts() -> None:
     release_health_url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+    localized_release_health_url = (
+        "https://learn.microsoft.com/de-de/windows/release-health/windows11-release-information"
+    )
     atom_url = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+    localized_atom_url = "https://support.microsoft.com/de-de/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
     spoofed_release_health_url = (
         "https://learn.microsoft.com.attacker.invalid/en-us/windows/release-health/windows11-release-information"
     )
     spoofed_atom_url = "https://support.microsoft.com.attacker.invalid/en-us/feed/atom/example"
 
     assert _source_label(release_health_url) == "Microsoft Release Health"
+    assert _source_label(localized_release_health_url) == "Microsoft Release Health"
     assert _source_label(atom_url) == "Microsoft Atom feed"
+    assert _source_label(localized_atom_url) == "Microsoft Atom feed"
     assert _source_label(spoofed_release_health_url) == spoofed_release_health_url
     assert _source_label(spoofed_atom_url) == spoofed_atom_url
 
