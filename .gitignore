@@ -20,6 +20,7 @@ test-output*.json
 cli-output*.json
 local-output*.json
 dependency-freshness.json
+*handover*.md
 windows-release-policy.json
 windows-release-policy.json.sig
 !win11_release_guard/data/

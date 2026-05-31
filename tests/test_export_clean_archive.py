@@ -46,6 +46,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert not name.endswith(".pem")
         assert not name.endswith(".key")
         assert not name.endswith(".zip")
+        assert not Path(name).match("*handover*.md")
         assert Path(name).name != "out.json"
         assert not Path(name).match("site/*")
         assert Path(name).name != export_clean_archive.LEGACY_PROTOTYPE_NAME

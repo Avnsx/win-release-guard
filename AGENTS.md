@@ -28,6 +28,7 @@ This repository is public software for Windows administrators. Future agents mus
 - Preserve administrator-facing diagnostic data in normal product output unless the user explicitly asks for masking.
 - Keep WUA, Panther, DISM, and local system evidence subordinate to signed policy truth.
 - CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub code scanning is disabled in repository settings, enable it under Settings, Code security and analysis.
+- Handover files are temporary local artifacts. Do not commit or publish `*handover*.md`; they are ignored and excluded from clean archives.
 
 ## Deployment-Affecting Live Verification Gate
 

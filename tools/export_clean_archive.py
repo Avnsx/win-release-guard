@@ -63,6 +63,7 @@ EXCLUDED_FILE_PATTERNS = (
     "test-output*.json",
     "cli-output*.json",
     "local-output*.json",
+    "*handover*.md",
     "*.tmp",
     "*.temp",
     "*.log",
