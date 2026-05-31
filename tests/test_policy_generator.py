@@ -344,10 +344,14 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     signature_bytes = (tmp_path / "windows-release-policy.json.sig").read_bytes()
     manifest = json.loads((tmp_path / "policy-manifest.json").read_text(encoding="utf-8"))
     generated_policy = json.loads((tmp_path / "windows-release-policy.json").read_text(encoding="utf-8"))
+    api_policy = json.loads((tmp_path / "api/v1/policy.json").read_text(encoding="utf-8"))
+    api_manifest = json.loads((tmp_path / "api/v1/manifest.json").read_text(encoding="utf-8"))
     assert manifest["policy_sha256"] == hashlib.sha256(policy_bytes).hexdigest()
     assert manifest["signature_sha256"] == hashlib.sha256(signature_bytes).hexdigest()
     assert manifest["signature_algorithm"] == "ed25519"
     assert manifest["key_id"] == "test-policy-key"
+    assert api_policy == generated_policy
+    assert api_manifest == manifest
     assert manifest["timezone"] == "Europe/Berlin"
     assert manifest["status"] == "Policy current"
     assert manifest["published_urls"]["policy"] == DEFAULT_POLICY_URL
@@ -373,10 +377,13 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "/windows-release-policy.json.sig" in index
     assert "/policy-manifest.json" in index
     assert "/api/v1/policy.json" in index
+    assert "/api/v1/manifest.json" in index
+    assert "Programmatic JSON endpoint" in index
     assert "Europe/Berlin" not in index
     assert "Sunday, 31 May 2026, 16:11:50 CEST" in index
     assert "auth" not in index.lower()
     assert "token" not in index.lower()
+    assert "private-" + "key" not in index.lower()
     assert "http://cdn" not in index.lower()
     assert "https://cdn" not in index.lower()
     assert "<script" not in index.lower()
