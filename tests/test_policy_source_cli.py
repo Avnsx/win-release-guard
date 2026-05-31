@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from win11_release_guard import __main__ as cli
+from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
 from win11_release_guard.exceptions import PolicyFetchError
 from win11_release_guard.signing import sign_policy_bytes
 
@@ -17,9 +18,9 @@ def _policy_json() -> dict:
         "schema_version": 1,
         "generated_at_utc": "2026-05-28T00:00:00Z",
         "source_urls": [
-            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
-            "https://avnsx.github.io/win-release-guard/windows-release-policy.json",
+            DEFAULT_RELEASE_HEALTH_URL,
         ],
+        "published_urls": dict(DEFAULT_PUBLISHED_POLICY_URLS),
         "current_versions": [
             {
                 "version": "25H2",
@@ -95,6 +96,9 @@ def test_check_policy_source_local_signed_file_ok(monkeypatch, tmp_path, capsys)
     assert "Policy source: OK" in output
     assert "Signature: valid" in output
     assert "Generated at UTC: 2026-05-28T00:00:00Z" in output
+    assert f"- {DEFAULT_RELEASE_HEALTH_URL}" in output
+    assert f"- policy: {DEFAULT_POLICY_URL}" in output
+    assert f"- api_policy: {DEFAULT_PUBLISHED_POLICY_URLS['api_policy']}" in output
     assert "Broad target: 25H2 / 26200 / 26200.8457" in output
     assert "Baseline: 26200.8457" in output
     assert "- 26H1 / 28000 / new devices only" in output

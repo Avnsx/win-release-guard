@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
 from win11_release_guard.exceptions import PolicyParseError
 from win11_release_guard.generator import generate_policy_from_release_health_html
 from win11_release_guard.models import EditionScope, ReleasePolicy, ServicingChannel
@@ -54,8 +55,9 @@ def _json_policy() -> dict:
         "schema_version": 1,
         "generated_at_utc": "2026-05-28T00:00:00Z",
         "source_urls": [
-            "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+            DEFAULT_RELEASE_HEALTH_URL,
         ],
+        "published_urls": dict(DEFAULT_PUBLISHED_POLICY_URLS),
         "source": {"generator": "test"},
         "current_versions": [
             {
@@ -149,13 +151,44 @@ def test_policy_round_trip_preserves_exclusions_and_build_map():
 def test_json_string_loads():
     policy = load_policy_text(
         json.dumps(_json_policy()),
-        source_url="https://example.invalid/windows-release-policy.json",
+        source_url="https://policy.example.invalid/windows-release-policy.json",
     )
 
     assert policy.broad_target_existing_devices is not None
     assert policy.broad_target_existing_devices.version == "25H2"
-    assert policy.source["policy_url"] == "https://example.invalid/windows-release-policy.json"
-    assert "Loaded policy URL is not listed in source_urls." in policy.validation_warnings
+    assert policy.source["policy_url"] == "https://policy.example.invalid/windows-release-policy.json"
+    assert "Loaded policy URL is not listed in published_urls or source_urls." in policy.validation_warnings
+
+
+def test_default_pages_policy_url_does_not_warn():
+    policy = load_policy_text(json.dumps(_json_policy()), source_url=DEFAULT_POLICY_URL)
+
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in policy.validation_warnings
+
+
+def test_api_policy_alias_does_not_warn():
+    policy = load_policy_text(
+        json.dumps(_json_policy()),
+        source_url=DEFAULT_PUBLISHED_POLICY_URLS["api_policy"],
+    )
+
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in policy.validation_warnings
+
+
+def test_local_policy_path_does_not_warn():
+    policy = load_policy_text(
+        json.dumps(_json_policy()),
+        source_url=r"C:\tmp\windows-release-policy.json",
+    )
+
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in policy.validation_warnings
+
+
+def test_upstream_source_url_does_not_warn():
+    policy = load_policy_text(json.dumps(_json_policy()), source_url=DEFAULT_RELEASE_HEALTH_URL)
+
+    assert DEFAULT_RELEASE_HEALTH_URL in policy.source_urls
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in policy.validation_warnings
 
 
 def test_json_bytes_loads():

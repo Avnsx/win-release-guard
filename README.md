@@ -147,6 +147,12 @@ Trusted policy public keys are committed in
 `key_id`. Runtime clients do not authenticate to GitHub; they fetch the public
 GitHub Pages JSON plus `.sig` and verify the Ed25519 signature locally.
 
+Policy documents keep upstream Microsoft evidence URLs and public hosting URLs
+separate. `source_urls` is only for upstream Microsoft sources such as Release
+Health and the Update History Atom feed. GitHub Pages endpoints are listed in
+`published_urls`, including the landing page, canonical policy JSON, detached
+signature, manifest, and `/api/v1/` aliases.
+
 The generator path derives policy from Microsoft Windows 11 Release Health HTML
 and enriches ambiguous update rows from the Microsoft Update History Atom feed.
 The parser supports the public tables for current versions and release history:
@@ -197,20 +203,21 @@ python -m win11_release_guard --self-test
 ```
 
 Policy feed readiness means a real hosted URL is configured, signed JSON is
-available, the detached signature verifies, the schema validates, source URLs
-are listed, the generator workflow passes, and an update schedule exists. Check
-the hosted or local signed policy without local Windows probes:
+available, the detached signature verifies, the schema validates, upstream
+`source_urls` and public `published_urls` are listed, the generator workflow
+passes, and an update schedule exists. Check the hosted or local signed policy
+without local Windows probes:
 
 ```powershell
 python -m win11_release_guard --check-policy-source --policy-url https://avnsx.github.io/win-release-guard/windows-release-policy.json
 ```
 
-This prints the policy source status, source URLs, `generated_at_utc`, broad
-target, baseline, and excluded releases. It exits `0` when the policy source is
-valid and `2` when the policy or signature is unavailable, invalid, or
-untrusted. The command verifies the hosted signed-policy artifact; generator
-workflow health and the update schedule are verified through the repository's
-GitHub Actions and Pages configuration.
+This prints the policy source status, upstream source URLs, published URLs,
+`generated_at_utc`, broad target, baseline, and excluded releases. It exits `0`
+when the policy source is valid and `2` when the policy or signature is
+unavailable, invalid, or untrusted. The command verifies the hosted signed
+policy artifact; generator workflow health and the update schedule are verified
+through the repository's GitHub Actions and Pages configuration.
 
 ## Python Example
 
@@ -371,6 +378,10 @@ The public Pages feed exposes these stable programmatic paths:
 - `https://avnsx.github.io/win-release-guard/api/v1/policy.json`
 - `https://avnsx.github.io/win-release-guard/api/v1/policy.sig`
 - `https://avnsx.github.io/win-release-guard/api/v1/manifest.json`
+
+These public feed paths belong in `published_urls`, not `source_urls`.
+`source_urls` remains reserved for upstream Microsoft pages and feeds used to
+derive the signed policy.
 
 Detached signatures are JSON objects with `algorithm`, `key_id`, and
 `signature`. The runtime chooses the matching Ed25519 public key from

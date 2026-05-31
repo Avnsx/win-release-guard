@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import win11_release_guard.api as api
 import win11_release_guard.config as config_module
-from win11_release_guard.config import DEFAULT_POLICY_URL, ReleaseCheckerConfig
+from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, ReleaseCheckerConfig
 from win11_release_guard.exceptions import PolicyFetchError
 from win11_release_guard.models import (
     EvaluationStatus,
@@ -122,10 +122,10 @@ def test_runtime_json_policy_url_works(monkeypatch, tmp_path):
     assert result.policy_source_kind == "local_json"
     assert result.policy_signature_status == "valid"
     assert not any("Remote policy" in warning for warning in result.warnings)
-    assert "Loaded policy URL is not listed in source_urls." not in result.warnings
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in result.warnings
 
 
-def test_remote_json_policy_url_warns_when_loaded_url_not_in_source_urls(monkeypatch, tmp_path):
+def test_remote_json_policy_url_warns_when_loaded_url_not_in_published_or_source_urls(monkeypatch, tmp_path):
     _patch_local(monkeypatch)
     policy_url = "https://policy.example.invalid/windows-release-policy.json"
     policy_file = tmp_path / "windows-release-policy.json"
@@ -155,7 +155,60 @@ def test_remote_json_policy_url_warns_when_loaded_url_not_in_source_urls(monkeyp
     assert result.policy_source_kind == "remote_json"
     assert result.policy_source_url == policy_url
     assert calls == [policy_url, f"{policy_url}.sig"]
-    assert "Loaded policy URL is not listed in source_urls." in result.warnings
+    assert "Loaded policy URL is not listed in published_urls or source_urls." in result.warnings
+
+
+def test_default_pages_policy_url_does_not_warn_when_listed_in_published_urls(monkeypatch, tmp_path):
+    _patch_local(monkeypatch)
+    policy_file = tmp_path / "windows-release-policy.json"
+    policy_bytes = _write_signed_json(policy_file, _json_policy())
+    signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()
+
+    def fake_fetch(url, *args, **kwargs):
+        if str(url).endswith(".sig"):
+            return signature_bytes, "application/json"
+        return policy_bytes, "application/json"
+
+    monkeypatch.setattr(api, "fetch_policy_bytes", fake_fetch)
+
+    result = api.check_current_system(
+        ReleaseCheckerConfig(
+            policy_url=DEFAULT_POLICY_URL,
+            cache_file=str(tmp_path / "cache.json"),
+            enable_wua_probe=False,
+            trusted_policy_public_key=TEST_PUBLIC_KEY,
+        )
+    )
+
+    assert result.status is EvaluationStatus.COMPLIANT
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in result.warnings
+
+
+def test_api_policy_alias_does_not_warn_when_listed_in_published_urls(monkeypatch, tmp_path):
+    _patch_local(monkeypatch)
+    policy_url = DEFAULT_PUBLISHED_POLICY_URLS["api_policy"]
+    policy_file = tmp_path / "windows-release-policy.json"
+    policy_bytes = _write_signed_json(policy_file, _json_policy())
+    signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()
+
+    def fake_fetch(url, *args, **kwargs):
+        if str(url).endswith(".sig"):
+            return signature_bytes, "application/json"
+        return policy_bytes, "application/json"
+
+    monkeypatch.setattr(api, "fetch_policy_bytes", fake_fetch)
+
+    result = api.check_current_system(
+        ReleaseCheckerConfig(
+            policy_url=policy_url,
+            cache_file=str(tmp_path / "cache.json"),
+            enable_wua_probe=False,
+            trusted_policy_public_key=TEST_PUBLIC_KEY,
+        )
+    )
+
+    assert result.status is EvaluationStatus.COMPLIANT
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in result.warnings
 
 
 def test_env_policy_url_is_used(monkeypatch, tmp_path):
@@ -416,7 +469,7 @@ def test_no_internet_no_cache_uses_bundled_fallback_with_warning(monkeypatch, tm
     assert "Remote policy and cache unavailable; using bundled last-known-good policy." in result.warnings
     assert any("network unavailable" in problem for problem in result.source_problems)
     assert result.source_problems
-    assert "Loaded policy URL is not listed in source_urls." not in result.warnings
+    assert "Loaded policy URL is not listed in published_urls or source_urls." not in result.warnings
 
 
 def test_no_internet_no_cache_no_bundled_returns_check_incomplete(monkeypatch, tmp_path):

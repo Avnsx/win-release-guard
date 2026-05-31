@@ -155,6 +155,8 @@ def _signature_path(path: str | Path) -> Path:
 
 
 def _signature_url(policy_url: str) -> str:
+    if policy_url.endswith("/api/v1/policy.json"):
+        return f"{policy_url.rsplit('/', 1)[0]}/policy.sig"
     return f"{policy_url}.sig"
 
 

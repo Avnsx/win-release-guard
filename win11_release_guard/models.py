@@ -854,6 +854,7 @@ class ReleasePolicy:
     generated_at_utc: str | None = None
     source: Mapping[str, Any] = field(default_factory=dict)
     source_urls: tuple[str, ...] = field(default_factory=tuple)
+    published_urls: Mapping[str, str] = field(default_factory=dict)
     generator_version: str | None = None
     source_fetch_status: Mapping[str, Any] = field(default_factory=dict)
     quality_policy: QualityPolicy = QualityPolicy.B_RELEASE_ONLY
@@ -875,6 +876,11 @@ class ReleasePolicy:
     def __post_init__(self) -> None:
         object.__setattr__(self, "quality_policy", _quality_policy(self.quality_policy))
         object.__setattr__(self, "source_urls", tuple(str(url) for url in self.source_urls))
+        object.__setattr__(
+            self,
+            "published_urls",
+            {str(key): str(value) for key, value in dict(self.published_urls or {}).items()},
+        )
         object.__setattr__(self, "source_fetch_status", dict(self.source_fetch_status))
         object.__setattr__(self, "current_versions", tuple(self.current_versions))
         object.__setattr__(self, "release_history", tuple(self.release_history))
@@ -913,6 +919,7 @@ class ReleasePolicy:
             "generated_at_utc": self.generated_at_utc,
             "source": dict(self.source),
             "source_urls": list(self.source_urls),
+            "published_urls": dict(self.published_urls),
             "generator_version": self.generator_version,
             "source_fetch_status": dict(self.source_fetch_status),
             "quality_policy": self.quality_policy.value,
@@ -958,6 +965,10 @@ class ReleasePolicy:
             generated_at_utc=_optional_str(data.get("generated_at_utc")),
             source=dict(data.get("source") or {}),
             source_urls=tuple(str(url) for url in data.get("source_urls", [])),
+            published_urls={
+                str(key): str(value)
+                for key, value in dict(data.get("published_urls") or {}).items()
+            },
             generator_version=_optional_str(data.get("generator_version")),
             source_fetch_status=dict(data.get("source_fetch_status") or {}),
             quality_policy=_quality_policy(data.get("quality_policy")),

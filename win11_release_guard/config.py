@@ -8,6 +8,16 @@ DEFAULT_RELEASE_HEALTH_URL = (
     "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
 )
 DEFAULT_POLICY_URL = "https://avnsx.github.io/win-release-guard/windows-release-policy.json"
+DEFAULT_PAGES_BASE_URL = "https://avnsx.github.io/win-release-guard"
+DEFAULT_PUBLISHED_POLICY_URLS = {
+    "landing": f"{DEFAULT_PAGES_BASE_URL}/",
+    "policy": DEFAULT_POLICY_URL,
+    "signature": f"{DEFAULT_POLICY_URL}.sig",
+    "manifest": f"{DEFAULT_PAGES_BASE_URL}/policy-manifest.json",
+    "api_policy": f"{DEFAULT_PAGES_BASE_URL}/api/v1/policy.json",
+    "api_signature": f"{DEFAULT_PAGES_BASE_URL}/api/v1/policy.sig",
+    "api_manifest": f"{DEFAULT_PAGES_BASE_URL}/api/v1/manifest.json",
+}
 POLICY_URL_ENV_VAR = "WIN11_RELEASE_GUARD_POLICY_URL"
 
 DEFAULT_USER_AGENT = "win-release-guard/0.2"
@@ -99,8 +109,10 @@ __all__ = [
     "DEFAULT_EVENT_LOG_MAX_EVENTS",
     "DEFAULT_HTTP_TIMEOUT_SECONDS",
     "DEFAULT_PANTHER_TAIL_MAX_BYTES",
+    "DEFAULT_PAGES_BASE_URL",
     "DEFAULT_POWERSHELL_TIMEOUT_SECONDS",
     "DEFAULT_POLICY_URL",
+    "DEFAULT_PUBLISHED_POLICY_URLS",
     "DEFAULT_QUALITY_POLICY",
     "DEFAULT_RELEASE_HEALTH_URL",
     "DEFAULT_STALE_CACHE_MAX_AGE_HOURS",

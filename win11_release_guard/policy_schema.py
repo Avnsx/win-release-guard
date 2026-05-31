@@ -16,6 +16,7 @@ REQUIRED_POLICY_FIELDS = (
     "generated_at_utc",
     "generator_version",
     "source_urls",
+    "published_urls",
     "source_fetch_status",
     "current_versions",
     "release_history",
@@ -32,6 +33,16 @@ REQUIRED_POLICY_FIELDS = (
 
 _RELEASE_PATTERN = re.compile(r"^\d{2}H[12]$", re.IGNORECASE)
 _BUILD_PATTERN = re.compile(r"^\d{5}\.\d+$")
+_URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+PUBLISHED_URL_KEYS = (
+    "landing",
+    "policy",
+    "signature",
+    "manifest",
+    "api_policy",
+    "api_signature",
+    "api_manifest",
+)
 
 
 def _require_mapping(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -90,6 +101,20 @@ def validate_policy_document(data: Mapping[str, Any]) -> tuple[str, ...]:
     source_urls = _require_sequence(data, "source_urls")
     if not source_urls or not all(isinstance(url, str) and url for url in source_urls):
         raise PolicyParseError("source_urls must contain at least one URL.")
+
+    published_urls = _require_mapping(data, "published_urls")
+    missing_published_urls = [key for key in PUBLISHED_URL_KEYS if key not in published_urls]
+    if missing_published_urls:
+        raise PolicyParseError(
+            "published_urls is missing required field(s): "
+            f"{', '.join(missing_published_urls)}."
+        )
+    for key in PUBLISHED_URL_KEYS:
+        value = published_urls[key]
+        if not isinstance(value, str) or not value:
+            raise PolicyParseError(f"published_urls.{key} must be a non-empty URL string.")
+        if not _URL_PATTERN.match(value):
+            raise PolicyParseError(f"published_urls.{key} must be an absolute URL.")
 
     _require_mapping(data, "source_fetch_status")
     current_versions = _require_sequence(data, "current_versions")
@@ -156,6 +181,7 @@ def policy_document_to_json(data: Mapping[str, Any]) -> str:
 __all__ = [
     "GENERATOR_VERSION",
     "POLICY_SCHEMA_VERSION",
+    "PUBLISHED_URL_KEYS",
     "REQUIRED_POLICY_FIELDS",
     "policy_document_to_json",
     "validate_policy_document",

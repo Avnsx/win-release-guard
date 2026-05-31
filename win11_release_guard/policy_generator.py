@@ -15,7 +15,8 @@ from xml.etree import ElementTree
 
 from .config import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
-    DEFAULT_POLICY_URL,
+    DEFAULT_PAGES_BASE_URL,
+    DEFAULT_PUBLISHED_POLICY_URLS,
     DEFAULT_RELEASE_HEALTH_URL,
     DEFAULT_TRUSTED_POLICY_KEY_ID,
     DEFAULT_USER_AGENT,
@@ -28,7 +29,6 @@ from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 
 
 DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
-PAGES_BASE_URL = "https://avnsx.github.io/win-release-guard"
 PAGES_TIMEZONE = "Europe/Berlin"
 
 
@@ -427,6 +427,7 @@ def _policy_with_enrichment(
     source_fetch_status: Mapping[str, Any],
     validation_warnings: tuple[str, ...],
     signature_status: str,
+    published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
     special_releases = tuple(_entry_with_special_flag(entry) for entry in base_policy.special_releases)
     excluded = tuple(_entry_with_special_flag(entry) for entry in base_policy.excluded_for_existing_devices)
@@ -457,6 +458,7 @@ def _policy_with_enrichment(
         generated_at_utc=generated_at_utc,
         generator_version=GENERATOR_VERSION,
         source_urls=tuple(source_urls),
+        published_urls=dict(published_urls or DEFAULT_PUBLISHED_POLICY_URLS),
         source_fetch_status=dict(source_fetch_status),
         current_versions=current_versions,
         release_history=release_history,
@@ -482,6 +484,7 @@ def generate_policy(
     generated_at_utc: str | None = None,
     signature_status: str = "unsigned",
     source_fetch_status: Mapping[str, Any] | None = None,
+    published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
     warnings: list[str] = []
     base_policy = parse_windows11_release_health_html(release_health_html)
@@ -507,6 +510,7 @@ def generate_policy(
         source_fetch_status=source_fetch_status or {},
         validation_warnings=tuple(dict.fromkeys(warnings)),
         signature_status=signature_status,
+        published_urls=published_urls,
     )
     validate_policy_document(policy.to_dict())
     return policy
@@ -612,10 +616,6 @@ def write_policy_outputs(
             written["api_manifest"] = manifest_alias
 
     return written
-
-
-def _site_base_url(policy_url: str = DEFAULT_POLICY_URL) -> str:
-    return policy_url.rsplit("/", 1)[0].rstrip("/")
 
 
 def _sha256_hex(data: bytes | None) -> str | None:
@@ -757,7 +757,7 @@ def render_policy_index(
     )
 
 
-def render_robots_txt(*, base_url: str = PAGES_BASE_URL) -> str:
+def render_robots_txt(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
     return (
         "User-agent: *\n"
         "Allow: /\n"
@@ -765,7 +765,7 @@ def render_robots_txt(*, base_url: str = PAGES_BASE_URL) -> str:
     )
 
 
-def render_sitemap_xml(policy: ReleasePolicy, *, base_url: str = PAGES_BASE_URL) -> str:
+def render_sitemap_xml(policy: ReleasePolicy, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
     generated_at = escape(policy.generated_at_utc or _utc_now())
     urls = (
         f"{base_url}/",
@@ -789,13 +789,26 @@ def render_sitemap_xml(policy: ReleasePolicy, *, base_url: str = PAGES_BASE_URL)
     )
 
 
+def _published_urls_for_base_url(base_url: str) -> dict[str, str]:
+    normalized = base_url.rstrip("/")
+    return {
+        "landing": f"{normalized}/",
+        "policy": f"{normalized}/windows-release-policy.json",
+        "signature": f"{normalized}/windows-release-policy.json.sig",
+        "manifest": f"{normalized}/policy-manifest.json",
+        "api_policy": f"{normalized}/api/v1/policy.json",
+        "api_signature": f"{normalized}/api/v1/policy.sig",
+        "api_manifest": f"{normalized}/api/v1/manifest.json",
+    }
+
+
 def render_policy_manifest(
     policy: ReleasePolicy,
     *,
     policy_bytes: bytes,
     signature_bytes: bytes | None,
     signature: Mapping[str, Any] | None = None,
-    base_url: str = PAGES_BASE_URL,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     target = policy.broad_target_existing_devices
     policy_sha256 = _sha256_hex(policy_bytes)
@@ -814,15 +827,7 @@ def render_policy_manifest(
         "signature_algorithm": _signature_field(signature, "algorithm"),
         "key_id": _signature_field(signature, "key_id"),
         "source_urls": list(policy.source_urls),
-        "published_urls": {
-            "landing": f"{base_url}/",
-            "policy": f"{base_url}/windows-release-policy.json",
-            "signature": f"{base_url}/windows-release-policy.json.sig",
-            "manifest": f"{base_url}/policy-manifest.json",
-            "api_policy": f"{base_url}/api/v1/policy.json",
-            "api_signature": f"{base_url}/api/v1/policy.sig",
-            "api_manifest": f"{base_url}/api/v1/manifest.json",
-        },
+        "published_urls": dict(policy.published_urls or _published_urls_for_base_url(base_url)),
         "broad_target_existing_devices": (
             {
                 "version": target.version,

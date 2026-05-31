@@ -5,6 +5,7 @@ import json
 import pytest
 
 from win11_release_guard.bundled_policy import load_bundled_policy
+from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS
 from win11_release_guard.exceptions import PolicyTrustError
 from win11_release_guard.signing import load_trusted_policy, sign_policy_bytes, verify_policy_signature
 
@@ -134,3 +135,5 @@ def test_bundled_policy_loads_as_verified():
 
     assert trusted.signature_status == "valid"
     assert trusted.policy.broad_target_existing_devices is not None
+    assert trusted.policy.published_urls["policy"] == DEFAULT_POLICY_URL
+    assert trusted.policy.published_urls["api_policy"] == DEFAULT_PUBLISHED_POLICY_URLS["api_policy"]

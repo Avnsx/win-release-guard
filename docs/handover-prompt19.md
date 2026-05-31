@@ -81,13 +81,9 @@ Live check result:
 - Baseline: `26200.8457`
 - Excluded release: `26H1 / 28000`
 
-Remaining known warning:
-
-```text
-Loaded policy URL is not listed in source_urls.
-```
-
-This means the hosted signed artifact is valid and usable, but policy metadata still lists only upstream source URLs, not the hosted policy URL itself.
+Prompt 8 supersedes the earlier warning about hosted policy URLs not being in
+`source_urls`. Current architecture keeps upstream Microsoft URLs in
+`source_urls` and public GitHub Pages/API endpoints in `published_urls`.
 
 ## Inspected files and findings
 
@@ -226,7 +222,9 @@ Expected/current matches:
 - `.github/workflows/ci.yml` exists.
 - `.github/workflows/publish-policy.yml` exists.
 - Production policy URL is `https://avnsx.github.io/win-release-guard/windows-release-policy.json`.
-- Remaining live production warning is `Loaded policy URL is not listed in source_urls.`
+- The earlier live production warning about `source_urls` is expected to be
+  resolved by `published_urls` metadata in generated policy output and runtime
+  compatibility normalization for the bundled policy.
 
 Mismatch:
 
@@ -234,7 +232,8 @@ Mismatch:
 
 ## Immediate recommendations
 
-- Decide whether `source_urls` should include the hosted policy artifact URL. If yes, update policy generation so the production URL is listed and the live warning goes away.
+- Keep `source_urls` limited to upstream Microsoft sources. Hosted GitHub Pages
+  policy artifacts belong in `published_urls`.
 - Refresh `docs/source-learnings.md` if it should describe current implementation rather than historical planning.
 - Decide whether to restore or intentionally omit `docs/handover-prompt18.md`.
 

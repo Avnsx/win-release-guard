@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 from tools import generate_policy as generate_policy_cli
+from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
 from win11_release_guard.models import QualityPolicy
 from win11_release_guard.policy_generator import (
     build_policy_from_sources,
@@ -335,13 +336,18 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     policy_bytes = (tmp_path / "windows-release-policy.json").read_bytes()
     signature_bytes = (tmp_path / "windows-release-policy.json.sig").read_bytes()
     manifest = json.loads((tmp_path / "policy-manifest.json").read_text(encoding="utf-8"))
+    generated_policy = json.loads((tmp_path / "windows-release-policy.json").read_text(encoding="utf-8"))
     assert manifest["policy_sha256"] == hashlib.sha256(policy_bytes).hexdigest()
     assert manifest["signature_sha256"] == hashlib.sha256(signature_bytes).hexdigest()
     assert manifest["signature_algorithm"] == "ed25519"
     assert manifest["key_id"] == "test-policy-key"
     assert manifest["timezone"] == "Europe/Berlin"
     assert manifest["status"] == "Policy current"
+    assert manifest["published_urls"]["policy"] == DEFAULT_POLICY_URL
     assert manifest["published_urls"]["api_policy"].endswith("/api/v1/policy.json")
+    assert generated_policy["published_urls"] == DEFAULT_PUBLISHED_POLICY_URLS
+    assert DEFAULT_RELEASE_HEALTH_URL in generated_policy["source_urls"]
+    assert not any("github.io" in url for url in generated_policy["source_urls"])
 
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "<title>win-release-guard</title>" in index

@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 from .config import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_POLICY_URL,
+    DEFAULT_PUBLISHED_POLICY_URLS,
     DEFAULT_RELEASE_HEALTH_URL,
     DEFAULT_USER_AGENT,
 )
@@ -479,6 +480,32 @@ def _require_sequence(data: Mapping[str, Any], key: str) -> list[Any]:
     return value
 
 
+def _normalize_published_urls(value: Any) -> dict[str, str]:
+    if value in (None, {}):
+        return dict(DEFAULT_PUBLISHED_POLICY_URLS)
+    if not isinstance(value, Mapping):
+        raise PolicyParseError("JSON policy field 'published_urls' must be an object.")
+    normalized: dict[str, str] = {}
+    for key, url in value.items():
+        if not isinstance(url, str) or not url:
+            raise PolicyParseError(f"published_urls.{key} must be a non-empty URL string.")
+        normalized[str(key)] = url
+    return normalized
+
+
+def _source_url_is_listed(
+    source_url: str | None,
+    *,
+    source_urls: list[Any],
+    published_urls: Mapping[str, str],
+) -> bool:
+    if not source_url or not _is_url(source_url):
+        return True
+    upstream_urls = {str(url) for url in source_urls if isinstance(url, str)}
+    public_urls = {str(url) for url in published_urls.values()}
+    return source_url in upstream_urls or source_url in public_urls
+
+
 def _validate_release(value: Any, field: str) -> str:
     release = str(value or "").upper()
     if not _RELEASE_PATTERN.fullmatch(release):
@@ -530,6 +557,7 @@ def _normalize_json_policy_data(
         "generated_at_utc",
         "source",
         "source_urls",
+        "published_urls",
         "generator_version",
         "source_fetch_status",
         "quality_policy",
@@ -574,8 +602,13 @@ def _normalize_json_policy_data(
     source_urls = data.get("source_urls")
     if not isinstance(source_urls, list) or not source_urls or not all(isinstance(url, str) and url for url in source_urls):
         raise PolicyParseError("JSON policy is missing required non-empty list 'source_urls'.")
-    if source_url and _is_url(source_url) and source_url not in source_urls:
-        warnings.append("Loaded policy URL is not listed in source_urls.")
+    published_urls = _normalize_published_urls(data.get("published_urls"))
+    if not _source_url_is_listed(
+        source_url,
+        source_urls=source_urls,
+        published_urls=published_urls,
+    ):
+        warnings.append("Loaded policy URL is not listed in published_urls or source_urls.")
 
     current_versions = _require_sequence(data, "current_versions")
     normalized_current_versions: list[Mapping[str, Any]] = []
@@ -643,6 +676,7 @@ def _normalize_json_policy_data(
     normalized["schema_version"] = schema_version_int
     normalized["supported_build_families"] = normalized_supported
     normalized["source_urls"] = list(source_urls)
+    normalized["published_urls"] = dict(published_urls)
     if source_url:
         source = dict(normalized.get("source") or {})
         source["policy_url"] = source_url

@@ -623,6 +623,8 @@ def _self_test_payload() -> tuple[dict[str, object], bool]:
 
 
 def _policy_signature_source(policy_url: str) -> str:
+    if policy_url.endswith("/api/v1/policy.json"):
+        return f"{policy_url.rsplit('/', 1)[0]}/policy.sig"
     return f"{policy_url}.sig"
 
 
@@ -677,6 +679,7 @@ def _policy_source_success_payload(policy_url: str, signature_url: str, trusted_
         "signature_status": trusted_signature_status,
         "generated_at_utc": policy.generated_at_utc,
         "source_urls": list(policy.source_urls),
+        "published_urls": dict(policy.published_urls),
         "broad_target": broad_target,
         "baseline": baseline,
         "excluded_releases": excluded_releases,
@@ -832,6 +835,11 @@ def _print_policy_source_payload(payload: dict[str, object]) -> None:
     print("Source URLs:")
     for source_url in payload.get("source_urls") or []:
         print(f"- {source_url}")
+    published_urls = payload.get("published_urls") or {}
+    if isinstance(published_urls, dict) and published_urls:
+        print("Published URLs:")
+        for key, url in published_urls.items():
+            print(f"- {key}: {url}")
 
     broad_target = payload.get("broad_target")
     if isinstance(broad_target, dict):
