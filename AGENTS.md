@@ -28,6 +28,29 @@ This repository is public software for Windows administrators. Future agents mus
 - Preserve administrator-facing diagnostic data in normal product output unless the user explicitly asks for masking.
 - Keep WUA, Panther, DISM, and local system evidence subordinate to signed policy truth.
 
+## Deployment-Affecting Live Verification Gate
+
+Deployment-affecting changes include workflow changes, policy generator changes,
+signing changes, Pages landing page changes, manifest/API alias changes,
+source URL or published URL changes, and CLI changes to
+`--check-policy-source` or `--check-public-pages`.
+
+After any deployment-affecting change, run:
+
+```powershell
+python -m compileall -q win11_release_guard tools
+pytest -q
+python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest --signing-key-file .tmp/signing-test/private-key.b64
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+python -m win11_release_guard --check-policy-source
+python -m win11_release_guard --check-public-pages
+```
+
+If live network is unavailable, state that explicitly, run mocked tests, and
+do not claim live success. If a live check fails, fix the regression before final
+handover, rerun the live check, and record the exact failing URL, status, and
+error.
+
 ## Commit Message Rules
 
 - Use short, descriptive, human commit messages.

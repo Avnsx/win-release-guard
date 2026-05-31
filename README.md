@@ -497,6 +497,25 @@ pytest -q tests/test_cache.py tests/test_import_contract.py
 pytest -q
 ```
 
+Deployment-affecting changes require the live Pages gate before handover.
+This includes workflow changes, policy generator changes, signing changes,
+Pages landing page changes, manifest/API alias changes,
+source URL or published URL changes, and CLI changes to `--check-policy-source` or
+`--check-public-pages`.
+
+```powershell
+python -m compileall -q win11_release_guard tools
+pytest -q
+python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest --signing-key-file .tmp/signing-test/private-key.b64
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+python -m win11_release_guard --check-policy-source
+python -m win11_release_guard --check-public-pages
+```
+
+If live network is unavailable, record that explicitly, run the mocked test
+suite, and do not claim live success. If a live check fails, fix the regression,
+rerun the live check, and record the exact failing URL, status, and error.
+
 CI runs on Ubuntu and Windows across Python 3.11 and 3.12. It runs compileall,
 the no-network pytest suite, fixture-based policy generation with Pages support
 files, CLI JSON validation, clean source archive export, and the secret-material

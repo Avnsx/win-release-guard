@@ -37,3 +37,23 @@ def test_agents_contract_requires_descriptive_commit_messages() -> None:
     assert "mention the actual change" in lower_text
     assert "harden signed policy feed deployment" in lower_text
     assert "checkpoint after prompt 12" in lower_text
+
+
+def test_agents_contract_requires_live_gate_for_deployment_affecting_changes() -> None:
+    text = _agents_text()
+
+    assert "Deployment-Affecting Live Verification Gate" in text
+    assert "policy generator changes" in text
+    assert "manifest/API alias changes" in text
+    assert "source URL or published URL changes" in text
+    assert "`--check-policy-source`" in text
+    assert "`--check-public-pages`" in text
+    assert "python -m compileall -q win11_release_guard tools" in text
+    assert "pytest -q" in text
+    assert "python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html" in text
+    assert "python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github" in text
+    assert "python -m win11_release_guard --check-policy-source" in text
+    assert "python -m win11_release_guard --check-public-pages" in text
+    assert "If live network is unavailable" in text
+    assert "do not claim live success" in text
+    assert "exact failing URL, status, and" in text
