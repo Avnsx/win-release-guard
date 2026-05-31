@@ -22,6 +22,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert ".github/workflows/publish-policy.yml" in names
     assert "win11_release_guard/data/windows-release-policy.json" in names
     assert "win11_release_guard/data/windows-release-policy.json.sig" in names
+    assert "tools/check_commit_message.py" in names
     assert "tools/export_clean_archive.py" in names
     assert any(name.startswith("tests/") for name in names)
     assert any(name.startswith("docs/") for name in names)

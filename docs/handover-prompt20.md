@@ -22,6 +22,7 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `docs/policy-signing.md`
 - `tests/test_branding_contract.py`
 - `tests/test_cli.py`
+- `tests/test_commit_message_hygiene.py`
 - `tests/test_export_clean_archive.py`
 - `tests/test_import_contract.py`
 - `tests/test_no_active_graph_auth_references.py`
@@ -36,6 +37,7 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `tests/test_signing_key_management.py`
 - `tests/test_source_failures.py`
 - `tools/export_clean_archive.py`
+- `tools/check_commit_message.py`
 - `tools/generate_signing_key.py`
 - `tools/scan_for_secret_material.py`
 - `win11_release_guard/policy_generator.py`
@@ -47,11 +49,15 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 - `eeff852 Harden Ed25519 policy signing safeguards`
 - `14ad217 Polish public policy feed landing page`
 - `457a2e0 Clarify excluded release summaries on Pages dashboard`
+- `7ea5315 Document final Pages policy feed hardening`
+- `Enforce descriptive commit message hygiene`
 
 ## Final Commands Run
 
 - `git -c safe.directory=* status --short`
 - `python -m compileall -q win11_release_guard tools`
+- `python tools/check_commit_message.py --message "Enforce descriptive commit message hygiene"`
+- `pytest -q tests/test_commit_message_hygiene.py tests/test_agents_contract.py tests/test_export_clean_archive.py`
 - `pytest -q`
 - `python -m win11_release_guard --self-test`
 - `python -m win11_release_guard --diagnose-config`
@@ -66,7 +72,9 @@ Final hardening pass summary for `win-release-guard`, completed on 2026-05-31.
 ## Final Verification Results
 
 - `python -m compileall -q win11_release_guard tools`: passed.
-- `pytest -q`: `244 passed in 5.53s`.
+- `python tools/check_commit_message.py --message "Enforce descriptive commit message hygiene"`: passed.
+- `pytest -q tests/test_commit_message_hygiene.py tests/test_agents_contract.py tests/test_export_clean_archive.py`: `10 passed`.
+- `pytest -q`: `249 passed`.
 - `python -m win11_release_guard --self-test`: passed, package import ok, bundled policy loaded, bundled signature valid, policy schema ok, no remote fetch, no WUA probe.
 - `python -m win11_release_guard --diagnose-config`: passed, remote fetch not performed, bundled policy present, bundled signature valid.
 - `python -m win11_release_guard --check-policy-source`: passed.
@@ -139,8 +147,8 @@ Sitemap: https://avnsx.github.io/win-release-guard/sitemap.xml
 
 ## Clean Archive
 
-- Clean archive command passed after this handover was created.
-- `dist/win-release-guard-source.zip` contains `66` entries.
+- Clean archive command passed after the commit-message hygiene files were added.
+- `dist/win-release-guard-source.zip` contains `68` entries after the commit-message hygiene files were added.
 - Archive excludes `.git/`, `.pytest_cache/`, `__pycache__/`, `.cache/`, `.tmp/`, `dist/`, local `site/`, generated ZIPs, `out*.json`, old prototype files, and private key file names.
 - Ignored local generated artifacts may still exist after verification:
   - `site/`

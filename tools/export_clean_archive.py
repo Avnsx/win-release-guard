@@ -86,6 +86,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "tools/generate_policy.py",
     "tools/generate_signing_key.py",
     "tools/scan_for_secret_material.py",
+    "tools/check_commit_message.py",
     "tools/export_clean_archive.py",
     "docs/policy-signing.md",
     "tests/test_no_secret_material.py",

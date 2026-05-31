@@ -27,3 +27,29 @@ This repository is public software for Windows administrators. Future agents mus
 - Do not inspect or print credentials, tokens, private signing keys, GitHub Actions secret values, or credentialed remote URLs.
 - Preserve administrator-facing diagnostic data in normal product output unless the user explicitly asks for masking.
 - Keep WUA, Panther, DISM, and local system evidence subordinate to signed policy truth.
+
+## Commit Message Rules
+
+- Use short, descriptive, human commit messages.
+- Do not include prompt numbers.
+- Do not use "checkpoint", "prompt 12", "AI changes", "fix stuff", "final final", or similarly generic labels.
+- Mention the actual change.
+
+Good examples:
+
+- `Harden signed policy feed deployment`
+- `Polish Pages policy dashboard`
+- `Validate public policy API endpoints`
+- `Enforce secret scanning for policy artifacts`
+- `Document final Pages feed verification`
+- `Fix published URL metadata validation`
+- `Preserve robots contract in generator`
+
+Bad examples:
+
+- `checkpoint after prompt 12`
+- `prompt 8 done`
+- `fix`
+- `stuff`
+- `AI changes`
+- `final final`
