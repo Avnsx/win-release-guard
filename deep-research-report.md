@@ -734,72 +734,59 @@ def make_verdict(local: dict[str, Any], remote_policy: dict[str, Any]) -> FinalV
 
 Mit dieser Form der Zusammenführung wird aus lokalen Rohdaten und serverseitiger Policy ein eindeutiges Ergebnis. Genau so vermeidest du, dass ein kaputtes `ProductName` oder eine fehlende Windows-Update-Offerte dein Verdict verwässert.
 
-### Optionaler GitHub-Actions-Workflow mit OIDC und Pages
+### Beispielhafter GitHub-Actions-Workflow fuer Pages
 
 ```yaml
-name: build-windows-release-policy
+name: publish-policy
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 3 * * *"   # absichtlich nicht zur vollen Stunde
+    - cron: "23 6,18 * * *"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  id-token: write
-  contents: write
+  contents: read
   pages: write
+  id-token: write
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
-
-      # Optional: nur falls du Graph-Enrichment willst
-      - name: Azure Login with OIDC
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          allow-no-subscriptions: true
-
-      - name: Acquire Graph token
-        id: graph
-        run: |
-          TOKEN=$(az account get-access-token --resource-type ms-graph --query accessToken -o tsv)
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          python -m pip install -e ".[test]"
 
       - name: Generate release policy JSON
         env:
-          GRAPH_ACCESS_TOKEN: ${{ steps.graph.outputs.token }}
+          WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64: ${{ secrets.WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 }}
         run: |
-          python scripts/generate_release_policy.py
+          python tools/generate_policy.py --output-dir site --write-index --write-robots --write-sitemap --write-manifest --signing-key-env WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64
+
+      - uses: actions/configure-pages@v6
 
       - name: Publish to Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./site
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-    steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
 ```
 
-Dieser Workflow ist deshalb tragfähig, weil GitHub OIDC Azure-Zugriffe ohne langlebige Secrets unterstützt, `allow-no-subscriptions` tenantweite Logins erlaubt und GitHub Pages für ein statisches JSON ideal ist. Gleichzeitig musst du die dokumentierten Scheduling-Caveats einkalkulieren. citeturn7view0turn8view0turn8view1turn8view2turn8view3turn8view4
+Dieser Workflow ist als heutige Pages-Variante bewusst ohne Microsoft-Graph- oder Azure-Abhaengigkeit formuliert: Die Pipeline erzeugt ein signiertes statisches JSON-Artefakt, prueft es vor dem Upload und veroeffentlicht es ueber GitHub Pages. Gleichzeitig musst du die dokumentierten Scheduling-Caveats einkalkulieren. citeturn8view2turn8view3turn8view4
 
 ## Risiken, Wartung und priorisierte URLs
 

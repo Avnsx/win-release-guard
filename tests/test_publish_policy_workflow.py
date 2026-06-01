@@ -109,7 +109,7 @@ def test_publish_policy_workflow_uses_pages_artifact_deployment_actions() -> Non
     assert "actions/setup-python@v6" in text
     assert "actions/configure-pages@v6" in text
     assert "actions/upload-pages-artifact@v5" in text
-    assert "actions/upload-pages-artifact@v3" not in text
+    assert "actions/upload-pages-artifact@" + "v3" not in text
     assert "actions/deploy-pages@v5" in text
     assert "actions/checkout@" + "v4" not in text
     assert "actions/setup-python@" + "v5" not in text
