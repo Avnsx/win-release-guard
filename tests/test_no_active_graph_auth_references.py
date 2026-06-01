@@ -25,7 +25,6 @@ SCAN_TARGETS = (
 )
 ALLOWED_HISTORICAL_FILES = {
     ROOT / "docs" / "architecture-insight.md",
-    ROOT / "docs" / "source-learnings.md",
 }
 TEXT_SUFFIXES = {
     "",

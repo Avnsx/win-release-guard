@@ -1,62 +1,25 @@
 # Security Automation
 
-This repository uses file-based automation where GitHub supports it, and keeps
-GitHub UI settings explicit where they cannot be fully controlled by source
-files.
+Detailed automation documentation now lives in the GitHub Wiki:
 
-## Dependabot
+https://github.com/Avnsx/win11_release_guard/wiki/Automation-and-Security
 
-Dependabot version updates are configured by `.github/dependabot.yml`.
+Repository invariants kept here for local agents and tests:
 
-Configured ecosystems:
-
-- `pip` for Python dependency declarations in `pyproject.toml`
-- `github-actions` for workflow action versions under `.github/workflows/`
-
-Dependabot alerts and security updates may still need to be enabled in GitHub
-repository settings if they are not already active.
-
-## Code Scanning
-
-CodeQL code scanning is configured by `.github/workflows/codeql.yml`.
-
-GitHub UI path:
-
-```text
-Settings -> Code security and analysis -> Code scanning
-```
-
-GitHub UI settings are not fully controlled by repository files. If code
-scanning is disabled in settings, enable it there after the workflow is present.
+- Dependabot is configured in `.github/dependabot.yml`.
+- CodeQL code scanning is configured by `.github/workflows/codeql.yml`.
+- If GitHub code scanning is disabled, enable it under
+  `Settings -> Code security and analysis -> Code scanning`.
+- GitHub UI settings are not fully controlled by repository files.
+- README badges are workflow status badges, not external guarantees.
 
 ## GitHub Actions Pinning
 
-The repository uses a pragmatic action-pinning policy:
-
 - GitHub-owned first-party actions may use audited major tags.
-- The audited major tags are enforced by `tools/check_github_action_versions.py`.
+- Audited major tags are enforced by `tools/check_github_action_versions.py`.
 - Third-party actions are forbidden unless explicitly allowlisted and pinned to
   a full 40-character commit SHA.
 - Adding any third-party action requires updating the audit tool, tests, and
   this document with the reason for the exception.
 - Workflow permissions stay minimal; production publishing must not request
   `contents: write`.
-
-Dependabot covers the `github-actions` ecosystem so GitHub-owned action majors
-are reviewed through normal dependency update flow. Full SHA pinning remains an
-available stricter enterprise option, but it has a higher maintenance cost and
-is not the current policy for GitHub-owned first-party actions.
-
-## Workflow Badges
-
-README badges are GitHub Actions workflow status badges. They reflect the latest
-workflow status; they are not external guarantees.
-
-The dependency freshness badge is backed by
-`.github/workflows/dependency-freshness.yml`, which runs
-`tools/check_dependency_freshness.py`. A passing run means direct dependency
-specifiers in `pyproject.toml` allow the latest stable PyPI releases seen by
-that run.
-
-The dependency audit badge is backed by `.github/workflows/dependency-audit.yml`
-and `pip-audit`.

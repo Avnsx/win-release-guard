@@ -129,7 +129,6 @@ FORBIDDEN_ACTIVE_AUTH_PATTERNS = (
 )
 ALLOWED_HISTORICAL_AUTH_FILES = {
     "docs/architecture-insight.md",
-    "docs/source-learnings.md",
 }
 TEXT_SUFFIXES = {
     "",
