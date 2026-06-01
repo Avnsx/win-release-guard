@@ -64,9 +64,9 @@ The signature covers the exact bytes of `windows-release-policy.json`. The
 signature file itself is not part of the signed payload, so adding metadata such
 as `key_id` does not change the policy signature.
 
-The signed bundled policy JSON may retain legacy generator metadata until the
-bundled policy is regenerated and re-signed; editing signed bundled JSON bytes
-without regenerating its detached signature would invalidate verification.
+The signed bundled policy JSON must use the current `win11_release_guard`
+identity and must verify against its detached signature. If the bundled policy
+bytes change, replace or regenerate the detached signature in the same change.
 
 Legacy signatures without `key_id` are accepted only through the default trusted
 key during the transition.

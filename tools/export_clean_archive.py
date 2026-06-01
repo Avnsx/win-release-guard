@@ -120,7 +120,6 @@ FORBIDDEN_RENAMED_REPO_PATTERNS = (
     "avnsx.github.io/" + ("win" + "-release-guard"),
     ("win" + "-release-guard") + "-source.zip",
 )
-SIGNED_BUNDLED_POLICY_ENTRY = "win11_release_guard/data/windows-release-policy.json"
 FORBIDDEN_ACTIVE_AUTH_PATTERNS = (
     "Microsoft " + "Graph",
     "Az" + "ure",
@@ -223,7 +222,7 @@ def _validate_archive_content(archive_path: Path) -> None:
             for pattern in FORBIDDEN_RENAMED_REPO_PATTERNS:
                 if pattern in identity_text:
                     findings.append(f"{name}: stale repo/path identity {pattern!r}")
-            if name != SIGNED_BUNDLED_POLICY_ENTRY and ("win" + "-release-guard") in identity_text:
+            if ("win" + "-release-guard") in identity_text:
                 findings.append(f"{name}: stale project identity after rename")
 
             auth_text = text

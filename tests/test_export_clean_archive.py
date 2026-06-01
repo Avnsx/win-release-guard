@@ -89,8 +89,8 @@ def test_export_clean_archive_rejects_old_repo_path_and_archive_name(tmp_path: P
         export_clean_archive.validate_archive(archive_path, run_tests=False)
 
 
-def test_export_clean_archive_allows_legacy_name_only_in_signed_bundled_policy_json(tmp_path: Path) -> None:
-    archive_path = tmp_path / "allowed-bundled-policy.zip"
+def test_export_clean_archive_rejects_legacy_name_in_signed_bundled_policy_json(tmp_path: Path) -> None:
+    archive_path = tmp_path / "bad-bundled-policy.zip"
     old_project_name = "win" + "-release-guard"
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -100,6 +100,5 @@ def test_export_clean_archive_allows_legacy_name_only_in_signed_bundled_policy_j
                 content = f'{{"generator_version": "{old_project_name}/0.2"}}\n'
             archive.writestr(entry, content)
 
-    names = export_clean_archive.validate_archive(archive_path, run_tests=False)
-
-    assert "win11_release_guard/data/windows-release-policy.json" in names
+    with pytest.raises(RuntimeError, match="stale project identity after rename"):
+        export_clean_archive.validate_archive(archive_path, run_tests=False)

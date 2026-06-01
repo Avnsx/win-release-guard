@@ -37,9 +37,6 @@ EXCLUDED_PARTS = {
     "dist",
     "site",
 }
-EXCLUDED_RELATIVE_FILES = {
-    Path("win11_release_guard/data/windows-release-policy.json"),
-}
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 FORBIDDEN_STALE_PATTERNS = (
     "w11_" + "versioning" + "_api_controller",
@@ -59,8 +56,6 @@ def _iter_source_files(*, include_signed_policy: bool = False) -> list[Path]:
         candidates = [target] if target.is_file() else [path for path in target.rglob("*") if path.is_file()]
         for path in candidates:
             relative_path = path.relative_to(ROOT)
-            if not include_signed_policy and relative_path in EXCLUDED_RELATIVE_FILES:
-                continue
             if "handover" in path.name and path.suffix.lower() == ".md":
                 continue
             if set(relative_path.parts).intersection(EXCLUDED_PARTS):
@@ -121,12 +116,11 @@ def test_no_stale_package_or_project_identities() -> None:
     assert _line_findings(FORBIDDEN_STALE_PATTERNS + (LEGACY_PROTOTYPE_NAME,)) == []
 
 
-def test_signed_bundled_policy_json_is_only_legacy_identity_exception() -> None:
+def test_signed_bundled_policy_json_has_current_identity_and_valid_signature() -> None:
     from win11_release_guard.signing import verify_policy_signature
 
     policy_path = ROOT / "win11_release_guard" / "data" / "windows-release-policy.json"
     signature_path = policy_path.with_name(policy_path.name + ".sig")
-    allowed_path = Path("win11_release_guard/data/windows-release-policy.json")
     old_project_name = "win" + "-release-guard"
     old_repo_name = "Avnsx/" + old_project_name
     old_pages_root = "avnsx.github.io/" + old_project_name
@@ -137,8 +131,8 @@ def test_signed_bundled_policy_json_is_only_legacy_identity_exception() -> None:
         include_signed_policy=True,
     )
 
-    assert len(findings) == 2
-    assert all(finding.startswith(f"{allowed_path}:") for finding in findings)
+    assert findings == []
+    assert "win11_release_guard/0.2" in policy_path.read_text(encoding="utf-8")
     assert verify_policy_signature(policy_path.read_bytes(), signature_path.read_bytes())
 
 

@@ -24,10 +24,6 @@ LEGACY_PAGES_ROOT = "avnsx.github.io/" + LEGACY_PROJECT_NAME
 LEGACY_PAGES_URL = "https://" + LEGACY_PAGES_ROOT
 LEGACY_ARCHIVE_NAME = LEGACY_PROJECT_NAME + "-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info"))
-MAX_SIGNED_BUNDLED_LEGACY_PROJECT_OCCURRENCES = 2
-SIGNED_BUNDLED_POLICY_EXPLANATION = (
-    "editing signed bundled JSON bytes without regenerating its detached signature would invalidate verification"
-)
 TEXT_SUFFIXES = {
     "",
     ".cfg",
@@ -119,8 +115,6 @@ def _iter_files(root: Path, targets: Sequence[Path]) -> Iterable[Path]:
 
 def _line_findings(path: Path, relative_path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
-    if relative_path == SIGNED_BUNDLED_POLICY:
-        return findings
     for line_number, line in enumerate(text.splitlines(), start=1):
         for pattern, description in FORBIDDEN_PATTERNS:
             if pattern in line:
@@ -137,54 +131,17 @@ def _path_findings(relative_path: Path) -> list[Finding]:
     return findings
 
 
-def _legacy_project_occurrence_count(text: str) -> int:
-    return text.count(LEGACY_PROJECT_NAME)
-
-
-def _verify_signed_bundled_exception(root: Path) -> list[Finding]:
+def _verify_signed_bundled_policy(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     policy_path = root / SIGNED_BUNDLED_POLICY
     signature_path = root / SIGNED_BUNDLED_SIGNATURE
     if not policy_path.exists():
         return findings
 
-    policy_text = policy_path.read_text(encoding="utf-8", errors="replace")
-    legacy_count = _legacy_project_occurrence_count(policy_text)
-    if legacy_count == 0:
-        return findings
-
-    if legacy_count > MAX_SIGNED_BUNDLED_LEGACY_PROJECT_OCCURRENCES:
-        findings.append(
-            Finding(
-                SIGNED_BUNDLED_POLICY,
-                None,
-                f"signed bundled policy has {legacy_count} old project-name occurrences; maximum allowed is 2",
-            )
-        )
-    for pattern, description in FORBIDDEN_PATTERNS:
-        if pattern == LEGACY_PROJECT_NAME:
-            continue
-        if pattern in policy_text:
-            findings.append(Finding(SIGNED_BUNDLED_POLICY, None, f"{description} is not allowed in bundled policy"))
-
     if not signature_path.exists():
         findings.append(Finding(SIGNED_BUNDLED_SIGNATURE, None, "required bundled policy signature is missing"))
     elif not verify_policy_signature(policy_path.read_bytes(), signature_path.read_bytes()):
         findings.append(Finding(SIGNED_BUNDLED_SIGNATURE, None, "bundled policy signature does not verify"))
-
-    docs_text = "\n".join(
-        (root / path).read_text(encoding="utf-8", errors="replace")
-        for path in (Path("AGENTS.md"), Path("docs/policy-signing.md"))
-        if (root / path).exists()
-    )
-    if SIGNED_BUNDLED_POLICY_EXPLANATION not in " ".join(docs_text.split()):
-        findings.append(
-            Finding(
-                Path("AGENTS.md"),
-                None,
-                "missing signed bundled policy exception documentation",
-            )
-        )
     return findings
 
 
@@ -213,7 +170,7 @@ def check_project_identity(root: Path = REPO_ROOT, targets: Sequence[Path] = DEF
         findings.extend(_path_findings(relative_path))
         text = path.read_text(encoding="utf-8", errors="replace")
         findings.extend(_line_findings(path, relative_path, text))
-    findings.extend(_verify_signed_bundled_exception(root))
+    findings.extend(_verify_signed_bundled_policy(root))
     findings.extend(_check_generated_site(root))
     return findings
 

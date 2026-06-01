@@ -11,7 +11,6 @@ OLD_REPO_URL = "https://github.com/" + OLD_REPO_NAME
 OLD_PAGES_URL = "https://avnsx.github.io/" + OLD_PROJECT_NAME
 OLD_ARCHIVE_NAME = OLD_PROJECT_NAME + "-source.zip"
 OLD_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
-SIGNED_EXCEPTION_DOC = check_project_identity.SIGNED_BUNDLED_POLICY_EXPLANATION
 
 
 def _write(path: Path, text: str) -> Path:
@@ -68,14 +67,25 @@ def test_project_identity_scanner_fails_old_project_name_in_active_source(tmp_pa
     assert "old project name" in _messages(findings)
 
 
-def test_project_identity_scanner_verifies_signed_bundled_exception(monkeypatch, tmp_path: Path) -> None:
+def test_project_identity_scanner_rejects_old_identity_in_bundled_policy(tmp_path: Path) -> None:
     policy = _write(
         tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY,
         f'{{"generator_version": "{OLD_PROJECT_NAME}/0.2", "metadata": {{"generator": "{OLD_PROJECT_NAME}/0.2"}}}}\n',
     )
+    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_SIGNATURE, "signature\n")
+
+    findings = check_project_identity.check_project_identity(tmp_path, (Path("win11_release_guard"),))
+
+    assert "old project name" in _messages(findings)
+    assert policy.read_text(encoding="utf-8")
+
+
+def test_project_identity_scanner_verifies_clean_bundled_policy_signature(monkeypatch, tmp_path: Path) -> None:
+    policy = _write(
+        tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY,
+        '{"generator_version": "win11_release_guard/0.2"}\n',
+    )
     signature = _write(tmp_path / check_project_identity.SIGNED_BUNDLED_SIGNATURE, "signature\n")
-    _write(tmp_path / "AGENTS.md", SIGNED_EXCEPTION_DOC + "\n")
-    _write(tmp_path / "docs/policy-signing.md", SIGNED_EXCEPTION_DOC + "\n")
     calls: list[tuple[bytes, bytes]] = []
 
     def fake_verify(policy_bytes: bytes, signature_bytes: bytes) -> bool:
@@ -83,17 +93,14 @@ def test_project_identity_scanner_verifies_signed_bundled_exception(monkeypatch,
         return True
 
     monkeypatch.setattr(check_project_identity, "verify_policy_signature", fake_verify)
-
     findings = check_project_identity.check_project_identity(tmp_path, (Path("win11_release_guard"),))
 
     assert findings == []
     assert calls == [(policy.read_bytes(), signature.read_bytes())]
 
 
-def test_project_identity_scanner_fails_unsigned_bundled_exception(tmp_path: Path) -> None:
-    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, f'{{"generator": "{OLD_PROJECT_NAME}/0.2"}}\n')
-    _write(tmp_path / "AGENTS.md", SIGNED_EXCEPTION_DOC + "\n")
-    _write(tmp_path / "docs/policy-signing.md", SIGNED_EXCEPTION_DOC + "\n")
+def test_project_identity_scanner_fails_unsigned_bundled_policy(tmp_path: Path) -> None:
+    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, '{"generator": "win11_release_guard/0.2"}\n')
 
     findings = check_project_identity.check_project_identity(tmp_path, (Path("win11_release_guard"),))
 
