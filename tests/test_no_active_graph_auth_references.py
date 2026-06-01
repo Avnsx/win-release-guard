@@ -24,7 +24,7 @@ SCAN_TARGETS = (
     ROOT / ".github",
 )
 ALLOWED_HISTORICAL_FILES = {
-    ROOT / "deep-research-report.md",
+    ROOT / "docs" / "architecture-insight.md",
     ROOT / "docs" / "source-learnings.md",
 }
 TEXT_SUFFIXES = {

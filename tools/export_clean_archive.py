@@ -128,7 +128,7 @@ FORBIDDEN_ACTIVE_AUTH_PATTERNS = (
     "WindowsUpdates" + ".Read.All",
 )
 ALLOWED_HISTORICAL_AUTH_FILES = {
-    "deep-research-report.md",
+    "docs/architecture-insight.md",
     "docs/source-learnings.md",
 }
 TEXT_SUFFIXES = {

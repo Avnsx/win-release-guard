@@ -4,7 +4,7 @@
 
 Reviewed local sources:
 
-- `deep-research-report.md`
+- `docs/architecture-insight.md`
 - `WindowsOSBuild/README.md`
 - `WindowsOSBuild/Public/Get-LatestOSBuild.ps1`
 - `WindowsOSBuild/Public/Get-CurrentOSBuild.ps1`
@@ -35,7 +35,7 @@ WUView is useful as a local update-evidence model, not as policy truth. Its usef
 
 WUView's hard limitation is that it can only display what the local Windows Update Agent knows. WUA evidence must never override the policy verdict.
 
-## Deep Report Architecture
+## Architecture Insight
 
 The final architecture from the research report is:
 
