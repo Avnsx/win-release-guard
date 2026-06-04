@@ -42,6 +42,34 @@ def _atom() -> str:
     return (FIXTURES / "windows11-atom.xml").read_text(encoding="utf-8")
 
 
+def _atom_with_new_b_release() -> str:
+    entry = """
+  <entry>
+    <id>tag:support.microsoft.com,2026:KB5089600</id>
+    <title>June 9, 2026-KB5089600 (OS Build 26200.8461)</title>
+    <published>2026-06-09T18:00:00Z</published>
+    <updated>2026-06-09T18:00:00Z</updated>
+    <link rel="alternate" href="https://support.microsoft.com/help/5089600" />
+    <content type="text">Monthly security update for Windows 11.</content>
+  </entry>
+"""
+    return _atom().replace("</feed>", entry + "</feed>")
+
+
+def _atom_with_duplicate_new_b_release() -> str:
+    entry = """
+  <entry>
+    <id>tag:support.microsoft.com,2026:KB5089600-duplicate</id>
+    <title>June 9, 2026-KB5089600 (OS Build 26200.8461)</title>
+    <published>2026-06-09T18:00:00Z</published>
+    <updated>2026-06-09T18:00:00Z</updated>
+    <link rel="alternate" href="https://support.microsoft.com/help/5089600" />
+    <content type="text">Monthly security update for Windows 11.</content>
+  </entry>
+"""
+    return _atom_with_new_b_release().replace("</feed>", entry + "</feed>")
+
+
 def test_source_label_requires_exact_upstream_hosts() -> None:
     release_health_url = "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
     localized_release_health_url = (
@@ -213,6 +241,7 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     assert diagnostics["atom_feed"]["newest_atom_updated"] == "2026-05-16T18:00:00Z"
     assert diagnostics["atom_feed"]["newest_atom_published"] == "2026-05-16T18:00:00Z"
     assert diagnostics["atom_feed"]["newest_atom_build"] == "26200.8460"
+    assert any(event["severity"] == "notice" for event in diagnostics["events"])
     assert "quality_baselines" in data
     assert "preview_builds" in data
 
@@ -315,7 +344,7 @@ def test_atom_feed_marks_oob_when_table_is_ambiguous():
     assert any(item["kb_article"] == "KB5089550" for item in policy.out_of_band_builds)
 
 
-def test_source_diagnostics_warn_when_atom_has_newer_build_than_release_history():
+def test_source_diagnostics_notice_when_atom_oob_is_newer_than_release_history():
     policy = generate_policy(
         release_health_html=_html(),
         atom_feed_xml=_atom(),
@@ -323,12 +352,55 @@ def test_source_diagnostics_warn_when_atom_has_newer_build_than_release_history(
     )
     diagnostics = policy.source_diagnostics
     drift = diagnostics["drift"]["atom_newer_than_release_history"]
+    events = diagnostics["events"]
 
     assert drift[0]["build"] == "26200.8460"
     assert drift[0]["kb_article"] == "KB5089550"
+    assert drift[0]["out_of_band"] is True
     assert diagnostics["drift"]["generated_after_newest_source_hours"] == 78.0
-    assert any("Atom feed has newer build/KB entries" in warning for warning in policy.validation_warnings)
-    assert any("generated more than 24 hours after the newest source timestamp" in warning for warning in policy.validation_warnings)
+    assert any(
+        event["kind"] == "atom_newer_than_release_history"
+        and event["severity"] == "notice"
+        and event["affects_required_baseline"] is False
+        for event in events
+    )
+    assert not any("Atom feed shows a newer non-preview build" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_warn_when_atom_has_newer_b_release_for_broad_target():
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom_with_new_b_release(),
+        generated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+    events = policy.source_diagnostics["events"]
+
+    event = next(
+        event
+        for event in events
+        if event["kind"] == "atom_newer_than_release_history" and event["build"] == "26200.8461"
+    )
+    assert event["severity"] == "warning"
+    assert event["release"] == "25H2"
+    assert event["affects_broad_target"] is True
+    assert event["affects_required_baseline"] is True
+    assert any("newer non-preview build for the broad target" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_dedupes_duplicate_atom_events():
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom_with_duplicate_new_b_release(),
+    )
+    events = [
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history"
+        and event["build"] == "26200.8461"
+        and event["kb_article"] == "KB5089600"
+    ]
+
+    assert len(events) == 1
 
 
 def test_source_diagnostics_warn_when_current_versions_lag_release_history():
@@ -347,6 +419,16 @@ def test_policy_schema_accepts_source_diagnostics_without_unknown_key_warning():
     warnings = validate_policy_document(policy.to_dict())
 
     assert not any("unknown top-level key 'source_diagnostics'" in warning for warning in warnings)
+
+
+def test_policy_schema_accepts_structured_source_diagnostics_events():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+
+    validate_policy_document(data)
+
+    assert data["source_diagnostics"]["events"]
+    assert data["source_diagnostics"]["event_counts"]["warning"] >= 1
 
 
 def test_policy_schema_rejects_invalid_source_diagnostics_shape():
@@ -505,7 +587,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert api_policy == generated_policy
     assert api_manifest == manifest
     assert manifest["timezone"] == "Europe/Berlin"
-    assert manifest["status"] == "Warning state"
+    assert manifest["status"] == "Policy current"
     assert manifest["published_urls"]["policy"] == DEFAULT_POLICY_URL
     assert manifest["published_urls"]["api_policy"].endswith("/api/v1/policy.json")
     assert manifest["source_diagnostics"]["atom_feed"]["newest_atom_build"] == "26200.8460"
@@ -520,7 +602,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "<title>win11_release_guard</title>" in index
     assert "Windows release policy feed" in index
-    assert "Warning state" in index
+    assert "Policy current" in index
     assert "25H2" in index
     assert "Latest observed" in index
     assert "Required baseline" in index

@@ -454,6 +454,15 @@ def _newest_atom_timestamp(entries: tuple[AtomFeedEntry, ...], field: str) -> st
     return _newest_timestamp([getattr(entry, field) for entry in entries])
 
 
+def _history_release_by_family(rows: tuple[ReleaseHistoryEntry, ...]) -> dict[int, str]:
+    releases: dict[int, str] = {}
+    for row in rows:
+        current = releases.get(row.build_family)
+        if current is None or _release_key(row.release) > _release_key(current):
+            releases[row.build_family] = row.release
+    return releases
+
+
 def _history_build_maps(rows: tuple[ReleaseHistoryEntry, ...]) -> tuple[dict[int, tuple[int, int]], set[str], set[str]]:
     newest_by_family: dict[int, tuple[int, int]] = {}
     builds: set[str] = set()
@@ -473,6 +482,7 @@ def _atom_newer_than_history(
     release_history: tuple[ReleaseHistoryEntry, ...],
 ) -> tuple[dict[str, Any], ...]:
     newest_by_family, history_builds, history_kbs = _history_build_maps(release_history)
+    release_by_family = _history_release_by_family(release_history)
     missing: list[dict[str, Any]] = []
     seen: set[tuple[str, str | None]] = set()
     for entry in atom_entries:
@@ -491,9 +501,12 @@ def _atom_newer_than_history(
             seen.add(key)
             missing.append(
                 {
+                    "release": release_by_family.get(family),
                     "build": build,
                     "build_family": family,
                     "kb_article": kb,
+                    "preview": entry.preview,
+                    "out_of_band": entry.out_of_band,
                     "kb_missing_from_release_history": bool(kb and kb not in history_kbs),
                     "published": entry.published,
                     "updated": entry.updated,
@@ -535,6 +548,116 @@ def _newest_atom_build(entries: tuple[AtomFeedEntry, ...]) -> str | None:
     return max(builds, key=_build_key)
 
 
+def _event_key(item: Mapping[str, Any]) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    return (
+        str(item.get("severity")) if item.get("severity") is not None else None,
+        str(item.get("kind")) if item.get("kind") is not None else None,
+        str(item.get("release")) if item.get("release") is not None else None,
+        str(item.get("build")) if item.get("build") is not None else None,
+        str(item.get("kb_article")) if item.get("kb_article") is not None else None,
+    )
+
+
+def _dedupe_source_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str | None, str | None, str | None, str | None]] = set()
+    for event in events:
+        key = _event_key(event)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(dict(event))
+    return deduped
+
+
+def _source_event_counts(events: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"notice": 0, "warning": 0, "error": 0}
+    for event in events:
+        severity = str(event.get("severity") or "")
+        if severity in counts:
+            counts[severity] += 1
+    return counts
+
+
+def _atom_newer_event(item: Mapping[str, Any], target: ReleasePolicyEntry | None) -> dict[str, Any]:
+    release = str(item.get("release") or "") or None
+    build_family = item.get("build_family")
+    affects_broad_target = bool(
+        target is not None
+        and release == target.version
+        and build_family == target.build_family
+    )
+    affects_required_baseline = affects_broad_target and not bool(item.get("preview") or item.get("out_of_band"))
+    severity = "warning" if affects_required_baseline else "notice"
+    build = str(item.get("build") or "")
+    kb_article = item.get("kb_article")
+    if severity == "warning":
+        message = (
+            "Atom feed shows a newer non-preview build for the broad target that is not present "
+            f"in Release Health release_history: {kb_article or 'unknown KB'} build {build}."
+        )
+    else:
+        message = (
+            "Atom feed has newer Preview/OOB or non-baseline update information not present in "
+            f"Release Health release_history: {kb_article or 'unknown KB'} build {build}."
+        )
+    return {
+        "severity": severity,
+        "kind": "atom_newer_than_release_history",
+        "release": release,
+        "build_family": build_family,
+        "build": build or None,
+        "kb_article": kb_article,
+        "affects_broad_target": affects_broad_target,
+        "affects_required_baseline": affects_required_baseline,
+        "message": message,
+    }
+
+
+def _current_versions_lag_event(item: Mapping[str, Any], target: ReleasePolicyEntry | None) -> dict[str, Any]:
+    release = str(item.get("version") or "") or None
+    build_family = item.get("build_family")
+    build = item.get("newest_release_history_build")
+    affects_broad_target = bool(
+        target is not None
+        and release == target.version
+        and build_family == target.build_family
+    )
+    return {
+        "severity": "warning",
+        "kind": "current_versions_lag_release_history",
+        "release": release,
+        "build_family": build_family,
+        "build": build,
+        "kb_article": None,
+        "affects_broad_target": affects_broad_target,
+        "affects_required_baseline": False,
+        "message": (
+            "Current Versions latest_build appears older than Release History for "
+            f"{release}/{build_family}: {item.get('latest_build') or 'unknown'} < {build}."
+        ),
+    }
+
+
+def _source_diagnostic_messages(events: list[dict[str, Any]], *, minimum: str = "warning") -> list[str]:
+    severities = {"notice": 0, "warning": 1, "error": 2}
+    threshold = severities[minimum]
+    return [
+        str(event["message"])
+        for event in events
+        if severities.get(str(event.get("severity") or ""), -1) >= threshold
+        and event.get("message")
+    ]
+
+
+def _source_diagnostic_notices(events: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(event["message"])
+        for event in events
+        if event.get("severity") == "notice" and event.get("message")
+    ]
+
+
 def _source_status(
     source_fetch_status: Mapping[str, Any],
     key: str,
@@ -558,6 +681,8 @@ def _source_diagnostics(
     current_versions: tuple[ReleasePolicyEntry, ...],
     release_history: tuple[ReleaseHistoryEntry, ...],
     atom_entries: tuple[AtomFeedEntry, ...],
+    broad_target: ReleasePolicyEntry | None,
+    parser_diagnostics: tuple[Mapping[str, Any], ...] = (),
     source_fetch_status: Mapping[str, Any],
     release_health_url: str,
     atom_feed_url: str | None,
@@ -585,6 +710,13 @@ def _source_diagnostics(
     newest_atom_published = _newest_atom_timestamp(atom_entries, "published")
     atom_newer = _atom_newer_than_history(atom_entries, release_history)
     current_stale = _current_version_latest_older_than_history(current_versions, release_history)
+    events = _dedupe_source_events(
+        [
+            *(dict(item) for item in parser_diagnostics),
+            *(_atom_newer_event(item, broad_target) for item in atom_newer),
+            *(_current_versions_lag_event(item, broad_target) for item in current_stale),
+        ]
+    )
 
     source_times = [
         newest_current_revision,
@@ -599,36 +731,50 @@ def _source_diagnostics(
     if generated_dt and newest_source_dt:
         generated_after_hours = round((generated_dt - newest_source_dt).total_seconds() / 3600, 2)
 
-    warnings: list[str] = []
-    if atom_newer:
-        newest = atom_newer[0]
-        warnings.append(
-            "Source freshness warning: Atom feed has newer build/KB entries not present in Release Health "
-            f"release_history, including {newest.get('kb_article') or 'unknown KB'} "
-            f"build {newest.get('build')}."
-        )
-    if current_stale:
-        stale = current_stale[0]
-        warnings.append(
-            "Source freshness warning: Current Versions latest_build appears older than Release History for "
-            f"{stale['version']}/{stale['build_family']}: {stale.get('latest_build') or 'unknown'} < "
-            f"{stale['newest_release_history_build']}."
-        )
-    if generated_after_hours is not None and generated_after_hours >= 24 and (atom_newer or current_stale):
-        warnings.append(
-            "Source freshness warning: policy was generated more than 24 hours after the newest source timestamp "
-            "while source drift diagnostics remain unresolved."
-        )
+    if generated_after_hours is not None and generated_after_hours >= 24:
+        has_unresolved_warning = any(str(event.get("severity")) in {"warning", "error"} for event in events)
+        if has_unresolved_warning:
+            events.append(
+                {
+                    "severity": "warning",
+                    "kind": "source_drift_unresolved_after_24h",
+                    "release": broad_target.version if broad_target else None,
+                    "build_family": broad_target.build_family if broad_target else None,
+                    "build": broad_target.latest_build if broad_target else None,
+                    "kb_article": None,
+                    "affects_broad_target": bool(broad_target),
+                    "affects_required_baseline": False,
+                    "message": (
+                        "Policy was generated more than 24 hours after the newest source timestamp while "
+                        "warning-level source drift diagnostics remain unresolved."
+                    ),
+                }
+            )
     if (
         generated_after_hours is not None
         and generated_after_hours >= 24
         and not atom_entries
         and atom_status.get("status") != "ok"
     ):
-        warnings.append(
-            "Source freshness warning: policy was generated more than 24 hours after the newest Release Health "
-            "timestamp and Atom diagnostics are unavailable; preview/out-of-band enrichment may be incomplete."
+        events.append(
+            {
+                "severity": "warning",
+                "kind": "atom_diagnostics_unavailable",
+                "release": broad_target.version if broad_target else None,
+                "build_family": broad_target.build_family if broad_target else None,
+                "build": broad_target.latest_build if broad_target else None,
+                "kb_article": None,
+                "affects_broad_target": bool(broad_target),
+                "affects_required_baseline": False,
+                "message": (
+                    "Policy was generated more than 24 hours after the newest Release Health timestamp and "
+                    "Atom diagnostics are unavailable; preview/out-of-band enrichment may be incomplete."
+                ),
+            }
         )
+    events = _dedupe_source_events(events)
+    warnings = list(dict.fromkeys(_source_diagnostic_messages(events, minimum="warning")))
+    notices = list(dict.fromkeys(_source_diagnostic_notices(events)))
 
     return {
         "release_health_html": {
@@ -654,6 +800,12 @@ def _source_diagnostics(
             "newest_source_timestamp": newest_source_timestamp,
             "generated_after_newest_source_hours": generated_after_hours,
         },
+        "parser": {
+            "events": [dict(item) for item in parser_diagnostics],
+        },
+        "events": events,
+        "event_counts": _source_event_counts(events),
+        "notices": notices,
         "warnings": warnings,
     }
 
@@ -736,24 +888,39 @@ def _policy_with_enrichment(
 
     target = base_policy.broad_target_existing_devices
     if target is not None:
+        baseline_found = False
         baseline = quality_baselines.get(target.version, {}).get(QualityPolicy.B_RELEASE_ONLY.value)
         if isinstance(baseline, Mapping):
             build = baseline.get("build")
             if build:
+                baseline_found = True
                 baseline_build = str(build)
                 target = replace(
                     target,
                     baseline_build=baseline_build,
                     required_baseline_build=baseline_build,
                 )
+        if not baseline_found:
+            raise PolicyParseError(
+                "Could not select B-release required baseline for broad_target_existing_devices "
+                f"{target.version}/{target.build_family} from Release Health release_history."
+            )
 
     metadata = dict(base_policy.metadata)
     metadata["signature_status"] = signature_status
     metadata["generator"] = GENERATOR_VERSION
+    parser_source = base_policy.source_diagnostics.get("parser")
+    parser_diagnostics: tuple[Mapping[str, Any], ...] = ()
+    if isinstance(parser_source, Mapping):
+        parser_events = parser_source.get("events")
+        if isinstance(parser_events, list):
+            parser_diagnostics = tuple(item for item in parser_events if isinstance(item, Mapping))
     source_diagnostics = _source_diagnostics(
         current_versions=current_versions,
         release_history=release_history,
         atom_entries=atom_entries,
+        broad_target=target,
+        parser_diagnostics=parser_diagnostics,
         source_fetch_status=source_fetch_status,
         release_health_url=release_health_url,
         atom_feed_url=atom_feed_url,

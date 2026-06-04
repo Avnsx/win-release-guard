@@ -66,6 +66,79 @@ def _fixture_html_without_26h1_note() -> str:
     return html[:start] + html[end:]
 
 
+def _fixture_html_with_poison_current_table() -> str:
+    poison = """
+  <h2>Random dashboard</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Release</th>
+        <th>Service option</th>
+        <th>Latest OS build</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>26200.9999</td>
+      </tr>
+    </tbody>
+  </table>
+"""
+    return _fixture_html().replace("  <h2>Windows 11 current versions by servicing option</h2>", poison + "\n  <h2>Windows 11 current versions by servicing option</h2>", 1)
+
+
+def _fixture_html_with_minimal_current_versions() -> str:
+    minimal = """
+  <h2>Windows 11 current versions by servicing option</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Version</th>
+        <th>Servicing option</th>
+        <th>Latest build</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>26H1</td>
+        <td>General Availability Channel</td>
+        <td>28000.2113</td>
+      </tr>
+      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>26200.8457</td>
+      </tr>
+      <tr>
+        <td>24H2</td>
+        <td>General Availability Channel</td>
+        <td>26100.8457</td>
+      </tr>
+    </tbody>
+  </table>
+"""
+    html = _fixture_html()
+    start = html.index("  <h2>Windows 11 current versions by servicing option</h2>")
+    end = html.index("  <h2>Windows 11 release history</h2>", start)
+    return html[:start] + minimal + "\n" + html[end:]
+
+
+def _fixture_html_without_release_history_kb_column() -> str:
+    html = _fixture_html().replace("        <th>KB article</th>\n", "")
+    for kb in ("KB5089549", "KB5083631", "KB5089548"):
+        html = html.replace(f"        <td>{kb}</td>\n", "")
+    return html
+
+
+def _fixture_html_without_b_baseline_for_25h2() -> str:
+    row_start = _fixture_html().index("      <tr>\n        <td>General Availability Channel</td>\n        <td>2026-05 B</td>")
+    row_end = _fixture_html().index("      </tr>", row_start) + len("      </tr>\n")
+    html = _fixture_html()
+    return html[:row_start] + html[row_end:]
+
+
 def _json_policy() -> dict:
     return {
         "schema_version": 1,
@@ -444,6 +517,36 @@ def test_parse_release_health_header_variants_accept_german_latest_and_update_ty
     assert {entry.version for entry in policy.special_releases} == {"26H1"}
 
 
+def test_parse_release_health_ignores_poison_current_versions_table_before_real_table():
+    policy = parse_windows11_release_health_html(_fixture_html_with_poison_current_table())
+
+    assert policy.broad_target_existing_devices is not None
+    assert policy.broad_target_existing_devices.version == "25H2"
+    assert policy.broad_target_existing_devices.latest_build == "26200.8457"
+    assert all(entry.latest_build != "26200.9999" for entry in policy.current_versions)
+    events = policy.source_diagnostics["parser"]["events"]
+    assert any(event["kind"] == "ignored_current_versions_subset_table" for event in events)
+
+
+def test_parse_release_health_current_versions_missing_optional_lifecycle_revision_fields_still_loads():
+    policy = parse_windows11_release_health_html(_fixture_html_with_minimal_current_versions())
+
+    assert policy.broad_target_existing_devices is not None
+    assert policy.broad_target_existing_devices.version == "25H2"
+    assert policy.broad_target_existing_devices.latest_build == "26200.8457"
+    assert policy.broad_target_existing_devices.required_baseline_build == "26200.8457"
+
+
+def test_parse_release_history_missing_kb_article_column_still_loads():
+    policy = parse_windows11_release_health_html(_fixture_html_without_release_history_kb_column())
+
+    assert policy.broad_target_existing_devices is not None
+    assert policy.broad_target_existing_devices.required_baseline_build == "26200.8457"
+    row = next(row for row in policy.release_history if row.release == "25H2" and row.build == "26200.8457")
+    assert row.kb_article is None
+    assert row.kb_url is None
+
+
 def test_parse_release_health_selects_h2_ga_broad_target_not_26h1():
     policy = parse_windows11_release_health_html(_fixture_html())
 
@@ -514,6 +617,11 @@ def test_release_health_parser_reports_missing_release_history_update_type_heade
 def test_release_health_parser_requires_26h1_special_note_when_26h1_is_current():
     with pytest.raises(PolicyParseError, match="26H1 new-devices-only special release note"):
         parse_windows11_release_health_html(_fixture_html_without_26h1_note())
+
+
+def test_release_health_parser_requires_b_baseline_for_broad_target():
+    with pytest.raises(PolicyParseError, match="B-release required baseline"):
+        parse_windows11_release_health_html(_fixture_html_without_b_baseline_for_25h2())
 
 
 def test_non_json_non_html_source_raises_policy_parse_error():

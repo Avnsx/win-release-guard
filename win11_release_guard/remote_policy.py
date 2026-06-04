@@ -33,7 +33,7 @@ HttpGet = Callable[..., Any]
 _RELEASE_PATTERN = re.compile(r"^\d{2}H[12]$", re.IGNORECASE)
 _BUILD_PATTERN = re.compile(r"^\d{5}\.\d+$")
 _CURRENT_VERSION_REQUIRED_FIELDS = ("version", "servicing_option", "latest_build")
-_RELEASE_HISTORY_REQUIRED_FIELDS = ("servicing_option", "update_type", "availability_date", "build")
+_RELEASE_HISTORY_REQUIRED_FIELDS = ("update_type", "build")
 _FIELD_LABELS: Mapping[str, str] = {
     "version": "Version",
     "servicing_option": "Servicing option",
@@ -109,6 +109,21 @@ class _Cell:
 class _Table:
     headings: tuple[str, ...]
     rows: tuple[tuple[_Cell, ...], ...]
+
+
+@dataclass(frozen=True)
+class _CurrentVersionCandidate:
+    entry: ReleasePolicyEntry
+    table_index: int
+    scope: tuple[ServicingChannel, tuple[EditionScope, ...]]
+    matched_history_context: bool
+
+
+@dataclass(frozen=True)
+class _CurrentVersionSelection:
+    entries: list[ReleasePolicyEntry]
+    diagnostics: tuple[dict[str, Any], ...] = ()
+    conflicts: tuple[dict[str, Any], ...] = ()
 
 
 class _ReleaseHealthHtmlParser(HTMLParser):
@@ -277,6 +292,24 @@ def _table_diagnostics(tables: list[_Table], required_fields: tuple[str, ...]) -
     return "; ".join(diagnostics)
 
 
+def _dedupe_diagnostics(items: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str | None, str | None, str | None, str | None]] = set()
+    for item in items:
+        key = (
+            str(item.get("severity")) if item.get("severity") is not None else None,
+            str(item.get("kind")) if item.get("kind") is not None else None,
+            str(item.get("release")) if item.get("release") is not None else None,
+            str(item.get("build")) if item.get("build") is not None else None,
+            str(item.get("kb_article")) if item.get("kb_article") is not None else None,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(dict(item))
+    return deduped
+
+
 def _missing_table_error(table_name: str, required_fields: tuple[str, ...], tables: list[_Table]) -> PolicyParseError:
     required = ", ".join(_FIELD_LABELS.get(field, field) for field in required_fields)
     return PolicyParseError(
@@ -331,6 +364,40 @@ def _row_context(row: Mapping[str, str]) -> str:
     return _fold_text(" | ".join(str(value) for value in row.values()))
 
 
+def _servicing_context_is_plausible(value: str | None) -> bool:
+    folded = _fold_text(value)
+    if not folded:
+        return False
+    needles = (
+        "general availability",
+        "availability channel",
+        "servicing channel",
+        "long term",
+        "ltsc",
+        "ltsb",
+        "hotpatch",
+        "hot patch",
+        "allgemein",
+        "verfugbar",
+        "wartung",
+        "service",
+    )
+    return any(needle in folded for needle in needles)
+
+
+def _update_type_is_plausible(value: str | None) -> bool:
+    folded = _fold_text(value)
+    return bool(
+        folded
+        and (
+            re.search(r"\b(?:oob|[a-d])\b", folded)
+            or re.search(r"\b20\d{2}\s+\d{2}\b", folded)
+            or "preview" in folded
+            or "vorschau" in folded
+        )
+    )
+
+
 def _classify_current_version_table(
     table: _Table,
     headers: list[str],
@@ -350,11 +417,77 @@ def _classify_current_version_table(
     )
 
 
-def _parse_current_versions(tables: list[_Table]) -> list[ReleasePolicyEntry]:
-    current_versions: list[ReleasePolicyEntry] = []
-    seen: set[tuple[str, int, ServicingChannel, tuple[EditionScope, ...]]] = set()
+def _history_contexts(release_history: list[ReleaseHistoryEntry]) -> set[tuple[str, int]]:
+    return {(row.release, row.build_family) for row in release_history}
 
-    for table in tables:
+
+def _current_candidate_key(
+    candidate: _CurrentVersionCandidate,
+) -> tuple[str, int, ServicingChannel, tuple[EditionScope, ...]]:
+    return (
+        candidate.entry.version,
+        candidate.entry.build_family,
+        candidate.entry.servicing_channel,
+        candidate.entry.edition_scopes,
+    )
+
+
+def _current_candidate_table_contexts(
+    candidates: list[_CurrentVersionCandidate],
+) -> dict[tuple[int, tuple[ServicingChannel, tuple[EditionScope, ...]]], set[tuple[str, int]]]:
+    contexts: dict[tuple[int, tuple[ServicingChannel, tuple[EditionScope, ...]]], set[tuple[str, int]]] = {}
+    for candidate in candidates:
+        key = (candidate.table_index, candidate.scope)
+        contexts.setdefault(key, set()).add((candidate.entry.version, candidate.entry.build_family))
+    return contexts
+
+
+def _candidate_is_superseded_by_broader_table(
+    candidate: _CurrentVersionCandidate,
+    table_contexts: Mapping[tuple[int, tuple[ServicingChannel, tuple[EditionScope, ...]]], set[tuple[str, int]]],
+) -> bool:
+    candidate_table_key = (candidate.table_index, candidate.scope)
+    candidate_context = table_contexts.get(candidate_table_key, set())
+    row_context = (candidate.entry.version, candidate.entry.build_family)
+    if not candidate_context:
+        return False
+    for table_key, contexts in table_contexts.items():
+        if table_key == candidate_table_key or table_key[1] != candidate.scope:
+            continue
+        if row_context in contexts and candidate_context < contexts:
+            return True
+    return False
+
+
+def _current_conflict_diagnostic(
+    *,
+    key: tuple[str, int, ServicingChannel, tuple[EditionScope, ...]],
+    candidates: list[_CurrentVersionCandidate],
+) -> dict[str, Any]:
+    builds = sorted({candidate.entry.latest_build for candidate in candidates if candidate.entry.latest_build})
+    table_indexes = sorted({candidate.table_index for candidate in candidates})
+    return {
+        "severity": "warning",
+        "kind": "current_versions_candidate_conflict",
+        "release": key[0],
+        "build_family": key[1],
+        "builds": builds,
+        "table_indexes": table_indexes,
+        "message": (
+            "Multiple Current Versions candidates describe the same release/build-family context "
+            f"with different latest_build values: {', '.join(builds)}."
+        ),
+    }
+
+
+def _parse_current_versions(
+    tables: list[_Table],
+    release_history: list[ReleaseHistoryEntry],
+) -> _CurrentVersionSelection:
+    candidates: list[_CurrentVersionCandidate] = []
+    history_contexts = _history_contexts(release_history)
+
+    for table_index, table in enumerate(tables):
         headers, rows = _table_rows(table)
         if _missing_fields(headers, _CURRENT_VERSION_REQUIRED_FIELDS):
             continue
@@ -363,41 +496,93 @@ def _parse_current_versions(tables: list[_Table]) -> list[ReleasePolicyEntry]:
             release = _extract_release(_row_value(row, "version"))
             latest_build = _row_value(row, "latest_build")
             build_family = _extract_build_family(latest_build)
-            if not release or build_family is None:
+            servicing_option = _row_value(row, "servicing_option")
+            if (
+                not release
+                or build_family is None
+                or not latest_build
+                or not _BUILD_PATTERN.fullmatch(latest_build)
+                or not _servicing_context_is_plausible(servicing_option)
+            ):
                 continue
 
             servicing_channel, edition_scopes = _classify_current_version_table(table, headers, row)
-            key = (release, build_family, servicing_channel, edition_scopes)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            current_versions.append(
-                ReleasePolicyEntry(
-                    version=release,
-                    build_family=build_family,
-                    latest_build=latest_build,
-                    servicing_option=_row_value(row, "servicing_option"),
-                    availability_date=_row_value(row, "availability_date"),
-                    edition_scopes=edition_scopes,
-                    servicing_channel=servicing_channel,
-                    metadata={
-                        "home_pro_end": (
-                            _row_value(row, "home")
-                            or _row_value(row, "end", "updates")
-                        ),
-                        "enterprise_education_end": _row_value(row, "enterprise")
-                        or _row_value(row, "education"),
-                        "ltsc_end": _row_value(row, "ltsc")
-                        or _row_value(row, "long-term")
-                        or _row_value(row, "iot"),
-                        "latest_revision_date": _row_value(row, "latest_revision_date"),
-                        "raw": dict(row),
-                    },
+            scope = (servicing_channel, edition_scopes)
+            candidates.append(
+                _CurrentVersionCandidate(
+                    entry=ReleasePolicyEntry(
+                        version=release,
+                        build_family=build_family,
+                        latest_build=latest_build,
+                        servicing_option=servicing_option,
+                        availability_date=_row_value(row, "availability_date"),
+                        edition_scopes=edition_scopes,
+                        servicing_channel=servicing_channel,
+                        metadata={
+                            "home_pro_end": (
+                                _row_value(row, "home")
+                                or _row_value(row, "end", "updates")
+                            ),
+                            "enterprise_education_end": _row_value(row, "enterprise")
+                            or _row_value(row, "education"),
+                            "ltsc_end": _row_value(row, "ltsc")
+                            or _row_value(row, "long-term")
+                            or _row_value(row, "iot"),
+                            "latest_revision_date": _row_value(row, "latest_revision_date"),
+                            "raw": dict(row),
+                        },
+                    ),
+                    table_index=table_index,
+                    scope=scope,
+                    matched_history_context=(release, build_family) in history_contexts,
                 )
             )
 
-    return current_versions
+    if not candidates:
+        return _CurrentVersionSelection(entries=[])
+
+    table_contexts = _current_candidate_table_contexts(candidates)
+    filtered: list[_CurrentVersionCandidate] = []
+    diagnostics: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if _candidate_is_superseded_by_broader_table(candidate, table_contexts):
+            diagnostics.append(
+                {
+                    "severity": "notice",
+                    "kind": "ignored_current_versions_subset_table",
+                    "release": candidate.entry.version,
+                    "build_family": candidate.entry.build_family,
+                    "build": candidate.entry.latest_build,
+                    "table_index": candidate.table_index,
+                    "message": (
+                        "Ignored a Current Versions candidate from a narrower table because another "
+                        "same-scope table covers a broader matching Release History structure."
+                    ),
+                }
+            )
+            continue
+        filtered.append(candidate)
+
+    grouped: dict[tuple[str, int, ServicingChannel, tuple[EditionScope, ...]], list[_CurrentVersionCandidate]] = {}
+    for candidate in filtered:
+        grouped.setdefault(_current_candidate_key(candidate), []).append(candidate)
+
+    current_versions: list[ReleasePolicyEntry] = []
+    conflicts: list[dict[str, Any]] = []
+    for key, group in grouped.items():
+        pool = [candidate for candidate in group if candidate.matched_history_context] or group
+        builds = {candidate.entry.latest_build for candidate in pool if candidate.entry.latest_build}
+        if len(builds) > 1:
+            diagnostic = _current_conflict_diagnostic(key=key, candidates=pool)
+            diagnostics.append(diagnostic)
+            conflicts.append(diagnostic)
+        current_versions.append(pool[0].entry)
+
+    return _CurrentVersionSelection(
+        entries=current_versions,
+        diagnostics=tuple(_dedupe_diagnostics(diagnostics)),
+        conflicts=tuple(_dedupe_diagnostics(conflicts)),
+    )
 
 
 def _parse_release_history(tables: list[_Table]) -> list[ReleaseHistoryEntry]:
@@ -418,6 +603,8 @@ def _parse_release_history(tables: list[_Table]) -> list[ReleaseHistoryEntry]:
                 continue
 
             update_type = _row_value(row, "update_type") or ""
+            if not _update_type_is_plausible(update_type):
+                continue
             update_type_match = re.search(r"\b(OOB|[A-D])\b", update_type.upper())
             update_type_letter = update_type_match.group(1) if update_type_match else None
             kb_article = (
@@ -473,7 +660,13 @@ def _detect_special_release_reasons(document_text: str) -> dict[str, str]:
             continue
         context = text[max(0, match.start() - 240) : min(len(text), match.end() + 420)]
         context_l = _fold_text(context)
-        mentions_release_as_subject = f"version {normalized_release.lower()}" in context_l
+        subject_window = text[max(0, match.start() - 80) : min(len(text), match.end() + 120)]
+        subject_window_l = _fold_text(subject_window)
+        release_subject = f"version {normalized_release.lower()}"
+        mentions_release_as_subject = (
+            f"windows 11 {release_subject}" in subject_window_l
+            or f"windows 11 release {normalized_release.lower()}" in subject_window_l
+        )
         has_new_devices = "new devices" in context_l or "neue gerate" in context_l
         has_existing_devices = "existing devices" in context_l or "bestehende gerate" in context_l
         has_not_feature_update = (
@@ -588,6 +781,8 @@ def _select_quality_baseline(
     else:
         filtered = rows
 
+    if not filtered and quality_policy is QualityPolicy.B_RELEASE_ONLY:
+        return None
     if not filtered:
         filtered = rows
 
@@ -598,6 +793,14 @@ def _select_quality_baseline(
             _build_key(row.build),
         ),
     )
+
+
+def _conflict_matches_entry(conflict: Mapping[str, Any], entry: ReleasePolicyEntry) -> bool:
+    try:
+        build_family = int(conflict.get("build_family"))
+    except (TypeError, ValueError):
+        return False
+    return str(conflict.get("release") or "").upper() == entry.version and build_family == entry.build_family
 
 
 def _current_versions_with_quality_baselines(
@@ -1010,19 +1213,20 @@ def parse_windows11_release_health_html(html: str) -> ReleasePolicy:
     parser.feed(html)
     parser.close()
 
-    current_versions = _parse_current_versions(parser.tables)
-    if not current_versions:
-        raise _missing_table_error(
-            "current_versions table",
-            _CURRENT_VERSION_REQUIRED_FIELDS,
-            parser.tables,
-        )
-
     release_history = _parse_release_history(parser.tables)
     if not release_history:
         raise _missing_table_error(
             "release_history tables",
             _RELEASE_HISTORY_REQUIRED_FIELDS,
+            parser.tables,
+        )
+    current_selection = _parse_current_versions(parser.tables, release_history)
+    current_versions = current_selection.entries
+    parser_diagnostics = list(current_selection.diagnostics)
+    if not current_versions:
+        raise _missing_table_error(
+            "current_versions table",
+            _CURRENT_VERSION_REQUIRED_FIELDS,
             parser.tables,
         )
     current_versions = _current_versions_with_quality_baselines(current_versions, release_history)
@@ -1039,17 +1243,27 @@ def parse_windows11_release_health_html(html: str) -> ReleasePolicy:
     broad_target = _select_broad_target(current_versions, special_versions)
     if broad_target is None:
         raise PolicyParseError("Could not select broad_target_existing_devices from Release Health HTML.")
+    for conflict in current_selection.conflicts:
+        if _conflict_matches_entry(conflict, broad_target):
+            raise PolicyParseError(
+                "Conflicting Current Versions candidates make broad_target_existing_devices ambiguous: "
+                f"{conflict.get('message')}"
+            )
     baseline = _select_quality_baseline(
         release_history,
         broad_target.version,
         QualityPolicy.B_RELEASE_ONLY,
     )
-    if baseline is not None:
-        broad_target = replace(
-            broad_target,
-            baseline_build=baseline.build,
-            required_baseline_build=baseline.build,
+    if baseline is None:
+        raise PolicyParseError(
+            "Could not select B-release required baseline for broad_target_existing_devices "
+            f"{broad_target.version}/{broad_target.build_family} from Release Health release_history."
         )
+    broad_target = replace(
+        broad_target,
+        baseline_build=baseline.build,
+        required_baseline_build=baseline.build,
+    )
 
     return ReleasePolicy(
         generated_at_utc=datetime.now(timezone.utc).isoformat(),
@@ -1065,9 +1279,15 @@ def parse_windows11_release_health_html(html: str) -> ReleasePolicy:
         special_releases=special_entries,
         supported_releases=tuple(current_versions),
         excluded_for_existing_devices=special_entries,
+        source_diagnostics={
+            "parser": {
+                "events": parser_diagnostics,
+            }
+        },
         metadata={
             "parser": "stdlib_html_parser",
             "special_release_versions": sorted(special_versions),
+            "parser_diagnostics": parser_diagnostics,
         },
     )
 

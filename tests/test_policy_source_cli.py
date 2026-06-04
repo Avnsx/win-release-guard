@@ -207,6 +207,19 @@ def test_check_policy_source_prints_source_freshness_warnings(monkeypatch, tmp_p
         "warnings": [
             "Source freshness warning: Atom feed has newer build/KB entries not present in Release Health release_history."
         ],
+        "events": [
+            {
+                "severity": "warning",
+                "kind": "atom_newer_than_release_history",
+                "release": "25H2",
+                "build_family": 26200,
+                "build": "26200.8461",
+                "kb_article": "KB5089600",
+                "affects_broad_target": True,
+                "affects_required_baseline": True,
+                "message": "Source freshness warning: Atom feed has newer build/KB entries not present in Release Health release_history.",
+            }
+        ],
     }
     policy_file = tmp_path / "windows-release-policy.json"
     _write_policy_and_signature(
@@ -227,6 +240,59 @@ def test_check_policy_source_prints_source_freshness_warnings(monkeypatch, tmp_p
     assert "Source freshness:" in output
     assert "newest_atom_updated=2026-05-16T18:00:00Z" in output
     assert "Source freshness warning: Atom feed has newer build/KB entries" in output
+
+
+def test_check_policy_source_does_not_print_notice_events_as_warnings(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli, "check_current_system", lambda config: (_ for _ in ()).throw(AssertionError("local probe ran")))
+    policy_data = _policy_json()
+    policy_data["source_diagnostics"] = {
+        "release_health_html": {
+            "source_url": DEFAULT_RELEASE_HEALTH_URL,
+            "fetched_at_utc": "2026-05-31T00:00:00Z",
+            "bytes": 1234,
+            "status": "ok",
+        },
+        "atom_feed": {
+            "source_url": "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92",
+            "fetched_at_utc": "2026-05-31T00:00:01Z",
+            "bytes": 5678,
+            "status": "ok",
+        },
+        "events": [
+            {
+                "severity": "notice",
+                "kind": "atom_newer_than_release_history",
+                "release": "25H2",
+                "build_family": 26200,
+                "build": "26200.8460",
+                "kb_article": "KB5089550",
+                "affects_broad_target": True,
+                "affects_required_baseline": False,
+                "message": "Atom feed has newer Preview/OOB or non-baseline update information.",
+            }
+        ],
+        "notices": ["Atom feed has newer Preview/OOB or non-baseline update information."],
+        "warnings": [],
+    }
+    policy_file = tmp_path / "windows-release-policy.json"
+    _write_policy_and_signature(
+        policy_file,
+        (json.dumps(policy_data, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
+
+    code = cli.main([
+        "--check-policy-source",
+        "--policy-url",
+        str(policy_file),
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Source freshness:" in output
+    assert "Warnings:" not in output
+    assert "Preview/OOB or non-baseline" not in output
 
 
 def test_check_policy_source_invalid_signature_fails(tmp_path, capsys):

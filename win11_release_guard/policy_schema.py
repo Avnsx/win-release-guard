@@ -137,6 +137,46 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
     warnings = value.get("warnings")
     if warnings is not None and not isinstance(warnings, list):
         raise PolicyParseError("source_diagnostics.warnings must be a list.")
+    notices = value.get("notices")
+    if notices is not None and not isinstance(notices, list):
+        raise PolicyParseError("source_diagnostics.notices must be a list.")
+    events = value.get("events")
+    if events is not None:
+        if not isinstance(events, list):
+            raise PolicyParseError("source_diagnostics.events must be a list.")
+        for index, event in enumerate(events):
+            if not isinstance(event, Mapping):
+                raise PolicyParseError(f"source_diagnostics.events[{index}] must be an object.")
+            severity = event.get("severity")
+            if severity not in {"notice", "warning", "error"}:
+                raise PolicyParseError(
+                    f"source_diagnostics.events[{index}].severity must be notice, warning, or error."
+                )
+            kind = event.get("kind")
+            if not isinstance(kind, str) or not kind:
+                raise PolicyParseError(f"source_diagnostics.events[{index}].kind must be a non-empty string.")
+            message = event.get("message")
+            if message is not None and not isinstance(message, str):
+                raise PolicyParseError(f"source_diagnostics.events[{index}].message must be a string.")
+            release = event.get("release")
+            if release is not None:
+                _release(release, f"source_diagnostics.events[{index}].release")
+            build_family = event.get("build_family")
+            if build_family is not None:
+                _build_family(build_family, f"source_diagnostics.events[{index}].build_family")
+            build = event.get("build")
+            if build is not None:
+                _build(build, f"source_diagnostics.events[{index}].build")
+            for key in ("affects_broad_target", "affects_required_baseline"):
+                flag = event.get(key)
+                if flag is not None and not isinstance(flag, bool):
+                    raise PolicyParseError(f"source_diagnostics.events[{index}].{key} must be a boolean.")
+    event_counts = value.get("event_counts")
+    if event_counts is not None and not isinstance(event_counts, Mapping):
+        raise PolicyParseError("source_diagnostics.event_counts must be an object.")
+    parser = value.get("parser")
+    if parser is not None and not isinstance(parser, Mapping):
+        raise PolicyParseError("source_diagnostics.parser must be an object.")
 
 
 def _optional_int(data: Mapping[str, Any], key: str) -> int | None:
