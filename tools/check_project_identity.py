@@ -24,6 +24,8 @@ LEGACY_PAGES_ROOT = "avnsx.github.io/" + LEGACY_PROJECT_NAME
 LEGACY_PAGES_URL = "https://" + LEGACY_PAGES_ROOT
 LEGACY_ARCHIVE_NAME = LEGACY_PROJECT_NAME + "-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info"))
+PACKAGING_AUTHOR = 'Mikail ("Avnsx") C.'
+PYPROJECT_AUTHOR_SNIPPET = f"authors = [{{ name = '{PACKAGING_AUTHOR}' }}]"
 TEXT_SUFFIXES = {
     "",
     ".cfg",
@@ -41,6 +43,7 @@ TEXT_SUFFIXES = {
 DEFAULT_SCAN_TARGETS = (
     Path("README.md"),
     Path("AGENTS.md"),
+    Path("pyproject.toml"),
     Path("docs"),
     Path("tests"),
     Path("tools"),
@@ -162,6 +165,22 @@ def _check_generated_site(root: Path) -> list[Finding]:
     return findings
 
 
+def _check_packaging_metadata(root: Path) -> list[Finding]:
+    pyproject = root / "pyproject.toml"
+    if not pyproject.exists():
+        return []
+    text = pyproject.read_text(encoding="utf-8", errors="replace")
+    if PYPROJECT_AUTHOR_SNIPPET in text:
+        return []
+    return [
+        Finding(
+            Path("pyproject.toml"),
+            None,
+            f"required packaging author metadata is missing or changed; expected {PACKAGING_AUTHOR!r}",
+        )
+    ]
+
+
 def check_project_identity(root: Path = REPO_ROOT, targets: Sequence[Path] = DEFAULT_SCAN_TARGETS) -> list[Finding]:
     root = root.resolve()
     findings: list[Finding] = []
@@ -171,6 +190,7 @@ def check_project_identity(root: Path = REPO_ROOT, targets: Sequence[Path] = DEF
         text = path.read_text(encoding="utf-8", errors="replace")
         findings.extend(_line_findings(path, relative_path, text))
     findings.extend(_verify_signed_bundled_policy(root))
+    findings.extend(_check_packaging_metadata(root))
     findings.extend(_check_generated_site(root))
     return findings
 
