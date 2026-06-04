@@ -12,10 +12,12 @@ from win11_release_guard.cache import (
 )
 from win11_release_guard.config import (
     DEFAULT_POLICY_URL,
+    MAX_POLICY_BYTES_ENV_VAR,
     STRICT_PRODUCTION_ENV_VAR,
     ReleaseCheckerConfig,
     resolve_policy_url,
 )
+from win11_release_guard.json_utils import DEFAULT_MAX_POLICY_BYTES
 from win11_release_guard.exceptions import PolicyParseError
 from win11_release_guard.models import ReleasePolicy, ReleasePolicyEntry
 
@@ -152,3 +154,11 @@ def test_strict_production_env_and_preset_force_signed_source_check(monkeypatch)
     assert explicit_config.allow_runtime_release_health_html is False
     assert explicit_config.allow_unsigned_policy is False
     assert explicit_config.source_check_required_for_green is True
+
+
+def test_invalid_max_policy_bytes_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv(MAX_POLICY_BYTES_ENV_VAR, "not-an-int")
+
+    config = ReleaseCheckerConfig()
+
+    assert config.max_policy_bytes == DEFAULT_MAX_POLICY_BYTES

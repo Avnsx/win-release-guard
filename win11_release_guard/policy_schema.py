@@ -6,11 +6,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .exceptions import PolicyParseError
+from .version import generator_version
 
 
 SUPPORTED_POLICY_SCHEMA_VERSION = 1
 POLICY_SCHEMA_VERSION = SUPPORTED_POLICY_SCHEMA_VERSION
-GENERATOR_VERSION = "win11_release_guard/0.2"
+GENERATOR_VERSION = generator_version()
 
 REQUIRED_POLICY_FIELDS = (
     "schema_version",
@@ -172,11 +173,25 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
                 if flag is not None and not isinstance(flag, bool):
                     raise PolicyParseError(f"source_diagnostics.events[{index}].{key} must be a boolean.")
     event_counts = value.get("event_counts")
-    if event_counts is not None and not isinstance(event_counts, Mapping):
-        raise PolicyParseError("source_diagnostics.event_counts must be an object.")
+    if event_counts is not None:
+        if not isinstance(event_counts, Mapping):
+            raise PolicyParseError("source_diagnostics.event_counts must be an object.")
+        for key, count in event_counts.items():
+            if str(key) not in {"notice", "warning", "error"}:
+                continue
+            if not isinstance(count, int) or count < 0:
+                raise PolicyParseError(f"source_diagnostics.event_counts.{key} must be a non-negative integer.")
     parser = value.get("parser")
-    if parser is not None and not isinstance(parser, Mapping):
-        raise PolicyParseError("source_diagnostics.parser must be an object.")
+    if parser is not None:
+        if not isinstance(parser, Mapping):
+            raise PolicyParseError("source_diagnostics.parser must be an object.")
+        parser_events = parser.get("events")
+        if parser_events is not None:
+            if not isinstance(parser_events, list):
+                raise PolicyParseError("source_diagnostics.parser.events must be a list.")
+            for index, event in enumerate(parser_events):
+                if not isinstance(event, Mapping):
+                    raise PolicyParseError(f"source_diagnostics.parser.events[{index}] must be an object.")
 
 
 def _optional_int(data: Mapping[str, Any], key: str) -> int | None:

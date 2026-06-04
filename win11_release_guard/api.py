@@ -8,10 +8,16 @@ from typing import Iterable
 
 from .bundled_policy import load_bundled_policy
 from .cache import default_cache_path
-from .config import ReleaseCheckerConfig, resolve_policy_url
+from .config import (
+    LIVE_POLICY_FRESHNESS_WARNING_AGE_HOURS,
+    STRICT_PRODUCTION_MAX_LIVE_POLICY_AGE_HOURS,
+    ReleaseCheckerConfig,
+    resolve_policy_url,
+)
 from .evaluator import evaluate_windows_update_state, select_broad_fleet_target
 from .exceptions import PolicyError, PolicyFetchError, PolicyParseError, PolicyTrustError, WindowsReleaseCheckerError
 from .local_state import get_local_windows_state
+from .json_utils import DEFAULT_MAX_SIGNATURE_BYTES
 from .models import EvaluationResult, EvaluationStatus, LocalWindowsState, ReleasePolicy, SourceProblem, SourceStatus
 from .audit_probes import collect_audit_diagnostics
 from .policy_diagnostics import apply_silent_feature_update_diagnostics
@@ -29,6 +35,7 @@ class PolicySourceResult:
     policy_source_kind: str | None = None
     policy_signature_status: str | None = None
     policy_age_hours: float | None = None
+    feed_age_days: float | None = None
     warnings: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     source_problems: tuple[SourceProblem, ...] = ()
@@ -181,6 +188,30 @@ def _policy_age_hours(policy: ReleasePolicy, now: datetime | None = None) -> flo
     return max(0.0, (reference - generated.astimezone(timezone.utc)).total_seconds() / 3600)
 
 
+def _feed_age_days(policy_age_hours: float | None) -> float | None:
+    if policy_age_hours is None:
+        return None
+    return round(policy_age_hours / 24, 2)
+
+
+def _live_policy_age_warning(policy_age_hours: float | None) -> str | None:
+    if policy_age_hours is None or policy_age_hours <= LIVE_POLICY_FRESHNESS_WARNING_AGE_HOURS:
+        return None
+    days = _feed_age_days(policy_age_hours)
+    return (
+        f"Live signed policy feed is {days:g} days old; generated_at_utc is older than 14 days. "
+        "Treat this as a feed maintenance warning."
+    )
+
+
+def _is_live_remote_json_source(source: PolicySourceResult) -> bool:
+    return (
+        source.source_status is SourceStatus.REMOTE_POLICY_OK
+        and source.policy_source_kind == "remote_json"
+        and source.is_source_check_complete
+    )
+
+
 def _policy_is_fresh(policy: ReleasePolicy, cache_path: Path, *, max_age_hours: float) -> bool:
     if policy.generated_at_utc:
         age = _policy_age_hours(policy)
@@ -242,6 +273,11 @@ def _accept_trusted_policy(
     source_problems: list[SourceProblem],
 ) -> PolicySourceResult:
     warnings.extend(trusted.policy.validation_warnings)
+    policy_age_hours = _policy_age_hours(trusted.policy)
+    if source_status is SourceStatus.REMOTE_POLICY_OK and source_kind == "remote_json":
+        freshness_warning = _live_policy_age_warning(policy_age_hours)
+        if freshness_warning:
+            warnings.append(freshness_warning)
     signature_status = (
         "not_applicable_html"
         if source_kind == "remote_html"
@@ -254,7 +290,8 @@ def _accept_trusted_policy(
         policy_source_url=source_url,
         policy_source_kind=source_kind,
         policy_signature_status=signature_status,
-        policy_age_hours=_policy_age_hours(trusted.policy),
+        policy_age_hours=policy_age_hours,
+        feed_age_days=_feed_age_days(policy_age_hours),
         warnings=tuple(dict.fromkeys(warnings)),
         errors=tuple(dict.fromkeys(errors)),
         source_problems=tuple(dict.fromkeys(source_problems)),
@@ -288,6 +325,7 @@ def _fetch_signature_bytes(policy_url: str, config: ReleaseCheckerConfig) -> byt
         data, _content_type = fetch_policy_bytes(
             _signature_url(policy_url),
             timeout=config.timeout_seconds,
+            max_bytes=DEFAULT_MAX_SIGNATURE_BYTES,
         )
         return data
     except WindowsReleaseCheckerError:
@@ -314,6 +352,7 @@ def _load_remote_policy(
     policy_bytes, content_type = fetch_policy_bytes(
         policy_url,
         timeout=config.timeout_seconds,
+        max_bytes=config.max_policy_bytes,
     )
     source_kind = _source_kind_from_bytes(
         policy_bytes,
@@ -372,6 +411,10 @@ def _load_cache_policy(
 ) -> PolicySourceResult | None:
     if not cache_path.exists():
         return None
+    if cache_path.stat().st_size > config.max_policy_bytes:
+        raise PolicyFetchError(
+            f"Cached release policy at {cache_path} is too large: exceeds safety cap of {config.max_policy_bytes} bytes."
+        )
     signature_path = _signature_path(cache_path)
     signature_bytes = signature_path.read_bytes() if signature_path.exists() else None
     trusted = load_trusted_policy(
@@ -551,6 +594,7 @@ def _with_source(
         source_status=source.source_status,
         is_source_check_complete=source.is_source_check_complete,
         policy_age_hours=source.policy_age_hours,
+        feed_age_days=source.feed_age_days,
         policy_source_url=source.policy_source_url,
         policy_source_kind=source.policy_source_kind,
         policy_signature_status=source.policy_signature_status,
@@ -618,16 +662,23 @@ def decide_source_degradation(
 ) -> SourceDegradationDecision:
     source_status = source.source_status
     source_class = _source_status_class(source_status)
-    live_remote_json = (
-        source_status is SourceStatus.REMOTE_POLICY_OK
-        and source.policy_source_kind == "remote_json"
-        and source.is_source_check_complete
+    live_remote_json = _is_live_remote_json_source(source)
+    live_remote_json_too_old = (
+        live_remote_json
+        and source.policy_age_hours is not None
+        and source.policy_age_hours > STRICT_PRODUCTION_MAX_LIVE_POLICY_AGE_HOURS
     )
 
     if config.strict_production:
-        force_check_incomplete = not live_remote_json
+        force_check_incomplete = not live_remote_json or live_remote_json_too_old
         reason = None
-        if force_check_incomplete:
+        if live_remote_json_too_old:
+            days = _feed_age_days(source.policy_age_hours)
+            reason = (
+                "Strict production requires a live signed remote JSON policy generated within 45 days before "
+                f"returning a production result. Current live policy age is {days:g} days."
+            )
+        elif force_check_incomplete:
             source_kind = source.policy_source_kind or "unknown"
             reason = (
                 "Strict production requires a complete live signed remote JSON policy source before returning a production result. "
@@ -659,6 +710,12 @@ def decide_source_degradation(
         mode="source_check_required" if config.source_check_required_for_green else "normal",
         reason="Source check incomplete; cannot return green result." if force_for_green else None,
     )
+
+
+def _local_scope_status(candidate_status: EvaluationStatus) -> EvaluationStatus | None:
+    if candidate_status is EvaluationStatus.OUT_OF_SCOPE:
+        return EvaluationStatus.OUT_OF_SCOPE
+    return None
 
 
 def check_current_system(config: ReleaseCheckerConfig | None = None) -> EvaluationResult:
@@ -722,6 +779,8 @@ def check_current_system(config: ReleaseCheckerConfig | None = None) -> Evaluati
         result = replace(
             result,
             status=EvaluationStatus.CHECK_INCOMPLETE,
+            candidate_status=degradation.candidate_status,
+            local_scope_status=_local_scope_status(degradation.candidate_status),
             is_warning=False,
             is_error=True,
             action=source_gate_reason,

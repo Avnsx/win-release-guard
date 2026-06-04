@@ -19,6 +19,7 @@ from win11_release_guard.models import (
     SourceStatus,
 )
 from win11_release_guard.signing import sign_policy_bytes
+from win11_release_guard.version import package_version
 
 
 TEST_PRIVATE_KEY = "krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs="
@@ -356,6 +357,25 @@ def test_cli_pretty_warns_on_stale_cache_source(monkeypatch, capsys):
     assert "using stale cache; treat this as degraded evidence, not production green" in output
 
 
+def test_cli_pretty_shows_policy_age_when_available(monkeypatch, capsys):
+    result = evaluate_windows_update_state(
+        LocalWindowsState(current_build=26200, full_build="26200.8457"),
+        _policy(),
+    )
+    result = replace(
+        result,
+        source_status=SourceStatus.REMOTE_POLICY_OK,
+        is_source_check_complete=True,
+        policy_source_kind="remote_json",
+        policy_age_hours=360.0,
+        feed_age_days=15.0,
+    )
+
+    output = _run_pretty_with_result(monkeypatch, result, capsys, "--no-wua")
+
+    assert "Policy age: 15 days (360 hours)" in output
+
+
 def test_cli_pretty_prints_source_drift_warnings(monkeypatch, capsys):
     result = evaluate_windows_update_state(
         LocalWindowsState(current_build=26200, full_build="26200.8457"),
@@ -529,6 +549,7 @@ def test_cli_strict_production_env_var_enables_preset(monkeypatch, capsys):
         calls.append(config)
         return EvaluationResult(
             status=EvaluationStatus.CHECK_INCOMPLETE,
+            candidate_status=EvaluationStatus.COMPLIANT,
             action="Strict production requires a live source.",
             source_status=SourceStatus.USING_BUNDLED_POLICY,
             is_source_check_complete=False,
@@ -546,6 +567,8 @@ def test_cli_strict_production_env_var_enables_preset(monkeypatch, capsys):
     assert calls[0].strict_production is True
     assert calls[0].source_check_required_for_green is True
     assert payload["strict_production"] is True
+    assert payload["candidate_status"] == EvaluationStatus.COMPLIANT.value
+    assert payload["local_scope_status"] is None
 
 
 def test_cli_diagnose_config_reports_policy_url_source(monkeypatch, capsys):
@@ -600,6 +623,15 @@ def test_cli_diagnose_config_reports_policy_url_source(monkeypatch, capsys):
     assert cli_payload["policy_url_source"] == "cli"
 
 
+def test_cli_diagnose_config_reports_program_version(capsys):
+    code = cli.main(["--diagnose-config"])
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["package_version"] == package_version() == "0.3.0"
+
+
 def test_cli_diagnose_config_reports_strict_production(monkeypatch, capsys):
     monkeypatch.setenv(STRICT_PRODUCTION_ENV_VAR, "1")
 
@@ -638,6 +670,30 @@ def test_cli_pretty_warns_when_source_is_not_live_remote_json(monkeypatch, capsy
     assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
     assert "Source: USING_BUNDLED_POLICY / bundled" in output
     assert "Source warning: live signed remote JSON policy was not fully verified" in output
+
+
+def test_cli_pretty_shows_out_of_scope_candidate_when_strict_source_incomplete(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli,
+        "check_current_system",
+        lambda config: EvaluationResult(
+            status=EvaluationStatus.CHECK_INCOMPLETE,
+            candidate_status=EvaluationStatus.OUT_OF_SCOPE,
+            local_scope_status=EvaluationStatus.OUT_OF_SCOPE,
+            action="Strict production requires a live source.",
+            source_status=SourceStatus.USING_BUNDLED_POLICY,
+            is_source_check_complete=False,
+            policy_source_kind="bundled",
+            strict_production=True,
+        ),
+    )
+
+    code = cli.main(["--pretty"])
+
+    output = capsys.readouterr().out
+    assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
+    assert "Status: CHECK_INCOMPLETE" in output
+    assert "Local candidate: OUT_OF_SCOPE (local scope: OUT_OF_SCOPE; source check incomplete)" in output
 
 
 def test_cli_diagnose_config_does_not_check_source_by_default(monkeypatch, capsys):

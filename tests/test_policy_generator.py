@@ -8,9 +8,17 @@ from urllib.parse import urlparse
 import pytest
 
 from tools import generate_policy as generate_policy_cli
-from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
+from win11_release_guard.config import (
+    DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS,
+    DEFAULT_POLICY_URL,
+    DEFAULT_POLICY_WARNING_AGE_SECONDS,
+    DEFAULT_PUBLISHED_POLICY_URLS,
+    DEFAULT_RELEASE_HEALTH_URL,
+)
 from win11_release_guard.exceptions import PolicyParseError
-from win11_release_guard.models import QualityPolicy
+from win11_release_guard.freshness import epoch_milliseconds_from_iso
+from win11_release_guard.models import QualityPolicy, ReleasePolicy
+import win11_release_guard.policy_generator as policy_generator_module
 from win11_release_guard.policy_generator import (
     _source_label,
     build_policy_from_sources,
@@ -19,7 +27,7 @@ from win11_release_guard.policy_generator import (
     render_robots_txt,
     write_policy_outputs,
 )
-from win11_release_guard.policy_schema import validate_policy_document
+from win11_release_guard.policy_schema import GENERATOR_VERSION, validate_policy_document
 
 
 FIXTURES = Path("tests/fixtures")
@@ -28,10 +36,25 @@ EXPECTED_ROBOTS_TXT = (
     "Allow: /\n"
     "Sitemap: https://avnsx.github.io/win11_release_guard/sitemap.xml\n"
 )
+REMOVED_SCHEMA_PANEL_LABELS = (
+    "API " + "and schema",
+    "Policy " + "schema",
+    "Reader " + "range",
+)
 
 
 def _html() -> str:
     return (FIXTURES / "windows11-release-health.html").read_text(encoding="utf-8")
+
+
+def test_generator_utc_now_is_monotonic_at_millisecond_precision() -> None:
+    values = [policy_generator_module._utc_now() for _ in range(4)]
+    epochs = [epoch_milliseconds_from_iso(value) for value in values]
+
+    assert all(epoch is not None for epoch in epochs)
+    assert epochs == sorted(epochs)
+    assert len(set(epochs)) == len(epochs)
+    assert all("." in value for value in values)
 
 
 def _html_file(name: str) -> str:
@@ -233,6 +256,7 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     assert data["min_reader_schema_version"] == 1
     assert data["max_reader_schema_version"] == 1
     assert data["api_version"] == "v1"
+    assert data["generator_version"] == GENERATOR_VERSION
     assert data["compatibility"]["required_core_schema_version"] == 1
     assert diagnostics["release_health_html"]["source_url"] == DEFAULT_RELEASE_HEALTH_URL
     assert diagnostics["release_health_html"]["bytes"] > 0
@@ -440,6 +464,15 @@ def test_policy_schema_rejects_invalid_source_diagnostics_shape():
         validate_policy_document(data)
 
 
+def test_policy_schema_rejects_invalid_source_diagnostics_event_counts():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
+    data = policy.to_dict()
+    data["source_diagnostics"]["event_counts"]["warning"] = -1
+
+    with pytest.raises(PolicyParseError, match="source_diagnostics.event_counts.warning"):
+        validate_policy_document(data)
+
+
 def test_b_release_quality_baseline_does_not_require_preview():
     policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
     baseline = policy.quality_baselines["25H2"][QualityPolicy.B_RELEASE_ONLY.value]
@@ -477,6 +510,18 @@ def test_missing_atom_feed_still_generates_policy_with_warning():
     assert policy.broad_target_existing_devices is not None
     assert policy.broad_target_existing_devices.version == "25H2"
     assert any("Atom feed missing" in warning for warning in policy.validation_warnings)
+    event = next(event for event in policy.source_diagnostics["events"] if event["kind"] == "atom_feed_missing")
+    assert event["severity"] == "warning"
+    assert event["affects_required_baseline"] is False
+
+
+def test_atom_feed_parse_failure_is_structured_source_diagnostic():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml="<feed>")
+
+    assert any("Atom feed could not be parsed" in warning for warning in policy.validation_warnings)
+    event = next(event for event in policy.source_diagnostics["events"] if event["kind"] == "atom_feed_parse_failed")
+    assert event["severity"] == "warning"
+    assert "Atom feed could not be parsed" in event["message"]
 
 
 def test_parse_atom_feed_extracts_kb_build_and_classification():
@@ -584,6 +629,21 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert manifest["max_reader_schema_version"] == 1
     assert manifest["api_version"] == "v1"
     assert manifest["compatibility"]["required_core_schema_version"] == 1
+    assert manifest["generated_at_epoch_s"] == 1780236710
+    assert manifest["warn_after_epoch_s"] == 1781446310
+    assert manifest["stale_after_epoch_s"] == 1784124710
+    assert manifest["strict_stale_after_epoch_s"] == 1784124710
+    assert manifest["max_ok_age_seconds"] == DEFAULT_POLICY_WARNING_AGE_SECONDS
+    assert manifest["warning_age_seconds"] == DEFAULT_POLICY_WARNING_AGE_SECONDS
+    assert manifest["strict_stale_age_seconds"] == DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS
+    assert manifest["freshness_policy"] == {
+        "warning_after_days": 14,
+        "strict_stale_after_days": 45,
+        "max_ok_age_seconds": DEFAULT_POLICY_WARNING_AGE_SECONDS,
+        "warning_age_seconds": DEFAULT_POLICY_WARNING_AGE_SECONDS,
+        "strict_stale_age_seconds": DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS,
+        "client_recomputes_age": True,
+    }
     assert api_policy == generated_policy
     assert api_manifest == manifest
     assert manifest["timezone"] == "Europe/Berlin"
@@ -595,14 +655,52 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert manifest["broad_target_existing_devices"]["required_baseline_build"] == "26200.8457"
     assert manifest["required_baseline_build"] == "26200.8457"
     assert generated_policy["published_urls"] == DEFAULT_PUBLISHED_POLICY_URLS
+    assert generated_policy["metadata"]["freshness_policy"]["warning_after_days"] == 14
+    assert generated_policy["metadata"]["freshness_policy"]["strict_stale_after_days"] == 45
+    assert generated_policy["metadata"]["freshness_policy"]["client_recomputes_age"] is True
+    roundtripped_policy = ReleasePolicy.from_dict(generated_policy)
+    assert roundtripped_policy.metadata["freshness_policy"]["warning_age_seconds"] == DEFAULT_POLICY_WARNING_AGE_SECONDS
     assert DEFAULT_RELEASE_HEALTH_URL in generated_policy["source_urls"]
     source_hosts = {urlparse(url).hostname for url in generated_policy["source_urls"]}
     assert "avnsx.github.io" not in source_hosts
 
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
-    assert "<title>win11_release_guard</title>" in index
-    assert "Windows release policy feed" in index
-    assert "Policy current" in index
+    assert "<title>Windows 11 Release Guard</title>" in index
+    assert "<h1>Windows 11 Release Guard</h1>" in index
+    assert "Broad-fleet Windows 11 release and quality baseline dashboard." in index
+    assert 'class="header-nav"' in index
+    assert 'class="nav-hover-label"' in index
+    assert "nav-binoculars" not in index
+    assert "--item-size:38px" in index
+    assert ".nav-hover-label{display:none}" in index
+    assert 'id="policy-summary"' in index
+    assert 'href="https://avnsx.github.io/win11_release_guard/"' in index
+    assert 'data-nav-label="Dashboard"' in index
+    assert "Dashboard" in index
+    assert 'data-nav-label="Write a Issue Ticket"' in index
+    assert "Write a Issue Ticket" in index
+    assert "https://github.com/Avnsx/win11_release_guard/issues/new" in index
+    assert 'data-nav-label="Wiki"' in index
+    assert "Wiki" in index
+    assert "https://github.com/Avnsx/win11_release_guard/wiki" in index
+    assert "initHeaderNav" in index
+    assert "reportUiError" in index
+    assert "data-ui-last-error" in index
+    assert "shutdownUi" in index
+    assert "pagehide" in index
+    assert "beforeunload" in index
+    assert "safeSetTimeout" in index
+    assert "safeSetInterval" in index
+    assert "safeRequestFrame" in index
+    assert "button.isConnected" in index
+    assert "nav.isConnected" in index
+    assert "freshness update" in index
+    assert "Bookmarks" not in index
+    assert "Blogs" not in index
+    assert "E-books" not in index
+    assert "Account" not in index
+    assert "Menu" not in index
+    assert "Policy current" not in index
     assert "25H2" in index
     assert "Latest observed" in index
     assert "Required baseline" in index
@@ -614,6 +712,10 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
         "26H1 is excluded for existing devices because Microsoft scopes it to new devices and does not offer "
         "it as an in-place update from 24H2/25H2."
     ) in index
+    assert "Release policy notes" not in index
+    assert "release-note" not in index
+    assert "No source issues reported" in index
+    assert index.find("No source issues reported") < index.find("26H1 excluded for existing devices")
     assert "existing devi." not in index
     assert "Microsoft Release Health" in index
     assert "Microsoft Atom feed" in index
@@ -624,15 +726,102 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "/policy-manifest.json" in index
     assert "/api/v1/policy.json" in index
     assert "/api/v1/manifest.json" in index
-    assert "Programmatic JSON endpoint" in index
+    assert "Programmatic JSON endpoint" not in index
+    assert "Independent Windows release-policy dashboard. Not affiliated with Microsoft." in index
+    assert "&copy; 2026 Mikail (&quot;Avnsx&quot;) C. Maintained as an open-source project." in index
+    assert "Source code and documentation are available on" in index
+    assert "provided under the" in index
+    assert "footer-repo-line" not in index
+    assert "footer-symbol" not in index
+    assert "</span></a>.</span></p>" not in index
+    assert 'class="footer-github" href="https://github.com/Avnsx/win11_release_guard"' in index
+    assert "<span>GitHub</span>" in index
+    assert (
+        'class="footer-license-basic" href="https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"'
+        in index
+    )
+    assert "GPL-3.0 license" in index
+    assert "GPL-3.0 license</a>.</p>" not in index
+    assert 'class="footer-license"' not in index
+    assert "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt" in index
+    assert "github-icon" in index
+    assert ">LICENSE.txt<" not in index
     assert "Europe/Berlin" not in index
     assert "Sunday, 31 May 2026, 16:11:50 CEST" in index
+    assert "Generated age" not in index
+    assert "Policy Feed Currency" in index
+    assert "Published feed age" in index
+    assert "days at render-time fallback" in index
+    assert "Browser recalculates published policy feed age from the GitHub Actions generated timestamp" in index
+    assert "Date.now" in index
+    assert "Current" in index
+    assert "Refresh Due" in index
+    assert "Stale" in index
+    assert "Published policy feed currency: Unknown" in index
+    assert "Workflow refresh" in index
+    assert "GitHub workflow static feed generation" in index
+    assert "Release Health fetched" not in index
+    assert "Atom feed fetched" not in index
+    assert "Berlin, Germany" in index
+    assert "Program versioning" not in index
+    assert "Program Version" in index
+    program_version = GENERATOR_VERSION.rsplit("/", 1)[-1]
+    assert f"https://github.com/Avnsx/win11_release_guard/releases/tag/v{program_version}" in index
+    assert "GitHub release tag" not in index
+    assert "Logic ID" not in index
+    assert "Policy generated by" not in index
+    assert "public /api/v1 lane" not in index
+    assert "signed policy document schema" not in index
+    assert "API version" not in index
+    assert "Policy Schema Version" not in index
+    for removed_label in REMOVED_SCHEMA_PANEL_LABELS:
+        assert removed_label not in index
+    assert "Source diagnostics" in index
+    assert "diag-feed" in index
+    assert 'aria-label="Source diagnostic event feed"' in index
+    assert "<h2>Sources</h2>" not in index
+    assert "sources-panel" not in index
+    assert "source-health" in index
+    assert "source-tile ok" in index
+    assert "source-status" in index
+    assert "Signed policy trust" in index
+    assert "Signature status" in index
+    assert "signature-head" in index
+    assert "signature-status-card" in index
+    assert "Document trust state" in index
+    assert "Detached signature metadata for the published policy artifact." in index
+    assert "signature-kv" in index
+    assert "<dt>Algorithm</dt>" in index
+    assert "<dt>key_id</dt>" in index
+    assert "<dt>Policy SHA-256</dt>" in index
+    assert "<dt>Signature status</dt>" in index
+    assert "endpoint-pill" not in index
+    assert "api-endpoints" in index
+    assert "api-endpoint-row" in index
+    assert "Signed policy JSON" in index
+    assert "Primary signed policy document used by automation and fleet dashboards." in index
+    assert "Detached signature" in index
+    assert "Ed25519 signature that lets clients verify the policy before trusting it." in index
+    assert "Policy manifest" in index
+    assert "Compact metadata for hashes, freshness thresholds, source state, and API aliases." in index
+    assert "API v1 policy alias" in index
+    assert "Backward-compatible policy endpoint for stable reader integrations." in index
+    assert "API v1 manifest alias" in index
+    assert "Backward-compatible manifest endpoint for stable reader integrations." in index
+    assert '<section class="panel span-5 signature-panel">' in index
+    assert '<section class="panel span-7 programmatic-api">' in index
+    assert ".programmatic-api{grid-column:6/span 7;grid-row:3}" in index
+    assert ".signature-panel,.programmatic-api{grid-column:1/-1}" in index
+    assert "Notices" in index
+    assert "Warnings" in index
+    assert "Errors" in index
     assert "auth" not in index.lower()
     assert "token" not in index.lower()
     assert "private-" + "key" not in index.lower()
     assert "http://cdn" not in index.lower()
     assert "https://cdn" not in index.lower()
-    assert "<script" not in index.lower()
+    assert '<script type="application/json" id="policy-freshness-data">' in index
+    assert "script src" not in index.lower()
 
     assert render_robots_txt() == EXPECTED_ROBOTS_TXT
     assert (tmp_path / "robots.txt").read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")

@@ -12,6 +12,7 @@ on:
       - "tools/generate_policy.py"
       - "tools/check_project_identity.py"
       - "tools/scan_for_secret_material.py"
+      - "pyproject.toml"
       - "win11_release_guard/**"
 
 env:
@@ -78,9 +79,19 @@ jobs:
           signature_path = Path("site/windows-release-policy.json.sig")
           policy_bytes = policy_path.read_bytes()
           signature_bytes = signature_path.read_bytes()
-          validate_policy_document(json.loads(policy_bytes.decode("utf-8")))
+          policy = json.loads(policy_bytes.decode("utf-8"))
+          validate_policy_document(policy)
           if not verify_policy_signature(policy_bytes, signature_bytes):
               raise SystemExit("published policy signature verification failed")
+          events = policy.get("source_diagnostics", {}).get("events", [])
+          error_events = [
+              event
+              for event in events
+              if isinstance(event, dict) and event.get("severity") == "error"
+          ]
+          if error_events:
+              kinds = ", ".join(str(event.get("kind") or "unknown") for event in error_events)
+              raise SystemExit(f"source diagnostics error events block publish: {kinds}")
           PY
 
       - name: Check project identity

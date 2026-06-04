@@ -1,88 +1,72 @@
 # Policy Signing
 
-Detailed signing documentation now lives in the GitHub Wiki:
+Purpose: define how public policy JSON becomes trusted by runtime clients. The feed is public static data; trust comes from Ed25519 verification with committed public keys.
 
-https://github.com/Avnsx/win11_release_guard/wiki/Policy-Feed-and-Signing
+Related links: [docs index](README.md) | [wiki trust model](../wiki/Policy-Feed-and-Trust-Model.md) | [security automation](security-automation.md)
 
-Repository invariants kept here for local agents and tests:
+## Artifacts
 
-- Runtime clients never authenticate to GitHub and never need GitHub tokens.
-- Private signing keys are never committed.
-- The production private key is stored only as GitHub Actions secret
-  `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`.
-- Trusted public keys are committed in
-  `win11_release_guard/data/trusted_policy_keys.json`.
-- Signatures carry `key_id` and `signed_at_utc`; runtime verification selects
-  the matching public key by `key_id`.
-- Trusted key records carry `status`, `valid_from_utc`, and, for `retiring` or
-  `retired` keys, `verify_not_after_utc`.
-- `active` keys can verify current policy signatures inside their validity
-  window.
-- `retiring` keys can verify signatures only when `signed_at_utc` is present
-  and not later than `verify_not_after_utc`.
-- `retired` keys can verify only old signatures whose `signed_at_utc` is
-  present and not later than `verify_not_after_utc`; they must not validate new
-  production policy signatures.
-- The signed bundled policy JSON must use the current `win11_release_guard`
-  identity and must verify against its detached signature.
+| Artifact | Path | Role |
+| --- | --- | --- |
+| Canonical policy | `windows-release-policy.json` | Signed JSON policy consumed by runtime clients. |
+| Detached signature | `windows-release-policy.json.sig` | JSON signature metadata plus Ed25519 signature over exact policy bytes. |
+| Manifest | `policy-manifest.json` | Hashes, freshness fields, source diagnostics, public endpoint metadata. |
+| API aliases | `/api/v1/*` | Backward-compatible public integration lane. |
+| Trusted keys | `win11_release_guard/data/trusted_policy_keys.json` | Public verification keys only. |
 
-## Key Rotation Lifecycle
+## Key Model
 
-Trusted key records live in `win11_release_guard/data/trusted_policy_keys.json`.
-Each record has a `key_id`, public key material, `status`, and optional validity
-window fields:
+| Item | Rule |
+| --- | --- |
+| Private signing key | Exists only in GitHub Actions Secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`. |
+| Runtime authentication | Runtime clients do not authenticate to GitHub. |
+| Signature algorithm | Ed25519. |
+| Key selection | Signature `key_id` selects a committed public key record. |
+| Retiring keys | Must have `verify_not_after_utc`; verification overlap with the active key is at least 24 months. |
+| Retired keys | Can verify old signatures inside their verification window only. |
 
-- `valid_from_utc`: earliest signature time accepted for the key.
-- `verify_not_after_utc`: last signature time accepted for retiring or retired
-  keys.
-- `status`: one of `active`, `retiring`, or `retired`.
+## Signature Format
 
-Lifecycle rules:
+```json
+{
+  "algorithm": "ed25519",
+  "key_id": "win11_release_guard-policy-2026-05",
+  "signature": "base64-ed25519-signature",
+  "signed_at_utc": "2026-05-31T00:00:00+00:00"
+}
+```
 
-- `active` keys are valid for new production policy signatures inside their
-  validity window.
-- `retiring` keys are accepted only for signatures with `signed_at_utc` present
-  and not later than `verify_not_after_utc`.
-- `retired` keys are accepted only for old/bundled policies whose
-  `signed_at_utc` is present and not later than `verify_not_after_utc`.
-- Missing `signed_at_utc` on retiring or retired keys is not trusted for fresh
-  production policy validation.
+The signature covers only the exact policy JSON bytes. Signature metadata is not part of the signed payload.
 
-## Bundled Fallback Policy
+## Generate Or Rotate A Key
 
-The bundled policy files in `win11_release_guard/data/` are last-known-good
-fallback artifacts. They must verify against a committed trusted public key, but
-they are not regenerated locally unless the production signing key is available
-through the GitHub Actions workflow. Do not replace them with a test-key-signed
-policy.
+```powershell
+python tools/generate_signing_key.py --out-dir .tmp/signing-key
+```
 
-A bundled policy may remain in the older schema-1 JSON shape without
-`api_version`, `compatibility`, `source_diagnostics`, `latest_observed_build`,
-or `required_baseline_build` fields in the raw file. That legacy shape is
-allowed only for the bundled fallback. Runtime loading must normalize it through
-the model layer so current readers still expose `latest_observed_build`,
-`required_baseline_build`, an empty `source_diagnostics` object, and no unknown
-top-level compatibility warning.
+| Step | Action |
+| --- | --- |
+| 1 | Generate key material under ignored `.tmp/`. |
+| 2 | Store the generated private key value in the GitHub Actions secret. |
+| 3 | Review and commit only public key records. |
+| 4 | Mark the previous key `retiring` with an adequate verification window. |
+| 5 | Publish and verify the new signed feed. |
 
-The minimum bundled fallback contract is:
+## Do / Do Not
 
-- the detached signature verifies against `trusted_policy_keys.json`;
-- the JSON uses the current `win11_release_guard` identity and public
-  `published_urls`;
-- `schema_version` remains supported;
-- `broad_target_existing_devices.baseline_build` matches the B-release
-  `quality_baselines[version].b_release_only.build`;
-- each `current_versions` row contains a parseable `latest_build`;
-- no private signing key material is present in the tracked tree.
+| Do | Do not |
+| --- | --- |
+| Commit public verification keys. | Commit private signing keys, PEMs, or secret values. |
+| Keep old public keys during rotation. | Delete retiring keys while old signed artifacts can exist. |
+| Update bundled policy bytes and bundled signature together. | Accept unsigned production policy by default. |
+| Check manifest hashes and API aliases. | Treat public hosting alone as a trust signal. |
 
-Operational rotation flow:
+## Verify
 
-1. Generate a new key in ignored scratch space with
-   `python tools/generate_signing_key.py --out-dir .tmp/signing-key`.
-2. Add the new public key record as `active` with a clear `key_id`.
-3. Move the old key to `retiring` and set `verify_not_after_utc`.
-4. Update the GitHub Actions secret
-   `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64` with the new private key.
-5. Publish and live-verify the feed.
-6. After the verification window, move the old key to `retired`; do not delete
-   it while bundled policies signed by that key still need verification.
+```powershell
+python -m win11_release_guard --self-test
+python -m win11_release_guard --check-policy-source
+python -m win11_release_guard --check-public-pages
+pytest -q tests/test_signing.py tests/test_signing_key_management.py tests/test_policy_source_cli.py
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+```

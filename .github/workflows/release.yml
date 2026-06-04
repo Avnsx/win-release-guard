@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.3.0"
+        required: true
+        type: string
+      create_tag:
+        description: "Create the annotated tag if it does not already exist"
+        required: true
+        default: false
+        type: boolean
+      draft:
+        description: "Create the GitHub Release as a draft"
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Resolve release tag
+        id: release_ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            create_tag="${{ inputs.create_tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            create_tag="false"
+          fi
+
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must match vX.Y.Z, got '${tag}'."
+            exit 1
+          fi
+
+          git fetch --tags --force origin
+          tag_exists="false"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_exists="true"
+            git checkout --detach "$tag"
+          elif [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "$create_tag" != "true" ]; then
+            echo "::error::Tag '${tag}' does not exist. Push it first or dispatch with create_tag=true."
+            exit 1
+          elif [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::create_tag=true is allowed only from main."
+            exit 1
+          fi
+
+          version="${tag#v}"
+          actual_version="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(data["project"]["version"])
+          PY
+          )"
+          if [ "$actual_version" != "$version" ]; then
+            echo "::error::Tag '${tag}' does not match pyproject version '${actual_version}'."
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=${tag_exists}" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Compile
+        run: python -m compileall -q win11_release_guard tools tests
+
+      - name: Check project identity
+        run: python tools/check_project_identity.py
+
+      - name: Audit GitHub action versions
+        run: python tools/check_github_action_versions.py
+
+      - name: Check version consistency
+        run: python tools/check_version_consistency.py
+
+      - name: Check dependency freshness
+        run: python tools/check_dependency_freshness.py --output dependency-freshness.json
+
+      - name: Test
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: pytest -q --durations=20
+
+      - name: Self-test
+        run: python -m win11_release_guard --self-test
+
+      - name: Verify public policy source
+        run: python -m win11_release_guard --check-policy-source
+
+      - name: Verify public Pages aliases
+        run: python -m win11_release_guard --check-public-pages
+
+      - name: Create clean archive
+        run: python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip --skip-test-run
+
+      - name: Validate clean archive
+        run: python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip --skip-test-run
+
+      - name: Scan for secret material
+        run: >
+          python tools/scan_for_secret_material.py
+          win11_release_guard
+          tests
+          tools
+          docs
+          README.md
+          AGENTS.md
+          pyproject.toml
+          .github
+
+      - name: Create annotated tag when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && steps.release_ref.outputs.tag_exists == 'false' && inputs.create_tag == true
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.release_ref.outputs.tag }}" -m "Release ${{ steps.release_ref.outputs.tag }}"
+          git push origin "refs/tags/${{ steps.release_ref.outputs.tag }}"
+
+      - name: Write release body
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          commit_sha="$(git rev-parse HEAD)"
+          cat > .tmp/release-notes.md <<EOF
+          ## win11_release_guard ${{ steps.release_ref.outputs.version }}
+
+          - Version: ${{ steps.release_ref.outputs.version }}
+          - Commit: ${commit_sha}
+          - Artifact: win11_release_guard-source.zip
+          - Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json
+          - Runtime clients use the signed public JSON feed and detached Ed25519 signature; GitHub Release assets are distribution artifacts, not policy trust roots.
+          EOF
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release_ref.outputs.tag }}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::GitHub Release '${tag}' already exists."
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.draft }}" = "true" ]; then
+            gh release create "$tag" \
+              "dist/win11_release_guard-source.zip#win11_release_guard-source.zip" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" \
+              --notes-file ".tmp/release-notes.md" \
+              --draft
+          else
+            gh release create "$tag" \
+              "dist/win11_release_guard-source.zip#win11_release_guard-source.zip" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" \
+              --notes-file ".tmp/release-notes.md"
+          fi

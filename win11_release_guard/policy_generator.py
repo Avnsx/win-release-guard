@@ -18,11 +18,20 @@ from .config import (
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_PAGES_BASE_URL,
     DEFAULT_PUBLISHED_POLICY_URLS,
+    DEFAULT_POLICY_STRICT_STALE_AGE_DAYS,
+    DEFAULT_POLICY_WARNING_AGE_DAYS,
     DEFAULT_RELEASE_HEALTH_URL,
     DEFAULT_TRUSTED_POLICY_KEY_ID,
     DEFAULT_USER_AGENT,
 )
 from .exceptions import PolicyFetchError, PolicyParseError
+from .freshness import (
+    epoch_milliseconds_from_iso,
+    freshness_policy_metadata,
+    freshness_thresholds,
+    parse_iso_utc_datetime,
+)
+from .json_utils import DEFAULT_MAX_MICROSOFT_SOURCE_BYTES
 from .models import QualityPolicy, ReleaseHistoryEntry, ReleasePolicy, ReleasePolicyEntry
 from .policy_schema import (
     GENERATOR_VERSION,
@@ -35,6 +44,9 @@ from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 
 
 DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+GITHUB_RELEASES_BASE_URL = "https://github.com/Avnsx/win11_release_guard/releases/tag"
+GITHUB_LICENSE_URL = "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"
+GITHUB_REPOSITORY_URL = "https://github.com/Avnsx/win11_release_guard"
 PAGES_TIMEZONE = "Europe/Berlin"
 ROBOTS_TXT = (
     "User-agent: *\n"
@@ -47,12 +59,16 @@ CURATED_EXCLUDED_RELEASE_SUMMARIES = {
         "it as an in-place update from 24H2/25H2."
     )
 }
+_RELEASE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 @dataclass(frozen=True)
 class SourceText:
     text: str
     status: Mapping[str, Any]
+
+
+_LAST_UTC_NOW_MS = 0
 
 
 @dataclass(frozen=True)
@@ -69,7 +85,15 @@ class AtomFeedEntry:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    global _LAST_UTC_NOW_MS
+    epoch_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if epoch_ms <= _LAST_UTC_NOW_MS:
+        epoch_ms = _LAST_UTC_NOW_MS + 1
+    _LAST_UTC_NOW_MS = epoch_ms
+    seconds, milliseconds = divmod(epoch_ms, 1000)
+    return datetime.fromtimestamp(seconds, timezone.utc).replace(microsecond=milliseconds * 1000).isoformat(
+        timespec="milliseconds"
+    )
 
 
 def _parse_policy_datetime(value: str | None) -> datetime:
@@ -127,7 +151,125 @@ def _generated_at_human(value: str | None) -> str:
     )
 
 
-def _fetch_url(url: str, *, timeout: float) -> str:
+def _utc_time_human(value: str | None) -> str:
+    utc_dt = parse_iso_utc_datetime(value)
+    if utc_dt is None:
+        return "unavailable"
+    weekdays = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    months = (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    )
+    return (
+        f"{weekdays[utc_dt.weekday()]}, {utc_dt.day} {months[utc_dt.month - 1]} "
+        f"{utc_dt.year}, {utc_dt:%H:%M:%S} UTC"
+    )
+
+
+def _epoch_copy_icon_html() -> str:
+    return (
+        '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+        '<path d="M8 7.5A2.5 2.5 0 0 1 10.5 5h6A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16h-6A2.5 2.5 0 0 1 8 13.5z" '
+        'fill="none" stroke="currentColor" stroke-width="1.8"/>'
+        '<path d="M5 10.5A2.5 2.5 0 0 1 7.5 8H8v5.5A2.5 2.5 0 0 0 10.5 16H16v.5A2.5 2.5 0 0 1 13.5 19h-6A2.5 2.5 0 0 1 5 16.5z" '
+        'fill="none" stroke="currentColor" stroke-width="1.8"/>'
+        "</svg>"
+    )
+
+
+def _github_icon_html() -> str:
+    return (
+        '<svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+        '<path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38'
+        ' 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52'
+        '-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2'
+        '-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82'
+        '.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08'
+        ' 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48'
+        ' 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>'
+        "</svg>"
+    )
+
+
+def _footer_html() -> str:
+    return (
+        "<footer>"
+        '<p class="footer-note footer-disclaimer">Independent Windows release-policy dashboard. Not affiliated with Microsoft.</p>'
+        '<p class="footer-note footer-owner">&copy; 2026 Mikail (&quot;Avnsx&quot;) C. Maintained as an open-source project.</p>'
+        '<p class="footer-note footer-source">'
+        "Source code and documentation are available on "
+        f'<a class="footer-github" href="{escape(GITHUB_REPOSITORY_URL, quote=True)}">'
+        f"{_github_icon_html()}<span>GitHub</span></a>, provided under the "
+        f'<a class="footer-license-basic" href="{escape(GITHUB_LICENSE_URL, quote=True)}">GPL-3.0 license</a></p>'
+        "</footer>"
+    )
+
+
+def _time_with_epoch_copy_html(value: str | None, *, label: str) -> str:
+    utc_dt = parse_iso_utc_datetime(value)
+    epoch_ms = epoch_milliseconds_from_iso(value)
+    if utc_dt is None or epoch_ms is None:
+        return '<span class="time-copy unavailable">unavailable</span>'
+    iso_value = utc_dt.isoformat()
+    display = _utc_time_human(iso_value)
+    escaped_epoch = escape(str(epoch_ms), quote=True)
+    escaped_label = escape(label, quote=True)
+    return (
+        '<span class="time-copy">'
+        f'<time datetime="{escape(iso_value, quote=True)}">{escape(display)}</time>'
+        '<button type="button" class="epoch-copy" '
+        f'data-epoch="{escaped_epoch}" '
+        f'aria-label="Copy {escaped_label} epoch millisecond timestamp {escaped_epoch}" '
+        f'title="Copy epoch millisecond timestamp {escaped_epoch}">'
+        f"{_epoch_copy_icon_html()}"
+        "</button></span>"
+    )
+
+
+def _generated_age_days(value: str | None, *, reference: datetime | None = None) -> float:
+    generated = _parse_policy_datetime(value)
+    now = reference or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return round(max(0.0, (now.astimezone(timezone.utc) - generated).total_seconds() / 86400), 2)
+
+
+def _content_length_from_headers(headers: Mapping[str, object] | None) -> int | None:
+    if headers is None:
+        return None
+    value = None
+    if hasattr(headers, "get"):
+        value = headers.get("content-length") or headers.get("Content-Length")
+    if value is None and hasattr(headers, "items"):
+        for key, candidate in headers.items():
+            if str(key).lower() == "content-length":
+                value = candidate
+                break
+    if value is None:
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _fetch_url(
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int = DEFAULT_MAX_MICROSOFT_SOURCE_BYTES,
+) -> str:
     request = urllib.request.Request(
         url,
         headers={
@@ -137,7 +279,17 @@ def _fetch_url(url: str, *, timeout: float) -> str:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="replace")
+        content_length = _content_length_from_headers(response.headers)
+        if content_length is not None and content_length > max_bytes:
+            raise PolicyFetchError(
+                f"Microsoft source response is too large: exceeds safety cap of {max_bytes} bytes."
+            )
+        data = response.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise PolicyFetchError(
+                f"Microsoft source response is too large: exceeds safety cap of {max_bytes} bytes."
+            )
+        return data.decode(charset, errors="replace")
 
 
 def load_source_text(
@@ -658,6 +810,20 @@ def _source_diagnostic_notices(events: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _source_input_event(kind: str, message: str, *, severity: str = "warning") -> dict[str, Any]:
+    return {
+        "severity": severity,
+        "kind": kind,
+        "release": None,
+        "build_family": None,
+        "build": None,
+        "kb_article": None,
+        "affects_broad_target": False,
+        "affects_required_baseline": False,
+        "message": message,
+    }
+
+
 def _source_status(
     source_fetch_status: Mapping[str, Any],
     key: str,
@@ -683,6 +849,7 @@ def _source_diagnostics(
     atom_entries: tuple[AtomFeedEntry, ...],
     broad_target: ReleasePolicyEntry | None,
     parser_diagnostics: tuple[Mapping[str, Any], ...] = (),
+    source_input_events: tuple[Mapping[str, Any], ...] = (),
     source_fetch_status: Mapping[str, Any],
     release_health_url: str,
     atom_feed_url: str | None,
@@ -713,6 +880,7 @@ def _source_diagnostics(
     events = _dedupe_source_events(
         [
             *(dict(item) for item in parser_diagnostics),
+            *(dict(item) for item in source_input_events),
             *(_atom_newer_event(item, broad_target) for item in atom_newer),
             *(_current_versions_lag_event(item, broad_target) for item in current_stale),
         ]
@@ -864,6 +1032,7 @@ def _policy_with_enrichment(
     atom_feed_xml: str | None,
     source_fetch_status: Mapping[str, Any],
     validation_warnings: tuple[str, ...],
+    source_input_events: tuple[Mapping[str, Any], ...] = (),
     signature_status: str,
     published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
@@ -909,6 +1078,7 @@ def _policy_with_enrichment(
     metadata = dict(base_policy.metadata)
     metadata["signature_status"] = signature_status
     metadata["generator"] = GENERATOR_VERSION
+    metadata["freshness_policy"] = freshness_policy_metadata()
     parser_source = base_policy.source_diagnostics.get("parser")
     parser_diagnostics: tuple[Mapping[str, Any], ...] = ()
     if isinstance(parser_source, Mapping):
@@ -921,6 +1091,7 @@ def _policy_with_enrichment(
         atom_entries=atom_entries,
         broad_target=target,
         parser_diagnostics=parser_diagnostics,
+        source_input_events=source_input_events,
         source_fetch_status=source_fetch_status,
         release_health_url=release_health_url,
         atom_feed_url=atom_feed_url,
@@ -977,6 +1148,7 @@ def generate_policy(
     published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
     warnings: list[str] = []
+    source_input_events: list[dict[str, Any]] = []
     generated = generated_at_utc or _utc_now()
     effective_source_fetch_status = {
         "release_health_html": _source_status(
@@ -1000,12 +1172,18 @@ def generate_policy(
         try:
             atom_entries = parse_atom_feed(atom_feed_xml)
         except PolicyParseError as exc:
-            warnings.append(f"Atom feed could not be parsed: {exc}")
+            message = f"Atom feed could not be parsed: {exc}"
+            warnings.append(message)
+            source_input_events.append(_source_input_event("atom_feed_parse_failed", message))
     else:
-        warnings.append("Atom feed missing; preview/out-of-band enrichment unavailable.")
+        message = "Atom feed missing; preview/out-of-band enrichment unavailable."
+        warnings.append(message)
+        source_input_events.append(_source_input_event("atom_feed_missing", message))
 
     if atom_feed_xml and not atom_entries:
-        warnings.append("Atom feed contained no usable entries.")
+        message = "Atom feed contained no usable entries."
+        warnings.append(message)
+        source_input_events.append(_source_input_event("atom_feed_no_usable_entries", message))
 
     release_history = _enrich_history(base_policy.release_history, atom_entries)
     policy = _policy_with_enrichment(
@@ -1019,6 +1197,7 @@ def generate_policy(
         atom_feed_xml=atom_feed_xml,
         source_fetch_status=effective_source_fetch_status,
         validation_warnings=tuple(dict.fromkeys(warnings)),
+        source_input_events=tuple(source_input_events),
         signature_status=signature_status,
         published_urls=published_urls,
     )
@@ -1198,6 +1377,560 @@ def _status_text(policy: ReleasePolicy) -> str:
     return "Warning state" if policy.validation_warnings else "Policy current"
 
 
+def _source_event_counts_for_policy(policy: ReleasePolicy) -> dict[str, int]:
+    source_diagnostics = policy.source_diagnostics if isinstance(policy.source_diagnostics, Mapping) else {}
+    raw_counts = source_diagnostics.get("event_counts") if isinstance(source_diagnostics, Mapping) else {}
+    counts = {"notice": 0, "warning": 0, "error": 0}
+    if isinstance(raw_counts, Mapping):
+        for key in counts:
+            try:
+                counts[key] = max(0, int(raw_counts.get(key) or 0))
+            except (TypeError, ValueError):
+                counts[key] = 0
+    return counts
+
+
+def _source_diagnostics_for_policy(policy: ReleasePolicy) -> Mapping[str, Any]:
+    source_diagnostics = policy.source_diagnostics if isinstance(policy.source_diagnostics, Mapping) else {}
+    return source_diagnostics
+
+
+def _short_diagnostic_text(value: Any, *, max_length: int = 150) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= max_length:
+        return text
+    boundary = text.rfind(" ", 0, max_length - 1)
+    if boundary < max_length // 2:
+        boundary = max_length - 1
+    return text[:boundary].rstrip(" ,;:-.") + "."
+
+
+def _source_diagnostic_event_severity(value: Any) -> str:
+    severity = str(value or "").strip().lower()
+    return severity if severity in {"notice", "warning", "error"} else "warning"
+
+
+def _source_diagnostic_event_label(kind: Any) -> str:
+    text = re.sub(r"[_-]+", " ", str(kind or "source diagnostic")).strip()
+    if not text:
+        return "Source diagnostic"
+    acronyms = {"kb", "oob", "esu", "lcu"}
+    return " ".join(part.upper() if part.lower() in acronyms else part.capitalize() for part in text.split())
+
+
+def _source_diagnostic_source_label(kind: Any) -> str:
+    text = str(kind or "").strip().lower()
+    if "atom" in text:
+        return "Atom feed"
+    if "manifest" in text:
+        return "Manifest"
+    if (
+        "freshness" in text
+        or "stale" in text
+        or "aging" in text
+        or "currency" in text
+        or "refresh" in text
+        or "policy_feed" in text
+    ):
+        return "Policy feed currency"
+    if "parser" in text or "parse" in text:
+        return "Parser"
+    if "release_health" in text or "current_versions" in text or "release_history" in text:
+        return "Release Health"
+    if "signature" in text:
+        return "Signature"
+    return "Source"
+
+
+def _source_diagnostic_timestamp(event: Mapping[str, Any]) -> str | None:
+    for key in ("occurred_at_utc", "fetched_at_utc", "published", "updated", "timestamp", "generated_at_utc"):
+        value = event.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    kind = event.get("kind")
+    severity = _source_diagnostic_event_severity(event.get("severity"))
+    title = _source_diagnostic_event_label(kind)
+    message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
+    tags: list[str] = []
+    for key, label in (
+        ("release", "Release"),
+        ("build", "Build"),
+    ):
+        value = event.get(key)
+        if value not in (None, ""):
+            tags.append(f"{label} {value}")
+    kb_article = event.get("kb_article")
+    if kb_article not in (None, ""):
+        kb_text = str(kb_article)
+        tags.append(kb_text if kb_text.upper().startswith("KB") else f"KB {kb_text}")
+    build_family = event.get("build_family")
+    if build_family not in (None, ""):
+        tags.append(f"Family {build_family}")
+    if event.get("affects_required_baseline"):
+        tags.append("Required baseline")
+    elif event.get("affects_broad_target"):
+        tags.append("Broad target")
+    timestamp = _source_diagnostic_timestamp(event)
+    if timestamp:
+        tags.append(timestamp)
+    return {
+        "severity": severity,
+        "title": title,
+        "source": _source_diagnostic_source_label(kind),
+        "message": message,
+        "tags": tuple(tags),
+    }
+
+
+def _source_diagnostic_row_from_text(severity: str, message: Any, *, source: str, title: str) -> dict[str, Any]:
+    return {
+        "severity": _source_diagnostic_event_severity(severity),
+        "title": title,
+        "source": source,
+        "message": _short_diagnostic_text(message),
+        "tags": (),
+    }
+
+
+def _raw_diagnostic_messages(source_diagnostics: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    values = source_diagnostics.get(key)
+    if not isinstance(values, list):
+        return ()
+    return tuple(str(item) for item in values if str(item or "").strip())
+
+
+def _freshness_diagnostic_row(generated_age_days: float) -> dict[str, Any] | None:
+    if generated_age_days >= DEFAULT_POLICY_STRICT_STALE_AGE_DAYS:
+        return _source_diagnostic_row_from_text(
+            "error",
+            (
+                "Published policy feed is stale at render time. Do not treat this data as "
+                "production-current until automation refresh succeeds."
+            ),
+            source="Policy feed currency",
+            title="Policy feed stale",
+        )
+    if generated_age_days >= DEFAULT_POLICY_WARNING_AGE_DAYS:
+        return _source_diagnostic_row_from_text(
+            "warning",
+            (
+                "Published policy feed refresh is due at render time. Verify automation health "
+                "before treating this data as production-current."
+            ),
+            source="Policy feed currency",
+            title="Policy feed refresh due",
+        )
+    return None
+
+
+def _source_diagnostic_rows(policy: ReleasePolicy, *, generated_age_days: float) -> tuple[dict[str, Any], ...]:
+    source_diagnostics = _source_diagnostics_for_policy(policy)
+    raw_events = source_diagnostics.get("events")
+    rows: list[dict[str, Any]] = []
+    if isinstance(raw_events, list):
+        rows.extend(
+            _source_diagnostic_row_from_event(event)
+            for event in raw_events
+            if isinstance(event, Mapping)
+        )
+
+    if not rows:
+        for message in _raw_diagnostic_messages(source_diagnostics, "errors"):
+            rows.append(_source_diagnostic_row_from_text("error", message, source="Source", title="Source error"))
+        for message in _raw_diagnostic_messages(source_diagnostics, "warnings"):
+            rows.append(_source_diagnostic_row_from_text("warning", message, source="Source", title="Source warning"))
+        for message in _raw_diagnostic_messages(source_diagnostics, "notices"):
+            rows.append(_source_diagnostic_row_from_text("notice", message, source="Source", title="Source notice"))
+        for message in policy.validation_warnings:
+            rows.append(
+                _source_diagnostic_row_from_text(
+                    "warning",
+                    message,
+                    source="Policy",
+                    title="Policy warning",
+                )
+            )
+
+    has_freshness_row = any(
+        str(row.get("source") or "") in {"Freshness", "Policy feed currency"} for row in rows
+    )
+    freshness_row = _freshness_diagnostic_row(generated_age_days)
+    if freshness_row is not None and not has_freshness_row:
+        rows.append(freshness_row)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (str(row.get("severity") or ""), str(row.get("title") or ""), str(row.get("message") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return tuple(deduped)
+
+
+def _excluded_release_diagnostic_rows(policy: ReleasePolicy) -> tuple[dict[str, Any], ...]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in policy.excluded_for_existing_devices:
+        version = str(entry.version or "").strip().upper()
+        if not version or version in seen:
+            continue
+        seen.add(version)
+        rows.append(
+            {
+                "severity": "notice",
+                "title": f"{version} excluded for existing devices",
+                "source": "Release policy",
+                "message": _excluded_release_summary(entry),
+                "tags": (
+                    f"Release {version}",
+                    "Existing devices",
+                    "Not broad target",
+                ),
+            }
+        )
+    return tuple(rows)
+
+
+def _display_source_event_counts(counts: Mapping[str, int], rows: tuple[dict[str, Any], ...]) -> dict[str, int]:
+    display_counts = {key: max(0, int(counts.get(key, 0))) for key in ("notice", "warning", "error")}
+    row_counts = {"notice": 0, "warning": 0, "error": 0}
+    for row in rows:
+        severity = _source_diagnostic_event_severity(row.get("severity"))
+        row_counts[severity] += 1
+    for severity, count in row_counts.items():
+        display_counts[severity] = max(display_counts[severity], count)
+    return display_counts
+
+
+def _placeholder_rows_for_unexplained_counts(
+    counts: Mapping[str, int],
+    rows: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    rows_by_severity = {"notice": 0, "warning": 0, "error": 0}
+    for row in rows:
+        rows_by_severity[_source_diagnostic_event_severity(row.get("severity"))] += 1
+    placeholders: list[dict[str, Any]] = []
+    for severity, title in (
+        ("error", "Error diagnostics reported"),
+        ("warning", "Warning diagnostics reported"),
+        ("notice", "Notice diagnostics reported"),
+    ):
+        missing = max(0, int(counts.get(severity, 0)) - rows_by_severity[severity])
+        if missing:
+            label = "entry" if missing == 1 else "entries"
+            placeholders.append(
+                _source_diagnostic_row_from_text(
+                    severity,
+                    f"{missing} {severity} diagnostic {label} reported without structured row details.",
+                    source="Source",
+                    title=title,
+                )
+            )
+    return tuple(placeholders)
+
+
+def _render_source_diagnostic_row(row: Mapping[str, Any]) -> str:
+    severity = _source_diagnostic_event_severity(row.get("severity"))
+    title = str(row.get("title") or "Source diagnostic")
+    source = str(row.get("source") or "Source")
+    message = str(row.get("message") or "")
+    tags = row.get("tags")
+    tag_items = ""
+    if isinstance(tags, tuple):
+        tag_items = "".join(f"<span>{escape(str(tag))}</span>" for tag in tags if str(tag or "").strip())
+    return (
+        f"<article class=\"diag-row {severity}\">"
+        "<span class=\"diag-stripe\" aria-hidden=\"true\"></span>"
+        "<div>"
+        "<div class=\"diag-row-head\">"
+        f"<span class=\"severity-badge {severity}\">{escape(severity.capitalize())}</span>"
+        f"<strong>{escape(title)}</strong>"
+        f"<span class=\"source-chip\">{escape(source)}</span>"
+        "</div>"
+        f"<p>{escape(message)}</p>"
+        f"<div class=\"diag-tags\">{tag_items}</div>"
+        "</div>"
+        "</article>"
+    )
+
+
+def _render_source_diagnostics_panel(
+    policy: ReleasePolicy,
+    counts: Mapping[str, int],
+    *,
+    generated_age_days: float,
+    generated_at_utc: str,
+) -> str:
+    base_rows = _source_diagnostic_rows(policy, generated_age_days=generated_age_days)
+    excluded_rows = _excluded_release_diagnostic_rows(policy)
+    counted_rows = (*base_rows, *excluded_rows)
+    rows = (*counted_rows, *_placeholder_rows_for_unexplained_counts(counts, counted_rows))
+    display_counts = _display_source_event_counts(counts, rows)
+    count_tiles = (
+        "<div class=\"diag-summary\" aria-label=\"Source diagnostic counts\">"
+        f"<div class=\"diag-tile notice\"><strong>{display_counts['notice']}</strong><span>Notices</span></div>"
+        f"<div class=\"diag-tile warning\"><strong>{display_counts['warning']}</strong><span>Warnings</span></div>"
+        f"<div class=\"diag-tile error\"><strong>{display_counts['error']}</strong><span>Errors</span></div>"
+        "</div>"
+    )
+    if not rows:
+        clear_row = _render_source_diagnostic_row(
+            {
+                "severity": "notice",
+                "title": "No source issues reported",
+                "source": "Source diagnostics",
+                "message": "Release Health, Atom feed, parser, and freshness checks have no warning or error events.",
+                "tags": ("No warnings", "No errors"),
+            }
+        )
+        details = f"<div class=\"diag-events diag-events-empty\">{clear_row}</div>"
+    else:
+        has_warning_or_error = any(
+            _source_diagnostic_event_severity(row.get("severity")) in {"warning", "error"}
+            for row in rows
+        )
+        lead_row = ""
+        if not has_warning_or_error:
+            clear_row = {
+                "severity": "notice",
+                "title": "No source issues reported",
+                "source": "Source diagnostics",
+                "message": "Release Health, Atom feed, parser, and freshness checks have no warning or error events.",
+                "tags": ("No warnings", "No errors"),
+            }
+            lead_row = _render_source_diagnostic_row(clear_row)
+        visible_rows = rows[:5]
+        hidden_rows = rows[5:]
+        rendered_visible = lead_row + "".join(_render_source_diagnostic_row(row) for row in visible_rows)
+        overflow = ""
+        if hidden_rows:
+            rendered_hidden = "".join(_render_source_diagnostic_row(row) for row in hidden_rows)
+            overflow = (
+                f"<details class=\"diag-more\"><summary>+{len(hidden_rows)} more</summary>"
+                f"<div class=\"diag-events\">{rendered_hidden}</div></details>"
+            )
+        details = f"<div class=\"diag-events\">{rendered_visible}</div>{overflow}"
+    return (
+        "<section class=\"panel span-7 source-diagnostics\"><h2>Source diagnostics</h2>"
+        f"{count_tiles}<div class=\"diag-feed\" role=\"region\" aria-label=\"Source diagnostic event feed\">"
+        f"{details}</div>{_render_source_tiles(policy, generated_at_utc=generated_at_utc)}</section>\n"
+    )
+
+
+def _program_version_from_generator(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "unknown"
+    return text.rsplit("/", 1)[-1] if "/" in text else text
+
+
+def _program_release_url(version: str | None) -> str | None:
+    text = str(version or "").strip()
+    if not _RELEASE_VERSION_PATTERN.fullmatch(text):
+        return None
+    return f"{GITHUB_RELEASES_BASE_URL}/v{text}"
+
+
+def _program_title_version_html(version: str | None) -> str:
+    text = str(version or "").strip() or "unknown"
+    url = _program_release_url(text)
+    escaped_text = escape(text)
+    label = f"Program Version {escaped_text}"
+    if url is None:
+        return (
+            '<span class="title-version-link">'
+            f'<span class="title-version-label">Program Version</span> {escaped_text}'
+            "</span>"
+        )
+    escaped_url = escape(url, quote=True)
+    return (
+        f'<a class="title-version-link mono" href="{escaped_url}" '
+        f'aria-label="{escape(label, quote=True)} release">'
+        '<span class="title-version-label">Program Version</span> '
+        f"{escaped_text}</a>"
+    )
+
+
+def _header_nav_html() -> str:
+    dashboard_icon = (
+        '<svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">'
+        '<path d="M20,4H6A2,2,0,0,0,4,6V20a2,2,0,0,0,2,2H20a2,2,0,0,0,2-2V6A2,2,0,0,0,20,4Z"/>'
+        '<path d="M42,4H28a2,2,0,0,0-2,2V20a2,2,0,0,0,2,2H42a2,2,0,0,0,2-2V6A2,2,0,0,0,42,4Z"/>'
+        '<path d="M20,26H6a2,2,0,0,0-2,2V42a2,2,0,0,0,2,2H20a2,2,0,0,0,2-2V28A2,2,0,0,0,20,26Z"/>'
+        '<path d="M42,26H28a2,2,0,0,0-2,2V42a2,2,0,0,0,2,2H42a2,2,0,0,0,2-2V28A2,2,0,0,0,42,26Z"/>'
+        "</svg>"
+    )
+    issue_icon = (
+        '<svg viewBox="0 0 512 512" aria-hidden="true" focusable="false">'
+        '<path d="M421.073 221.719c-.578 11.719-9.469 26.188-23.797 40.094v183.25c-.016 4.719-1.875 8.719-5.016 11.844-3.156 3.063-7.25 4.875-12.063 4.906H81.558c-4.781-.031-8.891-1.844-12.047-4.906-3.141-3.125-4.984-7.125-5-11.844V152.219c.016-4.703 1.859-8.719 5-11.844 3.156-3.063 7.266-4.875 12.047-4.906h158.609c12.828-16.844 27.781-34.094 44.719-49.906.078-.094.141-.188.219-.281H81.558c-18.75-.016-35.984 7.531-48.25 19.594-12.328 12.063-20.016 28.938-20 47.344v292.844c-.016 18.406 7.672 35.313 20 47.344C45.573 504.469 62.808 512 81.558 512h298.641c18.781 0 36.016-7.531 48.281-19.594 12.297-12.031 20-28.938 19.984-47.344V203.469c0 0-.125-.156-.328-.313-7.766 6.657-16.813 13-27.063 18.563z"/>'
+        '<path d="M498.058 0s-15.688 23.438-118.156 58.109C275.417 93.469 211.104 237.313 211.104 237.313c-15.484 29.469-76.688 151.906-76.688 151.906-16.859 31.625 14.031 50.313 32.156 17.656 34.734-62.688 57.156-119.969 109.969-121.594 77.047-2.375 129.734-69.656 113.156-66.531-21.813 9.5-69.906.719-41.578-3.656 68-5.453 109.906-56.563 96.25-60.031-24.109 9.281-46.594.469-51-2.188C513.386 138.281 498.058 0 498.058 0z"/>'
+        "</svg>"
+    )
+    wiki_icon = (
+        '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">'
+        '<path d="M5 0C3.343 0 2 1.343 2 3v10c0 1.657 1.343 3 3 3h9v-2H4v-2h10V0H5z"/>'
+        "</svg>"
+    )
+    items = (
+        ("Dashboard", DEFAULT_PUBLISHED_POLICY_URLS["landing"], dashboard_icon),
+        ("Write a Issue Ticket", "https://github.com/Avnsx/win11_release_guard/issues/new", issue_icon),
+        ("Wiki", "https://github.com/Avnsx/win11_release_guard/wiki", wiki_icon),
+    )
+    links = "".join(
+        (
+            f'<li><a href="{escape(href, quote=True)}" aria-label="{escape(label, quote=True)}" '
+            f'data-nav-label="{escape(label, quote=True)}">'
+            f"{icon}<span class=\"sr-only\">{escape(label)}</span></a></li>"
+        )
+        for label, href, icon in items
+    )
+    return (
+        '<nav class="header-nav" aria-label="Header navigation">'
+        '<span class="nav-hover-label" aria-hidden="true">Dashboard</span>'
+        f'<ul class="nav-inner">{links}</ul>'
+        "</nav>"
+    )
+
+
+def _format_bytes(value: Any) -> str:
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return "unavailable"
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KiB"
+    return f"{size / (1024 * 1024):.1f} MiB"
+
+
+def _hash_html(value: str | None) -> str:
+    short = _short_hash(value)
+    title = f' title="{escape(value, quote=True)}"' if value else ""
+    return f'<span class="mono hash"{title}>{escape(short)}</span>'
+
+
+def _source_status_for_url(policy: ReleasePolicy, url: str, *, generated_at_utc: str) -> Mapping[str, Any]:
+    label = _source_label(url)
+    if label == "Microsoft Release Health":
+        source = _source_diagnostics_for_policy(policy).get("release_health_html")
+    elif label == "Microsoft Atom feed":
+        source = _source_diagnostics_for_policy(policy).get("atom_feed")
+    else:
+        source = None
+    if not isinstance(source, Mapping):
+        return {
+            "status": "recorded",
+            "fetched_at_utc": generated_at_utc,
+            "bytes": None,
+        }
+    return source
+
+
+def _source_status_class(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"ok", "success", "valid", "healthy", "current"}:
+        return "ok"
+    if any(token in text for token in ("warn", "degraded", "aging", "partial", "stale")):
+        return "warning"
+    if any(token in text for token in ("error", "err", "fail", "invalid", "blocked", "unavailable")):
+        return "error"
+    return "unknown"
+
+
+def _render_source_tiles(policy: ReleasePolicy, *, generated_at_utc: str) -> str:
+    if not policy.source_urls:
+        return (
+            "<div class=\"source-health\" aria-label=\"Policy source status\">"
+            "<h3>Source health</h3><div class=\"source-health-grid\">"
+            "<div class=\"source-tile unknown\"><div class=\"source-tile-head\">"
+            "<strong>None recorded</strong><span class=\"source-status unknown\">unknown</span></div>"
+            "<span>No source URLs are present in this policy.</span></div>"
+            "</div></div>"
+        )
+    items: list[str] = []
+    for url in policy.source_urls:
+        label = _source_label(url)
+        status = _source_status_for_url(policy, url, generated_at_utc=generated_at_utc)
+        fetched_at = str(status.get("fetched_at_utc") or "")
+        fetched_at_html = _time_with_epoch_copy_html(fetched_at, label=f"{label} UTC")
+        status_text = str(status.get("status") or "unknown")
+        status_class = _source_status_class(status_text)
+        bytes_text = _format_bytes(status.get("bytes"))
+        escaped_url = escape(url, quote=True)
+        items.append(
+            f"<div class=\"source-tile {status_class}\">"
+            "<div class=\"source-tile-head\">"
+            f"<strong>{escape(label)}</strong>"
+            f"<span class=\"source-status {status_class}\">{escape(status_text)}</span>"
+            "</div>"
+            f"<a href=\"{escaped_url}\" title=\"{escaped_url}\">{escape(url)}</a>"
+            "<dl class=\"mini-kv\">"
+            f"<dt>Fetched:</dt><dd>{fetched_at_html}</dd>"
+            f"<dt>Bytes:</dt><dd>{escape(bytes_text)}</dd>"
+            "</dl>"
+            "</div>"
+        )
+    return (
+        "<div class=\"source-health\" aria-label=\"Policy source status\">"
+        "<h3>Source health</h3>"
+        f"<div class=\"source-health-grid\">{''.join(items)}</div></div>"
+    )
+
+
+def _render_endpoint_links() -> str:
+    endpoints = (
+        (
+            "Signed policy JSON",
+            "windows-release-policy.json",
+            "Primary signed policy document used by automation and fleet dashboards.",
+        ),
+        (
+            "Detached signature",
+            "windows-release-policy.json.sig",
+            "Ed25519 signature that lets clients verify the policy before trusting it.",
+        ),
+        (
+            "Policy manifest",
+            "policy-manifest.json",
+            "Compact metadata for hashes, freshness thresholds, source state, and API aliases.",
+        ),
+        (
+            "API v1 policy alias",
+            "api/v1/policy.json",
+            "Backward-compatible policy endpoint for stable reader integrations.",
+        ),
+        (
+            "API v1 manifest alias",
+            "api/v1/manifest.json",
+            "Backward-compatible manifest endpoint for stable reader integrations.",
+        ),
+    )
+    return "".join(
+        (
+            f'<a class="api-endpoint-row" href="{escape(endpoint, quote=True)}">'
+            f"<span><strong>{escape(title)}</strong><em>{escape(description)}</em></span>"
+            f"<code>/{escape(endpoint)}</code></a>"
+        )
+        for title, endpoint, description in endpoints
+    )
+
+
+def _safe_json_script_payload(data: Mapping[str, Any]) -> str:
+    return (
+        json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
+
+
 def render_policy_index(
     policy: ReleasePolicy,
     *,
@@ -1206,27 +1939,41 @@ def render_policy_index(
 ) -> str:
     target = policy.broad_target_existing_devices
     policy_hash = _sha256_hex(policy_bytes)
-    generated_human = _generated_at_human(policy.generated_at_utc)
-    signature_algorithm = _signature_field(signature, "algorithm") or "unavailable"
-    key_id = _signature_field(signature, "key_id") or "legacy default key"
-    status = _status_text(policy)
-    status_class = "ok" if status == "Policy current" else "warning"
-    excluded_items = "\n".join(
-        (
-            "          <li>"
-            f"<strong>{escape(entry.version)} excluded for existing devices</strong>"
-            f"<span>{escape(_excluded_release_summary(entry))}</span>"
-            "</li>"
-        )
-        for entry in policy.excluded_for_existing_devices
-    ) or "          <li><strong>None</strong><span>No existing-device exclusions in this policy.</span></li>"
-    source_items = "\n".join(
-        f'          <li><span>{escape(_source_label(url))}</span><a href="{escape(url)}">{escape(url)}</a></li>'
-        for url in policy.source_urls
+    generated_at_utc = policy.generated_at_utc or _utc_now()
+    generated_human = _generated_at_human(generated_at_utc)
+    generated_age_days = _generated_age_days(generated_at_utc)
+    signature_attached = signature is not None
+    raw_signature_status = str(policy.metadata.get("signature_status") or "unavailable")
+    if signature_attached:
+        signature_algorithm = _signature_field(signature, "algorithm") or "unavailable"
+        key_id = _signature_field(signature, "key_id") or "legacy default key"
+        signature_status = raw_signature_status
+        trust_indicator = "Signed policy trust"
+        trust_class = ""
+    else:
+        signature_algorithm = "not attached"
+        key_id = "not attached"
+        signature_status = "unsigned local preview" if raw_signature_status == "unsigned" else raw_signature_status
+        trust_indicator = "Unsigned local preview" if signature_status == "unsigned local preview" else "Signature metadata"
+        trust_class = " warning" if signature_status == "unsigned local preview" else ""
+    source_event_counts = _source_event_counts_for_policy(policy)
+    source_diagnostics_panel = _render_source_diagnostics_panel(
+        policy,
+        source_event_counts,
+        generated_age_days=generated_age_days,
+        generated_at_utc=generated_at_utc,
     )
+    program_version = _program_version_from_generator(GENERATOR_VERSION)
+    workflow_run = os.environ.get("GITHUB_RUN_ID") or "not available in local render"
+    endpoint_links = _render_endpoint_links()
+    freshness_data = {
+        "generated_at_utc": generated_at_utc,
+        **freshness_thresholds(generated_at_utc),
+        "freshness_policy": freshness_policy_metadata(),
+    }
     warning_items = "\n".join(f"<li>{escape(warning)}</li>" for warning in policy.validation_warnings)
     warning_block = (
-        f"      <section class=\"panel span-2\"><h2>Warnings</h2><ul class=\"warnings\">{warning_items}</ul></section>"
+        f"      <section class=\"panel span-12\"><h2>Warnings</h2><ul class=\"warnings\">{warning_items}</ul></section>"
         if warning_items
         else ""
     )
@@ -1240,62 +1987,225 @@ def render_policy_index(
         "<head>\n"
         "  <meta charset=\"utf-8\">\n"
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "  <title>win11_release_guard</title>\n"
+        "  <title>Windows 11 Release Guard</title>\n"
         "  <style>\n"
-        "    :root{color-scheme:light;--bg:#f6f8fb;--ink:#182230;--muted:#667085;--line:#d7dee8;--panel:#ffffff;--accent:#0f766e;--warn:#b45309;--code:#0b4a6f}\n"
-        "    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.45}\n"
-        "    main{max-width:1120px;margin:0 auto;padding:32px 20px}header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}\n"
-        "    h1{font-size:32px;line-height:1.1;margin:0 0 6px}p{margin:0}.subtitle{font-size:16px;color:var(--muted)}\n"
-        "    .badge{border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:var(--panel);font-weight:700;white-space:nowrap}.badge.ok{color:var(--accent)}.badge.warning{color:var(--warn)}\n"
-        "    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}.span-2{grid-column:span 2}.span-4{grid-column:span 4}\n"
-        "    h2{font-size:14px;text-transform:uppercase;letter-spacing:0;color:var(--muted);margin:0 0 12px}.metric{font-size:30px;font-weight:760;line-height:1}.label{display:block;color:var(--muted);font-size:13px;margin-top:6px}\n"
-        "    .kv{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:650;overflow-wrap:anywhere}.mono{font-family:Consolas,Menlo,monospace;color:var(--code)}\n"
-        "    ul.clean{list-style:none;margin:0;padding:0;display:grid;gap:10px}ul.clean li{display:grid;gap:3px}ul.clean span{color:var(--muted);font-size:13px}a{color:#075985;text-decoration:none}a:hover{text-decoration:underline}\n"
-        "    .sources li{grid-template-columns:minmax(170px,220px) 1fr;align-items:start}.links{display:flex;flex-wrap:wrap;gap:10px}.links a{border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:#f8fafc;font-family:Consolas,Menlo,monospace;font-size:13px}\n"
-        "    footer{margin-top:16px;color:var(--muted);font-size:13px}@media(max-width:760px){header{display:block}.badge{display:inline-block;margin-top:14px}.grid{grid-template-columns:1fr}.span-2,.span-4{grid-column:auto}.kv{grid-template-columns:1fr}.sources li{grid-template-columns:1fr}}\n"
+        "    :root{color-scheme:light;--bg:#f4f8fd;--ink:#172033;--muted:#667085;--soft:#f8fbff;--line:#d8e3f0;--panel:#ffffff;--blue:#0078d4;--blue-strong:#0067c0;--blue-soft:#e8f3ff;--ok:#107c10;--ok-soft:#eaf7ed;--warn:#b45309;--warn-soft:#fff4df;--err:#b42318;--err-soft:#fff0ed;--unknown:#64748b;--unknown-soft:#f1f5f9;--code:#063f63;--shadow:0 18px 55px rgba(31,79,143,.12)}\n"
+        "    *{box-sizing:border-box}html,body{max-width:100%;overflow-x:hidden}body{margin:0;min-height:100vh;background:linear-gradient(145deg,#ffffff 0%,#f5f9ff 42%,#edf4fb 100%);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.45}\n"
+        "    main{max-width:1180px;margin:0 auto;padding:28px 24px 24px}.masthead{margin-bottom:16px;padding:20px 22px;border:1px solid rgba(216,227,240,.95);border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(248,252,255,.86));box-shadow:var(--shadow);backdrop-filter:blur(18px)}\n"
+        "    .brand{display:flex;gap:16px;align-items:center;min-width:0}.brand>div:last-child{min-width:0;flex:1}.brand-layout{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:stretch}.brand-copy{min-width:0}.header-actions{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:10px;min-width:0}.winmark{width:58px;height:58px;display:grid;grid-template-columns:1fr 1fr;gap:3px;flex:0 0 auto}.winmark span{background:linear-gradient(145deg,#0091ff,#0067c0);border-radius:2px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}\n"
+        "    .title-line h1{font-size:34px;line-height:1.08;margin:0 0 6px;font-weight:760;overflow-wrap:anywhere}.subtitle-line{display:flex;align-items:baseline;gap:16px;min-width:0}.title-version-link{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:13px;font-weight:760;color:#0067c0;white-space:nowrap;flex:0 0 auto}.title-version-link:after{content:'\\2197';font-family:Segoe UI,Arial,sans-serif;font-size:11px}.title-version-label{color:var(--muted);font-family:Segoe UI,Arial,sans-serif;font-weight:700}p{margin:0}.subtitle{font-size:15px;color:var(--muted);overflow-wrap:anywhere;min-width:0}.eyebrow{display:block;margin-bottom:5px;color:#2563a7;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}\n"
+        "    .header-nav{--item-size:38px;--nav-gap:4px;--enter-nav:0;--label-x:19px;--label-y:0px;position:relative;isolation:isolate}.header-nav ul{list-style:none;margin:0;padding:0}.header-nav .nav-inner{display:flex;gap:var(--nav-gap);white-space:nowrap;border:1px solid rgba(194,213,235,.95);border-radius:999px;background:rgba(255,255,255,.88);box-shadow:0 9px 18px rgba(31,79,143,.09);padding:3px;backdrop-filter:blur(12px)}.header-nav .nav-inner li{display:flex}.header-nav .nav-inner a{width:var(--item-size);height:34px;display:grid;place-items:center;border-radius:999px;color:#667085;text-decoration:none;transition:color .16s ease,background-color .16s ease,transform .16s ease}.header-nav .nav-inner a:hover,.header-nav .nav-inner a:focus-visible{color:var(--blue-strong);background:linear-gradient(180deg,#f6fbff,#e8f3ff);text-decoration:none;transform:translateY(-1px)}.header-nav .nav-inner a:focus-visible{outline:3px solid rgba(0,120,212,.24);outline-offset:3px}.header-nav svg{width:20px;height:20px;display:block;fill:currentColor}.nav-hover-label{position:absolute;left:0;bottom:calc(100% + 6px);max-width:180px;opacity:var(--enter-nav);pointer-events:none;white-space:nowrap;border:1px solid rgba(184,207,234,.95);border-radius:999px;background:rgba(239,246,255,.96);box-shadow:0 9px 18px rgba(31,79,143,.12);color:#075985;font-size:11px;font-weight:780;line-height:1;padding:7px 10px;transform:translate(calc(var(--label-x) - 50%),calc((1 - var(--enter-nav)) * 4px + var(--label-y)));transition:opacity .15s ease,transform .2s ease}.header-nav:not(:hover):not(:focus-within){--enter-nav:0}\n"
+        "    .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.kpi-grid{margin-bottom:16px}.dashboard-grid{align-items:stretch}.panel{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(248,252,255,.9));border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0;box-shadow:0 10px 30px rgba(31,79,143,.08)}.panel *{min-width:0}.panel p,.panel span,.panel dd,.panel strong{overflow-wrap:anywhere}.panel.status-card{display:grid;gap:13px}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:span 12}\n"
+        "    h2{font-size:12px;text-transform:uppercase;letter-spacing:0;color:var(--muted);margin:0 0 12px}.metric{font-size:31px;font-weight:780;line-height:1;color:#102a43}.metric.blue{color:var(--blue)}.label{display:block;color:var(--muted);font-size:13px;margin-top:6px}.mono{font-family:Consolas,Menlo,monospace;color:var(--code);overflow-wrap:anywhere;word-break:break-word}\n"
+        "    .kv{display:grid;grid-template-columns:minmax(126px,160px) 1fr;gap:9px 14px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:650;overflow-wrap:anywhere}.kv dd span{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-weight:500}.compact-kv{grid-template-columns:1fr;gap:4px}.compact-kv dt{font-size:12px}.compact-kv dd{margin:0 0 8px}.metadata{border-top:1px solid var(--line);padding-top:12px}.refresh{border-left:3px solid var(--blue);background:linear-gradient(90deg,var(--blue-soft),rgba(255,255,255,0));padding-left:12px}.time-copy{display:inline-flex!important;align-items:center;gap:6px;max-width:100%;min-width:0;color:inherit;font-size:inherit}.time-copy time{overflow-wrap:anywhere}.time-copy.unavailable{color:var(--muted);font-size:13px}.epoch-copy{display:inline-grid;place-items:center;width:24px;height:24px;min-width:24px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,.86);color:#64748b;cursor:pointer;padding:0;box-shadow:0 1px 1px rgba(15,23,42,.04)}.epoch-copy:hover{border-color:#9cccf6;color:var(--blue-strong);background:#fff}.epoch-copy:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.epoch-copy[data-copy-state=\"copied\"]{border-color:#b9e6c4;color:var(--ok);background:var(--ok-soft)}.epoch-copy[data-copy-state=\"failed\"]{border-color:#f6b7ad;color:var(--err);background:var(--err-soft)}.epoch-copy svg{width:14px;height:14px;display:block;pointer-events:none}\n"
+        "    .freshness-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.freshness-state{display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);padding:6px 10px;font-size:13px;font-weight:750;color:var(--unknown);background:var(--unknown-soft)}.freshness-state.current{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.freshness-state.refresh-due{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.freshness-state.stale{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.freshness-state.unknown{color:var(--unknown);background:var(--unknown-soft);border-color:var(--line)}.freshness-metric{font-size:26px;font-weight:780;color:#102a43}.freshness-detail{color:var(--muted);font-size:13px}.thresholds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.thresholds div{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:10px}.thresholds strong{display:block;font-size:17px}.thresholds span{display:block;color:var(--muted);font-size:12px}\n"
+        "    ul.clean{list-style:none;margin:0;padding:0;display:grid;gap:10px}ul.clean li{display:grid;gap:3px}ul.clean span{color:var(--muted);font-size:13px}a{color:#075985;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px;border-radius:6px}.version-link{display:inline-flex;align-items:center;gap:6px;color:#0067c0;font-weight:760}.version-link:after{content:'\\2197';font-family:Segoe UI,Arial,sans-serif;font-size:12px}.hash{display:inline-block;max-width:100%}\n"
+        "    .trust-indicator{display:inline-flex;align-items:center;gap:6px;width:max-content;border:1px solid #b9e6c4;border-radius:999px;background:var(--ok-soft);color:var(--ok);padding:5px 9px;font-size:12px;font-weight:800;white-space:nowrap}.trust-indicator:before{content:'';width:7px;height:7px;border-radius:999px;background:currentColor;box-shadow:0 0 0 3px rgba(16,124,16,.12)}.trust-indicator.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.trust-indicator.warning:before{box-shadow:0 0 0 3px rgba(180,83,9,.14)}.signature-panel{display:flex;flex-direction:column;gap:12px;padding:16px}.signature-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.signature-head h2{margin:0}.signature-status-card{display:grid;gap:3px;border:1px solid #b9e6c4;border-radius:8px;background:linear-gradient(180deg,var(--ok-soft),#f8fff9);padding:12px}.signature-status-card.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.signature-status-card span{color:var(--muted);font-size:12px}.signature-status-card strong{color:#172033;font-size:16px;line-height:1.25}.signature-kv{display:grid;gap:8px;margin:0}.signature-kv div{display:grid;grid-template-columns:minmax(112px,34%) minmax(0,1fr);gap:10px;align-items:baseline;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:9px 10px}.signature-kv dt{color:var(--muted);font-size:12px}.signature-kv dd{margin:0;color:#172033;font-weight:720;overflow-wrap:anywhere}.signature-kv .mono{font-size:13px}.source-health{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px}.source-health h3{margin:0;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0}.source-health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.source-tile{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0;background:var(--soft)}.source-tile.ok{border-color:#b9e6c4;background:linear-gradient(180deg,var(--ok-soft),#f8fff9)}.source-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.source-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.source-tile.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.source-tile-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}.source-status{border:1px solid var(--line);border-radius:999px;background:#fff;color:#475569;padding:2px 7px;font-size:11px;font-weight:750}.source-status.ok{color:var(--ok);border-color:#b9e6c4;background:#fff}.source-status.warning{color:var(--warn);border-color:#f6d493;background:#fff}.source-status.error{color:var(--err);border-color:#f6b7ad;background:#fff}.source-status.unknown{color:var(--unknown);background:#fff}.source-tile a{display:block;margin:8px 0 10px;font-size:13px}.source-tile>span{display:block;margin-top:4px;color:var(--muted);font-size:13px}.mini-kv{display:grid;grid-template-columns:80px minmax(0,1fr);gap:5px 10px;margin:0;font-size:12px}.mini-kv dt{color:var(--muted)}.mini-kv dd{margin:0;font-weight:650;overflow-wrap:anywhere}\n"
+        "    .source-diagnostics{display:flex;flex-direction:column;gap:10px;min-height:0;align-self:start}.diag-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:0 0 auto}.diag-tile{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f2f7ff);padding:8px 10px}.diag-tile strong{display:block;font-size:22px;line-height:1}.diag-tile span{color:var(--muted);font-size:12px}.diag-tile.notice{border-color:#bfdbfe;background:linear-gradient(180deg,var(--blue-soft),#f8fbff)}.diag-tile.notice strong{color:var(--blue)}.diag-tile.notice span{color:var(--blue-strong);font-weight:650}.diag-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.diag-tile.warning strong{color:var(--warn)}.diag-tile.warning span{color:var(--warn);font-weight:650}.diag-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.diag-tile.error strong{color:var(--err)}.diag-tile.error span{color:var(--err);font-weight:650}.diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #d8dee8;border-radius:8px;background:linear-gradient(180deg,#f6f7f9,#eef1f5);padding:14px 11px 24px 14px;box-shadow:inset 0 1px 2px rgba(15,23,42,.06);scrollbar-width:thin;scrollbar-color:#a8b0bc #eef1f5}.diag-feed::-webkit-scrollbar{width:10px}.diag-feed::-webkit-scrollbar-track{background:#eef1f5;border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#a8b0bc;border-radius:999px;border:2px solid #eef1f5}.diag-events{display:grid;gap:10px;padding:2px 2px 24px}.diag-events-empty .diag-row{background:linear-gradient(90deg,#ffffff,#f8fafc)}.diag-row{display:grid;grid-template-columns:4px minmax(0,1fr);gap:8px;border:1px solid var(--line);border-radius:8px;background:#fbfdff;padding:8px}.diag-row.warning{border-color:#f6d493;background:linear-gradient(90deg,#fffaf0,#ffffff)}.diag-row.error{border-color:#f6b7ad;background:linear-gradient(90deg,#fff8f6,#ffffff)}.diag-row p{margin:3px 0 0;color:#475569;font-size:13px;line-height:1.35}.diag-stripe{display:block;border-radius:999px;background:var(--blue)}.diag-row.warning .diag-stripe{background:var(--warn)}.diag-row.error .diag-stripe{background:var(--err)}.diag-row-head{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.diag-row-head strong{font-size:13px}.severity-badge,.source-chip,.diag-tags span{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:700;background:#fff;color:#475569}.severity-badge.notice{color:var(--blue-strong);background:var(--blue-soft);border-color:#bfdbfe}.severity-badge.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.severity-badge.error{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.source-chip{font-weight:650}.diag-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.diag-tags:empty{display:none}.diag-more{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:8px}.diag-more summary{cursor:pointer;color:#075985;font-size:13px;font-weight:750}.diag-more .diag-events{margin-top:8px}\n"
+        "    .programmatic-api{display:flex;flex-direction:column;justify-content:flex-start}.api-endpoints{display:grid;gap:9px}.api-endpoint-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;color:inherit;text-decoration:none}.api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}.api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px}.api-endpoint-row strong{display:block;color:#172033;font-size:13px;line-height:1.25}.api-endpoint-row em{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-style:italic;font-weight:500;line-height:1.35}.api-endpoint-row code{font-family:Consolas,Menlo,monospace;font-size:12px;color:var(--code);white-space:normal;text-align:right;overflow-wrap:anywhere}.api-note{margin-bottom:12px}.warnings{margin:0;padding-left:18px;color:var(--warn)}footer{display:grid;gap:7px;justify-items:center;margin-top:16px;color:var(--muted);font-size:12px;line-height:1.45;text-align:center}.footer-note{max-width:900px;margin:0}.footer-disclaimer,.footer-owner{color:#64748b}.footer-source{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 6px}.footer-github{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.78);padding:2px 8px;color:#075985;font-weight:750;white-space:nowrap}.footer-license-basic{color:#075985;font-weight:650;text-decoration:none}.footer-license-basic:hover,.footer-license-basic:focus-visible{text-decoration:underline}.github-icon{width:13px;height:13px;display:block;flex:0 0 auto}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}\n"
+        "    @media(min-width:901px){#live-freshness-panel{grid-column:1/span 5;grid-row:1/span 2}.source-diagnostics{grid-column:6/span 7;grid-row:1/span 2}.signature-panel{grid-column:1/span 5;grid-row:3}.programmatic-api{grid-column:6/span 7;grid-row:3}}\n"
+        "    @media(max-width:900px){.grid{grid-template-columns:repeat(6,minmax(0,1fr))}.span-3,.span-4{grid-column:span 3}.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:span 6}.source-health-grid{grid-template-columns:1fr}.brand-layout{grid-template-columns:1fr}.header-actions{align-items:flex-start}.header-nav{--item-size:37px}.nav-hover-label{display:none}.title-version-link{margin-left:0}}\n"
+        "    @media(min-width:741px) and (max-width:900px){.signature-panel{grid-column:span 3}.programmatic-api{grid-column:span 3}.api-endpoint-row{grid-template-columns:1fr}.api-endpoint-row code{text-align:left}}\n"
+        "    @media(max-width:740px){.signature-panel,.programmatic-api{grid-column:1/-1}.signature-head{display:grid}.signature-kv div,.api-endpoint-row{grid-template-columns:1fr}.api-endpoint-row code{text-align:left}}\n"
+        "    @media(max-width:640px){main{padding:18px 12px}.masthead{padding:16px}.brand{display:grid;grid-template-columns:44px minmax(0,1fr);gap:14px;align-items:start}.brand-layout{gap:12px}.winmark{width:44px;height:44px}.title-line h1{font-size:23px}.subtitle-line{flex-wrap:wrap;gap:5px 12px}.header-nav{--item-size:35px;max-width:100%}.header-nav .nav-inner{width:max-content;max-width:100%;gap:3px;padding:3px}.header-nav .nav-inner a{height:32px}.header-nav svg{width:19px;height:19px}.title-version-link{font-size:12px;margin-left:0}.subtitle{font-size:14px;max-width:240px}.grid{grid-template-columns:1fr;gap:12px}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:auto}.kv{grid-template-columns:1fr}.diag-summary,.thresholds{grid-template-columns:1fr}.diag-feed{height:300px;min-height:300px;max-height:300px}}\n"
         "  </style>\n"
         "</head>\n"
         "<body>\n"
         "  <main>\n"
-        "    <header>\n"
-        "      <div><h1>win11_release_guard</h1><p class=\"subtitle\">Windows release policy feed</p></div>\n"
-        f"      <div class=\"badge {status_class}\">{escape(status)}</div>\n"
+        "    <header class=\"masthead\">\n"
+        "      <div class=\"brand\"><div class=\"winmark\" aria-hidden=\"true\"><span></span><span></span><span></span><span></span></div><div class=\"brand-layout\"><div class=\"brand-copy\"><span class=\"eyebrow\">Signed public policy feed</span><div class=\"title-line\"><h1>Windows 11 Release Guard</h1></div><div class=\"subtitle-line\"><p class=\"subtitle\">Broad-fleet Windows 11 release and quality baseline dashboard.</p></div></div><div class=\"header-actions\">"
+        f"{_header_nav_html()}"
+        f"{_program_title_version_html(program_version)}"
+        "</div></div></div>\n"
         "    </header>\n"
-        "    <section class=\"grid\">\n"
-        "      <article class=\"panel\"><h2>Release</h2>"
-        f"<div class=\"metric\">{escape(target_release)}</div><span class=\"label\">broad target</span></article>\n"
-        "      <article class=\"panel\"><h2>Build family</h2>"
+        "    <section class=\"grid kpi-grid\" id=\"policy-summary\" aria-label=\"Policy summary\">\n"
+        "      <article class=\"panel span-3\"><h2>Broad target</h2>"
+        f"<div class=\"metric blue\">{escape(target_release)}</div><span class=\"label\">existing Windows 11 devices</span></article>\n"
+        "      <article class=\"panel span-3\"><h2>Build family</h2>"
         f"<div class=\"metric\">{escape(target_family)}</div><span class=\"label\">Windows build line</span></article>\n"
-        "      <article class=\"panel\"><h2>Latest observed</h2>"
-        f"<div class=\"metric\">{escape(target_latest_observed or 'unknown')}</div><span class=\"label\">Microsoft current table</span></article>\n"
-        "      <article class=\"panel\"><h2>Required baseline</h2>"
+        "      <article class=\"panel span-3\"><h2>Latest observed</h2>"
+        f"<div class=\"metric\">{escape(target_latest_observed or 'unknown')}</div><span class=\"label\">Microsoft Current Versions table</span></article>\n"
+        "      <article class=\"panel span-3\"><h2>Required baseline</h2>"
         f"<div class=\"metric\">{escape(target_baseline or 'unknown')}</div><span class=\"label\">{escape(policy.quality_policy.value)} floor</span></article>\n"
-        "      <section class=\"panel span-2\"><h2>Excluded release</h2><ul class=\"clean\">"
-        f"{excluded_items}</ul></section>\n"
-        "      <section class=\"panel span-2\"><h2>Last updated</h2><dl class=\"kv\">"
-        f"<dt>Berlin</dt><dd>{escape(generated_human)}</dd>"
-        f"<dt>UTC</dt><dd><time datetime=\"{escape(policy.generated_at_utc)}\">{escape(policy.generated_at_utc)}</time></dd>"
+        "    </section>\n"
+        "    <section class=\"grid dashboard-grid\" aria-label=\"Policy operations dashboard\">\n"
+        "      <section class=\"panel span-5 status-card\" id=\"live-freshness-panel\" aria-label=\"Policy feed currency\"><div class=\"freshness-head\"><h2>Policy Feed Currency</h2><span id=\"live-freshness-state\" class=\"freshness-state unknown\" aria-live=\"polite\" aria-label=\"Published policy feed currency: Unknown\">Unknown</span></div>"
+        "<span class=\"label\">Published feed age</span>"
+        f"<div id=\"live-generated-age\" class=\"freshness-metric\" aria-live=\"polite\">{generated_age_days:g} days</div>"
+        "<p id=\"live-freshness-detail\" class=\"freshness-detail\">Render-time fallback. Browser recalculates published policy feed age from the GitHub Actions generated timestamp when JavaScript is available.</p>"
+        f"<div class=\"thresholds\"><div><strong>{DEFAULT_POLICY_WARNING_AGE_DAYS} days</strong><span>refresh-due threshold</span></div><div><strong>{DEFAULT_POLICY_STRICT_STALE_AGE_DAYS} days</strong><span>stale threshold</span></div></div>"
+        "<dl class=\"kv metadata\">"
+        f"<dt>Berlin, Germany:</dt><dd class=\"refresh\">{escape(generated_human)}<span>GitHub workflow static feed generation</span></dd>"
+        f"<dt>Time (UTC):</dt><dd>{_time_with_epoch_copy_html(generated_at_utc, label='policy generated UTC')}</dd>"
+        f"<dt>Published feed age:</dt><dd>{generated_age_days:g} days at render-time fallback</dd>"
+        f"<dt>Workflow refresh:</dt><dd>{escape(workflow_run)}<span>last automatic publish run, when generated in GitHub Actions</span></dd>"
+        "<noscript><dt>Browser update:</dt><dd>JavaScript disabled; published feed age cannot recalculate in the browser.</dd></noscript>"
         "</dl></section>\n"
-        "      <section class=\"panel span-2\"><h2>Sources</h2><ul class=\"clean sources\">"
-        f"{source_items}</ul></section>\n"
-        "      <section class=\"panel span-2\"><h2>Signature</h2><dl class=\"kv\">"
-        f"<dt>Algorithm</dt><dd>{escape(signature_algorithm)}</dd>"
-        f"<dt>key_id</dt><dd class=\"mono\">{escape(key_id)}</dd>"
-        f"<dt>Policy SHA-256</dt><dd class=\"mono\">{escape(_short_hash(policy_hash))}</dd>"
+        f"{source_diagnostics_panel}"
+        f"      <section class=\"panel span-5 signature-panel\"><div class=\"signature-head\"><h2>Signature</h2><span class=\"trust-indicator{trust_class}\">{escape(trust_indicator)}</span></div>"
+        f"<div class=\"signature-status-card{trust_class}\"><span>Document trust state</span><strong>{escape(signature_status)}</strong><span>Detached signature metadata for the published policy artifact.</span></div>"
+        "<dl class=\"signature-kv\">"
+        f"<div><dt>Algorithm</dt><dd>{escape(signature_algorithm)}</dd></div>"
+        f"<div><dt>key_id</dt><dd class=\"mono\">{escape(key_id)}</dd></div>"
+        f"<div><dt>Policy SHA-256</dt><dd>{_hash_html(policy_hash)}</dd></div>"
+        f"<div><dt>Signature status</dt><dd>{escape(signature_status)}</dd></div>"
         "</dl></section>\n"
         f"{warning_block}\n"
-        "      <section class=\"panel span-4\"><h2>Programmatic API</h2>"
-        "<p class=\"subtitle\">Public JSON policy artifacts for automation and fleet dashboards.</p>"
-        "<div class=\"links\">"
-        "<a href=\"windows-release-policy.json\">/windows-release-policy.json</a>"
-        "<a href=\"windows-release-policy.json.sig\">/windows-release-policy.json.sig</a>"
-        "<a href=\"policy-manifest.json\">/policy-manifest.json</a>"
-        "<a href=\"api/v1/policy.json\">/api/v1/policy.json</a>"
-        "<a href=\"api/v1/manifest.json\">/api/v1/manifest.json</a>"
+        "      <section class=\"panel span-7 programmatic-api\"><h2>Programmatic API</h2>"
+        "<p class=\"subtitle api-note\">Public JSON policy artifacts for fleet dashboards and scripts.</p>"
+        "<div class=\"api-endpoints\">"
+        f"{endpoint_links}"
         "</div></section>\n"
         "    </section>\n"
-        "    <footer>Programmatic JSON endpoint for automation and fleet dashboards.</footer>\n"
+        f"    {_footer_html()}\n"
         "  </main>\n"
+        f"  <script type=\"application/json\" id=\"policy-freshness-data\">{_safe_json_script_payload(freshness_data)}</script>\n"
+        "  <script>\n"
+        "    (function(){\n"
+        "      var dataNode=document.getElementById('policy-freshness-data');\n"
+        "      var stateNode=document.getElementById('live-freshness-state');\n"
+        "      var ageNode=document.getElementById('live-generated-age');\n"
+        "      var detailNode=document.getElementById('live-freshness-detail');\n"
+        "      var uiActive=true;\n"
+        "      var uiFrames=[];\n"
+        "      var uiTimers=[];\n"
+        "      function reportUiError(scope,error){\n"
+        "        if(document.documentElement){document.documentElement.setAttribute('data-ui-last-error',scope);}\n"
+        "        if(window.console&&console.warn){console.warn('Windows 11 Release Guard UI '+scope+' failed',error);}\n"
+        "      }\n"
+        "      function guard(scope,fn){try{return fn();}catch(error){reportUiError(scope,error);return undefined;}}\n"
+        "      function safeSetTimeout(fn,delay){\n"
+        "        if(!uiActive){return 0;}\n"
+        "        var id=window.setTimeout(function(){if(uiActive){guard('timer callback',fn);}},delay);\n"
+        "        uiTimers.push(['timeout',id]);\n"
+        "        return id;\n"
+        "      }\n"
+        "      function safeSetInterval(fn,delay){\n"
+        "        if(!uiActive){return 0;}\n"
+        "        var id=window.setInterval(function(){if(uiActive){guard('interval callback',fn);}},delay);\n"
+        "        uiTimers.push(['interval',id]);\n"
+        "        return id;\n"
+        "      }\n"
+        "      function safeRequestFrame(fn){\n"
+        "        if(!uiActive){return 0;}\n"
+        "        if(!window.requestAnimationFrame){return safeSetTimeout(fn,16);}\n"
+        "        var id=window.requestAnimationFrame(function(){if(uiActive){guard('animation frame',fn);}});\n"
+        "        uiFrames.push(id);\n"
+        "        return id;\n"
+        "      }\n"
+        "      function safeCancelFrame(id){\n"
+        "        if(!id){return;}\n"
+        "        if(window.cancelAnimationFrame){window.cancelAnimationFrame(id);}else{window.clearTimeout(id);}\n"
+        "      }\n"
+        "      function shutdownUi(){\n"
+        "        uiActive=false;\n"
+        "        uiFrames.forEach(safeCancelFrame);\n"
+        "        uiFrames=[];\n"
+        "        uiTimers.forEach(function(entry){if(entry[0]==='interval'){window.clearInterval(entry[1]);}else{window.clearTimeout(entry[1]);}});\n"
+        "        uiTimers=[];\n"
+        "      }\n"
+        "      window.addEventListener('pagehide',shutdownUi,{once:true});\n"
+        "      window.addEventListener('beforeunload',shutdownUi,{once:true});\n"
+        "      function setText(node,value){if(uiActive&&node&&node.isConnected){node.textContent=value;}}\n"
+        "      function setState(state,label,detail){\n"
+        "        if(!uiActive){return;}\n"
+        "        if(stateNode&&stateNode.isConnected){stateNode.className='freshness-state '+state;stateNode.textContent=label;stateNode.setAttribute('aria-label','Published policy feed currency: '+label);}\n"
+        "        setText(detailNode,detail);\n"
+        "      }\n"
+        "      function formatAge(seconds){\n"
+        "        var days=seconds/86400;\n"
+        "        if(days>=2){return days.toFixed(1).replace(/\\.0$/,'')+' days';}\n"
+        "        var hours=seconds/3600;\n"
+        "        if(hours>=2){return hours.toFixed(1).replace(/\\.0$/,'')+' hours';}\n"
+        "        var minutes=Math.max(0,Math.floor(seconds/60));\n"
+        "        return minutes+' minutes';\n"
+        "      }\n"
+        "      function fallbackCopy(text){\n"
+        "        if(!uiActive||!document.body){return Promise.reject(new Error('copy unavailable'));}\n"
+        "        var area=document.createElement('textarea');\n"
+        "        area.value=text;area.setAttribute('readonly','');\n"
+        "        area.style.position='fixed';area.style.left='-9999px';\n"
+        "        var ok=false;\n"
+        "        try{document.body.appendChild(area);area.select();ok=Boolean(document.execCommand&&document.execCommand('copy'));}catch(_error){ok=false;}finally{if(area.parentNode){area.parentNode.removeChild(area);}}\n"
+        "        return ok ? Promise.resolve() : Promise.reject(new Error('copy failed'));\n"
+        "      }\n"
+        "      function copyText(text){\n"
+        "        if(!uiActive){return Promise.reject(new Error('ui inactive'));}\n"
+        "        try{if(navigator.clipboard&&navigator.clipboard.writeText){return navigator.clipboard.writeText(text);}}catch(_error){return fallbackCopy(text);}\n"
+        "        return fallbackCopy(text);\n"
+        "      }\n"
+        "      function markCopyButton(button,state,title){\n"
+        "        if(!uiActive||!button||!button.isConnected){return;}\n"
+        "        button.setAttribute('data-copy-state',state);\n"
+        "        button.setAttribute('title',title);\n"
+        "        safeSetTimeout(function(){if(button&&button.isConnected){button.removeAttribute('data-copy-state');button.setAttribute('title',button.getAttribute('data-default-title')||'Copy epoch millisecond timestamp');}},1600);\n"
+        "      }\n"
+        "      Array.prototype.forEach.call(document.querySelectorAll('.epoch-copy[data-epoch]'),function(button){\n"
+        "        button.setAttribute('data-default-title',button.getAttribute('title')||'Copy epoch millisecond timestamp');\n"
+        "        button.addEventListener('click',function(){guard('copy epoch',function(){\n"
+        "          if(!uiActive||!button.isConnected){return;}\n"
+        "          var epoch=button.getAttribute('data-epoch')||'';\n"
+        "          if(!/^\\d+$/.test(epoch)){markCopyButton(button,'failed','Epoch millisecond timestamp unavailable');return;}\n"
+        "          copyText(epoch).then(function(){markCopyButton(button,'copied','Copied epoch millisecond timestamp '+epoch);}).catch(function(){markCopyButton(button,'failed','Could not copy epoch millisecond timestamp');});\n"
+        "        });});\n"
+        "      });\n"
+        "      function initHeaderNav(){\n"
+        "        var nav=document.querySelector('.header-nav');\n"
+        "        if(!nav){return;}\n"
+        "        var items=nav.querySelectorAll('.nav-inner a');\n"
+        "        if(!items.length){return;}\n"
+        "        var frame=0;\n"
+        "        var label=nav.querySelector('.nav-hover-label');\n"
+        "        function setItem(item,x,y){\n"
+        "          if(!uiActive||!nav.isConnected||!item||!item.isConnected){return;}\n"
+        "          var navRect=nav.getBoundingClientRect();\n"
+        "          var rect=item.getBoundingClientRect();\n"
+        "          var text=item.getAttribute('data-nav-label')||item.getAttribute('aria-label')||'';\n"
+        "          nav.style.setProperty('--enter-nav','1');\n"
+        "          nav.style.setProperty('--label-x',String((rect.left-navRect.left)+(rect.width/2)+(x*5))+'px');\n"
+        "          nav.style.setProperty('--label-y',String(y*3)+'px');\n"
+        "          if(label&&label.isConnected&&text){label.textContent=text;}\n"
+        "        }\n"
+        "        function queue(item,event){\n"
+        "          if(!uiActive||!item||!item.isConnected||!event){return;}\n"
+        "          if(frame){safeCancelFrame(frame);}\n"
+        "          frame=safeRequestFrame(function(){\n"
+        "            frame=0;\n"
+        "            if(!uiActive||!item.isConnected){return;}\n"
+        "            var rect=item.getBoundingClientRect();\n"
+        "            var x=((event.clientX-rect.left)-(rect.width/2))/rect.width;\n"
+        "            var y=((event.clientY-rect.top)-(rect.height/2))/rect.height;\n"
+        "            setItem(item,Math.max(-.5,Math.min(.5,x)),Math.max(-.5,Math.min(.5,y)));\n"
+        "          });\n"
+        "        }\n"
+        "        Array.prototype.forEach.call(items,function(item,index){\n"
+        "          item.addEventListener('pointermove',function(event){guard('header nav pointer',function(){queue(item,event);});},{passive:true});\n"
+        "          item.addEventListener('focus',function(){guard('header nav focus',function(){setItem(item,0,0);});});\n"
+        "        });\n"
+        "        nav.addEventListener('pointerleave',function(){if(nav.isConnected){nav.style.setProperty('--enter-nav','0');}});\n"
+        "        nav.addEventListener('focusout',function(){safeSetTimeout(function(){if(uiActive&&nav.isConnected&&!nav.contains(document.activeElement)){nav.style.setProperty('--enter-nav','0');}},0);});\n"
+        "      }\n"
+        "      guard('header nav init',initHeaderNav);\n"
+        "      function update(){\n"
+        "        if(!uiActive){return;}\n"
+        "        var data;\n"
+        "        try{data=JSON.parse(dataNode ? dataNode.textContent : '{}');}catch(_error){data={};}\n"
+        "        var generated=Number(data.generated_at_epoch_s);\n"
+        "        if(!Number.isFinite(generated)||generated<=0){setText(ageNode,'unknown');setState('unknown','Unknown','Published policy feed timestamp is unavailable or invalid; feed currency cannot be calculated in the browser.');return;}\n"
+        "        var now=Math.floor(Date.now()/1000);\n"
+        "        if(!Number.isFinite(now)){setText(ageNode,'unknown');setState('unknown','Unknown','Published policy feed age cannot be calculated because browser time is unavailable.');return;}\n"
+        "        var ageSeconds=Math.max(0,now-generated);\n"
+        "        var warningSeconds=Number(data.warning_age_seconds)||1209600;\n"
+        "        var staleSeconds=Number(data.strict_stale_age_seconds)||3888000;\n"
+        "        setText(ageNode,formatAge(ageSeconds));\n"
+        "        if(ageSeconds>=staleSeconds){setState('stale','Stale','Published policy feed is stale. Do not treat this data as production-current until automation refresh succeeds.');return;}\n"
+        "        if(ageSeconds>=warningSeconds){setState('refresh-due','Refresh Due','Published policy feed refresh is due. Verify automation health before treating this data as production-current.');return;}\n"
+        f"        setState('current','Current','Published policy feed is within the {DEFAULT_POLICY_WARNING_AGE_DAYS}-day maintenance threshold.');\n"
+        "      }\n"
+        "      guard('freshness update',update);\n"
+        "      safeSetInterval(function(){guard('freshness update',update);},60000);\n"
+        "    }());\n"
+        "  </script>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -1359,6 +2269,8 @@ def render_policy_manifest(
         "generated_at_utc": policy.generated_at_utc,
         "generated_at_human": _generated_at_human(policy.generated_at_utc),
         "timezone": PAGES_TIMEZONE,
+        **freshness_thresholds(policy.generated_at_utc),
+        "freshness_policy": freshness_policy_metadata(),
         "generator_version": policy.generator_version,
         "policy_schema_version": policy.schema_version,
         "min_reader_schema_version": policy.min_reader_schema_version,

@@ -14,7 +14,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from .config import DEFAULT_TRUSTED_POLICY_KEY_ID
 from .exceptions import PolicyTrustError
 from .models import ReleasePolicy
-from .json_utils import StrictJSONError, strict_json_loads, strict_json_object
+from .json_utils import (
+    DEFAULT_MAX_SIGNATURE_BYTES,
+    DEFAULT_MAX_TRUSTED_POLICY_KEYS_BYTES,
+    StrictJSONError,
+    strict_json_loads,
+    strict_json_object,
+)
 from .remote_policy import load_policy_bytes
 
 
@@ -149,13 +155,15 @@ def _trusted_key_records_from_mapping(data: Any) -> tuple[TrustedPolicyKey, ...]
 
 def load_trusted_policy_keys() -> tuple[TrustedPolicyKey, ...]:
     try:
-        key_text = resources.files(TRUSTED_POLICY_KEYS_PACKAGE).joinpath(TRUSTED_POLICY_KEYS_FILE).read_text(
-            encoding="utf-8"
-        )
+        key_bytes = resources.files(TRUSTED_POLICY_KEYS_PACKAGE).joinpath(TRUSTED_POLICY_KEYS_FILE).read_bytes()
     except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
         raise PolicyTrustError(f"Trusted policy key file is unavailable: {exc}") from exc
     try:
-        data = strict_json_object(key_text, label="Trusted policy key file")
+        data = strict_json_object(
+            key_bytes,
+            label="Trusted policy key file",
+            max_bytes=DEFAULT_MAX_TRUSTED_POLICY_KEYS_BYTES,
+        )
     except StrictJSONError as exc:
         raise PolicyTrustError(str(exc)) from exc
     return _trusted_key_records_from_mapping(data)
@@ -198,6 +206,11 @@ def load_private_key(private_key: str | bytes) -> Ed25519PrivateKey:
 
 def _decode_signature_value(value: str) -> bytes:
     normalized = value.strip()
+    if len(normalized) == 128:
+        try:
+            return bytes.fromhex(normalized)
+        except ValueError:
+            pass
     try:
         return base64.b64decode(normalized, validate=True)
     except binascii.Error:
@@ -208,15 +221,19 @@ def _decode_signature_value(value: str) -> bytes:
 
 
 def decode_policy_signature_metadata(signature_bytes: bytes) -> PolicySignature:
+    if len(signature_bytes) == 64:
+        return PolicySignature(algorithm=SIGNATURE_ALGORITHM, signature=bytes(signature_bytes))
     stripped = signature_bytes.strip()
     if not stripped:
         raise PolicyTrustError("Policy signature is empty.")
+    if len(stripped) > DEFAULT_MAX_SIGNATURE_BYTES:
+        raise PolicyTrustError(
+            f"Policy signature is too large: exceeds safety cap of {DEFAULT_MAX_SIGNATURE_BYTES} bytes."
+        )
 
     try:
         parsed: Any = strict_json_loads(stripped, label="Policy signature")
     except StrictJSONError as exc:
-        if len(stripped) == 64:
-            return PolicySignature(algorithm=SIGNATURE_ALGORITHM, signature=bytes(stripped))
         try:
             signature_text = stripped.decode("utf-8")
         except UnicodeDecodeError as decode_exc:

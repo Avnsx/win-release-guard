@@ -4,10 +4,10 @@ This repository is public software for Windows administrators. Future agents mus
 
 ## Non-Revertible Architecture Rules
 
-1. The user-facing project, repository, distribution, CLI, and site name is `win11_release_guard`.
+1. The canonical technical project, repository, distribution, CLI, and site identifier is `win11_release_guard`.
 2. The Python import package remains `win11_release_guard`.
 3. Do not rename the import package unless the user explicitly instructs that change.
-4. Future agents must not revert naming back to old project/package identities.
+4. Future agents must not revert naming back to previous project/package identities.
 5. Do not reintroduce the removed root prototype script; the supported source-tree entry point is `python -m win11_release_guard`.
 6. Clients must not contain GitHub tokens, GitHub PATs, classic tokens, fine-grained tokens, repo secrets, or private signing keys.
 7. Private signing keys must not be committed to the repository.
@@ -22,12 +22,31 @@ This repository is public software for Windows administrators. Future agents mus
 16. Historical research about authenticated Microsoft metadata APIs may remain only in `docs/architecture-insight.md` when explicitly marked out of scope, not active architecture instructions.
 17. `.git` is never included in clean archives.
 18. The source of truth is current code, tests, workflows, docs, and tools, not handover text.
+19. Public `/api/v1` Pages aliases stay backward compatible for at least 24 months; add fields compatibly instead of changing or removing the v1 contract.
+20. Signing key rotations require at least 24 months of verification overlap unless a documented last-resort trust break is required.
 
 Canonical repository and feed:
 
 - GitHub repo: `https://github.com/Avnsx/win11_release_guard`
 - Public feed: `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`
 - Console script: `win11_release_guard`
+
+## Product Display Name
+
+- The technical project, repository, package, import module, CLI command, feed
+  paths, workflow identifiers, JSON fields, code symbols, tests, and commands
+  remain `win11_release_guard`.
+- In Markdown headings and human-facing prose that explicitly names the
+  product but is not teaching a technical identifier or command, prefer the
+  display name `Windows 11 Release Guard`.
+- Do not replace technical examples such as `python -m win11_release_guard`,
+  `pip install`, imports, package metadata, URLs, file paths, JSON keys,
+  workflow names, signatures, archive names, or code references with the
+  display name.
+- Keep this distinction narrow: use `Windows 11 Release Guard` to make user-facing
+  headings and narrative text easier to read, not to rename internals. The code
+  and package identity must stay overwhelmingly consistent with
+  `win11_release_guard` so the module remains importable and automation-safe.
 
 ## Operational Notes
 
@@ -44,6 +63,20 @@ Canonical repository and feed:
   `site/`, `dist/`, pycache, package metadata, and private signing-key scratch
   files.
 - The signed bundled policy JSON must use the current `win11_release_guard` identity and must verify against its detached signature.
+- Local compatibility and key-rotation rules are documented in
+  `docs/policy-signing.md`; publish workflow controls are documented in
+  `docs/security-automation.md`; tagged GitHub release preparation is
+  documented in `docs/tagged-release-lane.md`.
+- Pages dashboard/UI changes must not alter signed policy semantics, Windows
+  release targeting, evaluator verdicts, WUA-secondary behavior, JSON
+  `schema_version`, API `api_version`, or signature trust.
+- The static Pages dashboard must remain no-token, no-secret, no-CDN, and
+  GitHub-Pages-compatible. Do not add external JavaScript, external CSS,
+  external fonts, or backend runtime assumptions.
+- The landing page must not rely only on render-time generated age. It must
+  embed signed/manifest freshness data and recompute live freshness in the
+  browser from `generated_at_epoch_s` or an equivalent signed timestamp, with a
+  clear no-JavaScript fallback.
 
 ## GitHub Actions Pinning Policy
 
@@ -52,6 +85,8 @@ Canonical repository and feed:
 - Third-party actions are forbidden unless explicitly allowlisted in the audit tool and pinned to a full 40-character commit SHA.
 - Do not add third-party actions without updating the audit tool, tests, and security automation docs with the reason.
 - Keep workflow token permissions minimal; the publish workflow must not request `contents: write`.
+- Only `.github/workflows/release.yml` may request `contents: write`, and only
+  for explicit tagged GitHub Release publication.
 - Dependabot covers `github-actions` updates for GitHub-owned action majors.
 
 ## Deployment-Affecting Live Verification Gate

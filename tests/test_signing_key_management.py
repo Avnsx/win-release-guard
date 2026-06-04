@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -169,6 +170,13 @@ def _trusted_key(*, key_id: str, status: str, verify_not_after_utc: str | None =
     )
 
 
+def _parse_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def test_retiring_key_validates_only_inside_verify_window(monkeypatch):
     policy_bytes = b'{"schema_version":1}\n'
     key_id = "test-retiring-key"
@@ -263,6 +271,20 @@ def test_runtime_can_verify_policy_with_committed_trusted_key():
     assert trusted.signature_status == "valid"
     assert trusted.policy.broad_target_existing_devices is not None
     assert keys_by_id["win11_release_guard-policy-2026-01"].status == "retiring"
-    assert keys_by_id["win11_release_guard-policy-2026-01"].verify_not_after_utc == "2026-06-30T00:00:00Z"
+    assert keys_by_id["win11_release_guard-policy-2026-01"].verify_not_after_utc == "2028-05-31T23:16:50+00:00"
     assert keys_by_id[DEFAULT_TRUSTED_POLICY_KEY_ID].status == "active"
     assert keys_by_id[DEFAULT_TRUSTED_POLICY_KEY_ID].valid_from_utc == "2026-05-31T23:16:50+00:00"
+
+
+def test_committed_retiring_key_keeps_24_month_overlap_with_active_key():
+    trusted_keys = load_trusted_policy_keys()
+    active = next(key for key in trusted_keys if key.key_id == DEFAULT_TRUSTED_POLICY_KEY_ID)
+    assert active.valid_from_utc is not None
+    active_from = _parse_utc(active.valid_from_utc)
+
+    retiring_keys = [key for key in trusted_keys if key.status == "retiring"]
+    assert retiring_keys
+    for key in retiring_keys:
+        assert key.verify_not_after_utc is not None
+        overlap = _parse_utc(key.verify_not_after_utc) - active_from
+        assert overlap >= timedelta(days=730)

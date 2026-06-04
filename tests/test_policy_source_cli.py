@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from win11_release_guard import __main__ as cli
 from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS, DEFAULT_RELEASE_HEALTH_URL
 from win11_release_guard.exceptions import PolicyFetchError
-from win11_release_guard.signing import sign_policy_bytes
+from win11_release_guard.policy_schema import GENERATOR_VERSION
+from win11_release_guard.signing import load_private_key, sign_policy_bytes
 
 
 TEST_PRIVATE_KEY = "krtF2muLgucP7JDVNKk2g+YQfz92c7xM49dzszxHxjs="
@@ -18,7 +20,7 @@ def _policy_json() -> dict:
     return {
         "schema_version": 1,
         "generated_at_utc": "2026-05-28T00:00:00Z",
-        "generator_version": "win11_release_guard/0.2",
+        "generator_version": GENERATOR_VERSION,
         "source_urls": [
             DEFAULT_RELEASE_HEALTH_URL,
         ],
@@ -110,9 +112,19 @@ def _policy_bytes() -> bytes:
     return (json.dumps(_policy_json(), indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def _policy_bytes_generated_at(generated_at_utc: str) -> bytes:
+    policy = _policy_json()
+    policy["generated_at_utc"] = generated_at_utc
+    return (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _signature_bytes(policy_bytes: bytes) -> bytes:
     signature = sign_policy_bytes(policy_bytes, TEST_PRIVATE_KEY)
     return (json.dumps(signature, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _raw_signature_bytes(policy_bytes: bytes) -> bytes:
+    return load_private_key(TEST_PRIVATE_KEY).sign(policy_bytes)
 
 
 def _manifest_bytes(policy_bytes: bytes, **extra_fields: object) -> bytes:
@@ -130,6 +142,10 @@ def _manifest_bytes(policy_bytes: bytes, **extra_fields: object) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _epoch(value: datetime) -> int:
+    return int(value.timestamp())
 
 
 def _policy_bytes_with_published_urls(published_urls: dict[str, str]) -> bytes:
@@ -537,6 +553,7 @@ def test_check_public_pages_validates_hashes_signatures_and_api_aliases(monkeypa
     policy_bytes = _policy_bytes()
     signature_bytes = _signature_bytes(policy_bytes)
     manifest_bytes = _manifest_bytes(policy_bytes)
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(datetime(2026, 6, 4, tzinfo=timezone.utc)))
     monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
 
     _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
@@ -560,7 +577,119 @@ def test_check_public_pages_validates_hashes_signatures_and_api_aliases(monkeypa
     assert "- manifest_policy_sha256: OK" in output
     assert "- api_manifest_policy_sha256: OK" in output
     assert "- published_urls: OK" in output
+    assert "- public_pages_freshness: OK" in output
     assert "- robots: OK HTTP 200" in output
+
+
+def test_check_public_pages_fails_when_manifest_epoch_is_15_days_old(monkeypatch, capsys):
+    now = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    generated = now - timedelta(days=15)
+    policy_bytes = _policy_bytes_generated_at(generated.isoformat())
+    signature_bytes = _signature_bytes(policy_bytes)
+    manifest_bytes = _manifest_bytes(policy_bytes, generated_at_epoch_s=_epoch(generated))
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(now))
+    monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
+    _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
+
+    code = cli.main([
+        "--check-public-pages",
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
+    assert "Policy source: PUBLIC_PAGES_FAILED" in output
+    assert "- public_pages_freshness: FAILED" in output
+    assert "15 days old" in output
+    assert "14-day public freshness threshold" in output
+
+
+def test_check_public_pages_fails_strict_stale_when_manifest_epoch_is_46_days_old(monkeypatch, capsys):
+    now = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    generated = now - timedelta(days=46)
+    policy_bytes = _policy_bytes_generated_at(generated.isoformat())
+    signature_bytes = _signature_bytes(policy_bytes)
+    manifest_bytes = _manifest_bytes(policy_bytes, generated_at_epoch_s=_epoch(generated))
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(now))
+    monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
+    _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
+
+    code = cli.main([
+        "--check-public-pages",
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
+    assert "- public_pages_freshness: FAILED" in output
+    assert "46 days old" in output
+    assert "45-day strict stale threshold" in output
+
+
+def test_check_public_pages_freshness_falls_back_to_policy_generated_at(monkeypatch, capsys):
+    now = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    generated = now - timedelta(days=15)
+    policy_bytes = _policy_bytes_generated_at(generated.isoformat())
+    signature_bytes = _signature_bytes(policy_bytes)
+    manifest_bytes = _manifest_bytes(policy_bytes)
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(now))
+    monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
+    _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
+
+    code = cli.main([
+        "--check-public-pages",
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
+    assert "- public_pages_freshness: FAILED" in output
+    assert "15 days old" in output
+
+
+def test_check_public_pages_invalid_manifest_epoch_fails_clearly(monkeypatch, capsys):
+    now = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    policy_bytes = _policy_bytes_generated_at(now.isoformat())
+    signature_bytes = _signature_bytes(policy_bytes)
+    manifest_bytes = _manifest_bytes(policy_bytes, generated_at_epoch_s="not-an-epoch")
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(now))
+    monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
+    _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
+
+    code = cli.main([
+        "--check-public-pages",
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == cli.EXIT_UNKNOWN_OR_POLICY_ERROR
+    assert "- public_pages_freshness: FAILED" in output
+    assert "manifest.generated_at_epoch_s must be an integer epoch timestamp" in output
+
+
+def test_check_public_pages_accepts_legacy_raw_signature_aliases(monkeypatch, capsys):
+    policy_bytes = _policy_bytes()
+    signature_bytes = _raw_signature_bytes(policy_bytes)
+    manifest_bytes = _manifest_bytes(policy_bytes)
+    monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
+
+    _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
+
+    code = cli.main([
+        "--check-public-pages",
+        "--trusted-policy-public-key",
+        TEST_PUBLIC_KEY,
+    ])
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Public Pages: OK" in output
+    assert "- canonical_signature: OK" in output
+    assert "- api_signature_integrity: OK" in output
 
 
 def test_check_public_pages_uses_custom_policy_published_urls(monkeypatch, capsys):

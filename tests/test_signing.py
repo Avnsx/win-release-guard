@@ -8,7 +8,7 @@ import pytest
 from win11_release_guard.bundled_policy import load_bundled_policy
 from win11_release_guard.config import DEFAULT_POLICY_URL, DEFAULT_PUBLISHED_POLICY_URLS
 from win11_release_guard.exceptions import PolicyTrustError
-from win11_release_guard.policy_schema import validate_policy_document
+from win11_release_guard.policy_schema import GENERATOR_VERSION, validate_policy_document
 from win11_release_guard.signing import load_trusted_policy, sign_policy_bytes, verify_policy_signature
 
 
@@ -23,7 +23,7 @@ def _policy_json() -> dict:
     return {
         "schema_version": 1,
         "generated_at_utc": "2026-05-28T00:00:00Z",
-        "generator_version": "win11_release_guard/0.2",
+        "generator_version": GENERATOR_VERSION,
         "source_urls": [("https://example" + ".invalid/windows-release-policy.json")],
         "source_fetch_status": {"release_health_html": {"status": "ok"}},
         "current_versions": [

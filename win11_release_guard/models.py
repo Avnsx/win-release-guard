@@ -261,6 +261,17 @@ def _source_status(value: SourceStatus | str | None) -> SourceStatus | None:
         return None
 
 
+def _evaluation_status(value: EvaluationStatus | str | None) -> EvaluationStatus | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, EvaluationStatus):
+        return value
+    try:
+        return EvaluationStatus(str(value))
+    except ValueError:
+        return None
+
+
 def _source_problem(value: SourceProblem | Mapping[str, Any] | str) -> SourceProblem:
     if isinstance(value, SourceProblem):
         return value
@@ -1076,6 +1087,8 @@ class EvaluationResult:
     """Serializable result returned by the evaluator."""
 
     status: EvaluationStatus
+    candidate_status: EvaluationStatus | None = None
+    local_scope_status: EvaluationStatus | None = None
     local: LocalWindowsState | None = None
     target: ReleasePolicyEntry | None = None
     baseline: ReleaseHistoryEntry | Mapping[str, Any] | None = None
@@ -1103,6 +1116,7 @@ class EvaluationResult:
     source_status: SourceStatus | None = None
     is_source_check_complete: bool = True
     policy_age_hours: float | None = None
+    feed_age_days: float | None = None
     policy_source_url: str | None = None
     policy_source_kind: str | None = None
     policy_signature_status: str | None = None
@@ -1115,6 +1129,8 @@ class EvaluationResult:
     def __post_init__(self) -> None:
         status = self.status if isinstance(self.status, EvaluationStatus) else EvaluationStatus(str(self.status))
         object.__setattr__(self, "status", status)
+        object.__setattr__(self, "candidate_status", _evaluation_status(self.candidate_status))
+        object.__setattr__(self, "local_scope_status", _evaluation_status(self.local_scope_status))
         object.__setattr__(self, "notes", tuple(self.notes))
         object.__setattr__(self, "source_status", _source_status(self.source_status))
         object.__setattr__(self, "warnings", tuple(str(item) for item in self.warnings))
@@ -1134,6 +1150,8 @@ class EvaluationResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status.value,
+            "candidate_status": self.candidate_status.value if self.candidate_status else None,
+            "local_scope_status": self.local_scope_status.value if self.local_scope_status else None,
             "local": self.local.to_dict() if self.local else None,
             "target": self.target.to_dict() if self.target else None,
             "baseline": (
@@ -1171,6 +1189,7 @@ class EvaluationResult:
             "source_status": self.source_status.value if self.source_status else None,
             "is_source_check_complete": self.is_source_check_complete,
             "policy_age_hours": self.policy_age_hours,
+            "feed_age_days": self.feed_age_days,
             "policy_source_url": self.policy_source_url,
             "policy_source_kind": self.policy_source_kind,
             "policy_signature_status": self.policy_signature_status,
@@ -1194,6 +1213,8 @@ class EvaluationResult:
                 baseline = dict(baseline_data)
         return cls(
             status=EvaluationStatus(str(data["status"])),
+            candidate_status=_evaluation_status(data.get("candidate_status")),
+            local_scope_status=_evaluation_status(data.get("local_scope_status")),
             local=LocalWindowsState.from_dict(local_data) if local_data else None,
             target=ReleasePolicyEntry.from_dict(target_data) if target_data else None,
             baseline=baseline,
@@ -1235,6 +1256,11 @@ class EvaluationResult:
             policy_age_hours=(
                 float(data["policy_age_hours"])
                 if data.get("policy_age_hours") is not None
+                else None
+            ),
+            feed_age_days=(
+                float(data["feed_age_days"])
+                if data.get("feed_age_days") is not None
                 else None
             ),
             policy_source_url=_optional_str(data.get("policy_source_url")),

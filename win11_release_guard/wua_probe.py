@@ -16,10 +16,11 @@ from .config import (
     DEFAULT_WUA_MAX_RELEVANT_UPDATES,
     DEFAULT_WUA_TIMEOUT_SECONDS,
 )
+from .version import client_application_id
 
 
 SEARCH_CRITERIA = "IsInstalled=0 and Type='Software' and IsHidden=0"
-CLIENT_APPLICATION_ID = "win11_release_guard/0.2"
+CLIENT_APPLICATION_ID = client_application_id()
 NOISE_CLASSIFICATIONS = {
     "defender_definition",
     "dotnet",

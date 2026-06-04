@@ -519,6 +519,102 @@ def test_strict_production_allows_green_only_for_live_remote_json(monkeypatch, t
     assert isinstance(payload["policy_age_hours"], float)
 
 
+def test_live_remote_policy_older_than_14_days_warns(monkeypatch, tmp_path):
+    _patch_local(monkeypatch)
+    policy_file = tmp_path / "remote-policy.json"
+    policy_bytes = _write_signed_policy(policy_file, _policy(generated_at_utc=_generated_at(hours_ago=15 * 24)))
+    signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()
+    policy_url = ("https://policy.example" + ".invalid/windows-release-policy.json")
+
+    def fake_fetch(url, *args, **kwargs):
+        if str(url).endswith(".sig"):
+            return signature_bytes, "application/json"
+        return policy_bytes, "application/json"
+
+    monkeypatch.setattr(api, "fetch_policy_bytes", fake_fetch)
+
+    result = api.check_current_system(
+        ReleaseCheckerConfig(
+            policy_url=policy_url,
+            cache_file=str(tmp_path / "cache.json"),
+            enable_wua_probe=False,
+            trusted_policy_public_key=TEST_PUBLIC_KEY,
+        )
+    )
+
+    assert result.status is EvaluationStatus.COMPLIANT
+    assert result.source_status is SourceStatus.REMOTE_POLICY_OK
+    assert result.policy_source_kind == "remote_json"
+    assert result.policy_age_hours is not None and result.policy_age_hours >= 15 * 24
+    assert result.feed_age_days is not None and result.feed_age_days >= 15
+    assert any("older than 14 days" in warning for warning in result.warnings)
+    payload = result.to_dict()
+    assert payload["feed_age_days"] >= 15
+
+
+def test_normal_mode_live_remote_policy_older_than_45_days_warns_without_blocking(monkeypatch, tmp_path):
+    _patch_local(monkeypatch)
+    policy_file = tmp_path / "remote-policy.json"
+    policy_bytes = _write_signed_policy(policy_file, _policy(generated_at_utc=_generated_at(hours_ago=46 * 24)))
+    signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()
+    policy_url = ("https://policy.example" + ".invalid/windows-release-policy.json")
+
+    def fake_fetch(url, *args, **kwargs):
+        if str(url).endswith(".sig"):
+            return signature_bytes, "application/json"
+        return policy_bytes, "application/json"
+
+    monkeypatch.setattr(api, "fetch_policy_bytes", fake_fetch)
+
+    result = api.check_current_system(
+        ReleaseCheckerConfig(
+            policy_url=policy_url,
+            cache_file=str(tmp_path / "cache.json"),
+            enable_wua_probe=False,
+            trusted_policy_public_key=TEST_PUBLIC_KEY,
+        )
+    )
+
+    assert result.status is EvaluationStatus.COMPLIANT
+    assert result.source_status is SourceStatus.REMOTE_POLICY_OK
+    assert result.is_source_check_complete is True
+    assert any("older than 14 days" in warning for warning in result.warnings)
+
+
+def test_strict_production_blocks_live_remote_policy_older_than_45_days(monkeypatch, tmp_path):
+    _patch_local(monkeypatch)
+    policy_file = tmp_path / "remote-policy.json"
+    policy_bytes = _write_signed_policy(policy_file, _policy(generated_at_utc=_generated_at(hours_ago=46 * 24)))
+    signature_bytes = policy_file.with_name(policy_file.name + ".sig").read_bytes()
+    policy_url = ("https://policy.example" + ".invalid/windows-release-policy.json")
+
+    def fake_fetch(url, *args, **kwargs):
+        if str(url).endswith(".sig"):
+            return signature_bytes, "application/json"
+        return policy_bytes, "application/json"
+
+    monkeypatch.setattr(api, "fetch_policy_bytes", fake_fetch)
+
+    result = api.check_current_system(
+        ReleaseCheckerConfig(
+            policy_url=policy_url,
+            cache_file=str(tmp_path / "cache.json"),
+            enable_wua_probe=False,
+            strict_production=True,
+            trusted_policy_public_key=TEST_PUBLIC_KEY,
+        )
+    )
+
+    assert result.status is EvaluationStatus.CHECK_INCOMPLETE
+    assert result.candidate_status is EvaluationStatus.COMPLIANT
+    assert result.source_status is SourceStatus.REMOTE_POLICY_OK
+    assert result.policy_source_kind == "remote_json"
+    assert result.is_source_check_complete is True
+    assert result.strict_production is True
+    assert "within 45 days" in (result.action or "")
+    assert result.metadata["source_degradation"]["force_check_incomplete"] is True
+
+
 def test_strict_production_blocks_local_json_green_even_when_signed(monkeypatch, tmp_path):
     _patch_local(monkeypatch)
     policy_file = tmp_path / "windows-release-policy.json"
@@ -611,6 +707,12 @@ def test_strict_production_blocks_bundled_green(monkeypatch, tmp_path):
     assert result.policy_source_kind == "bundled"
     assert result.is_source_check_complete is False
     assert result.strict_production is True
+    assert result.candidate_status is EvaluationStatus.COMPLIANT
+    assert result.local_scope_status is None
+    payload = result.to_dict()
+    assert payload["status"] == EvaluationStatus.CHECK_INCOMPLETE.value
+    assert payload["candidate_status"] == EvaluationStatus.COMPLIANT.value
+    assert payload["local_scope_status"] is None
     assert "Strict production requires" in result.action
 
 
@@ -639,6 +741,15 @@ def test_strict_production_blocks_windows10_out_of_scope_from_bundled(monkeypatc
     assert result.source_status is SourceStatus.USING_BUNDLED_POLICY
     assert result.policy_source_kind == "bundled"
     assert result.strict_production is True
+    assert result.candidate_status is EvaluationStatus.OUT_OF_SCOPE
+    assert result.local_scope_status is EvaluationStatus.OUT_OF_SCOPE
+    payload = result.to_dict()
+    assert payload["status"] == EvaluationStatus.CHECK_INCOMPLETE.value
+    assert payload["candidate_status"] == EvaluationStatus.OUT_OF_SCOPE.value
+    assert payload["local_scope_status"] == EvaluationStatus.OUT_OF_SCOPE.value
+    assert payload["source_status"] == SourceStatus.USING_BUNDLED_POLICY.value
+    assert payload["is_source_check_complete"] is False
+    assert payload["strict_production"] is True
     assert result.metadata["source_degradation"]["candidate_status"] == EvaluationStatus.OUT_OF_SCOPE.value
     assert result.metadata["source_degradation"]["must_exit_code_2"] is True
     assert "Strict production requires" in result.action
@@ -669,6 +780,8 @@ def test_strict_production_blocks_server_out_of_scope_from_bundled(monkeypatch, 
     assert result.source_status is SourceStatus.USING_BUNDLED_POLICY
     assert result.policy_source_kind == "bundled"
     assert result.strict_production is True
+    assert result.candidate_status is EvaluationStatus.OUT_OF_SCOPE
+    assert result.local_scope_status is EvaluationStatus.OUT_OF_SCOPE
     assert result.metadata["source_degradation"]["candidate_status"] == EvaluationStatus.OUT_OF_SCOPE.value
     assert result.metadata["source_degradation"]["must_exit_code_2"] is True
     assert "Strict production requires" in result.action
@@ -739,6 +852,8 @@ def test_no_internet_no_cache_uses_bundled_fallback_with_warning(monkeypatch, tm
     assert result.status is EvaluationStatus.COMPLIANT
     assert result.source_status is SourceStatus.USING_BUNDLED_POLICY
     assert result.is_source_check_complete is False
+    assert result.candidate_status is None
+    assert result.local_scope_status is None
     assert "Remote policy and cache unavailable; using bundled last-known-good policy." in result.warnings
     assert any("network unavailable" in problem for problem in result.source_problems)
     assert result.source_problems

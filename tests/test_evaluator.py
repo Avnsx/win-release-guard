@@ -14,6 +14,7 @@ from win11_release_guard.evaluator import (
 from win11_release_guard.models import (
     BuildEvidenceSource,
     EditionScope,
+    EvaluationResult,
     EvaluationStatus,
     InstalledBuildClassification,
     LocalWindowsState,
@@ -969,3 +970,24 @@ def test_unknown_edition_displays_windows_11_unknown_edition_with_warning():
     assert result.local_consensus is not None
     assert result.local_consensus.display_os_name == "Windows 11 unknown edition"
     assert any("UNKNOWN_EDITION_SCOPE" in warning for warning in result.warnings)
+
+
+def test_evaluation_result_candidate_status_round_trips():
+    result = EvaluationResult(
+        status=EvaluationStatus.CHECK_INCOMPLETE,
+        candidate_status=EvaluationStatus.OUT_OF_SCOPE,
+        local_scope_status=EvaluationStatus.OUT_OF_SCOPE,
+        policy_age_hours=1104.0,
+        feed_age_days=46.0,
+    )
+
+    payload = result.to_dict()
+    restored = EvaluationResult.from_dict(payload)
+
+    assert payload["candidate_status"] == EvaluationStatus.OUT_OF_SCOPE.value
+    assert payload["local_scope_status"] == EvaluationStatus.OUT_OF_SCOPE.value
+    assert restored.status is EvaluationStatus.CHECK_INCOMPLETE
+    assert restored.candidate_status is EvaluationStatus.OUT_OF_SCOPE
+    assert restored.local_scope_status is EvaluationStatus.OUT_OF_SCOPE
+    assert restored.policy_age_hours == 1104.0
+    assert restored.feed_age_days == 46.0

@@ -11,7 +11,8 @@ import urllib.error
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
-from importlib import metadata, resources
+from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -29,7 +30,9 @@ from .config import (
     DEFAULT_CACHE_MAX_AGE_HOURS,
     DEFAULT_EVENT_LOG_MAX_EVENTS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS,
     DEFAULT_POLICY_URL,
+    DEFAULT_POLICY_WARNING_AGE_SECONDS,
     DEFAULT_PUBLISHED_POLICY_URLS,
     DEFAULT_QUALITY_POLICY,
     DEFAULT_STALE_CACHE_MAX_AGE_HOURS,
@@ -37,15 +40,24 @@ from .config import (
     DEFAULT_WUA_MAX_HISTORY,
     DEFAULT_WUA_MAX_RELEVANT_UPDATES,
     DEFAULT_WUA_TIMEOUT_SECONDS,
+    MAX_POLICY_BYTES_ENV_VAR,
     POLICY_URL_ENV_VAR,
     ReleaseCheckerConfig,
     STRICT_PRODUCTION_ENV_VAR,
+    max_policy_bytes_from_env,
     normalize_policy_url,
     policy_url_from_env,
     strict_production_from_env,
 )
 from .exceptions import PolicyFetchError, PolicyParseError, PolicyTrustError, WindowsReleaseCheckerError
-from .json_utils import DEFAULT_MAX_JSON_BYTES, StrictJSONError, strict_json_object
+from .freshness import epoch_seconds_from_iso
+from .json_utils import (
+    DEFAULT_MAX_MANIFEST_BYTES,
+    DEFAULT_MAX_POLICY_BYTES,
+    DEFAULT_MAX_SIGNATURE_BYTES,
+    StrictJSONError,
+    strict_json_object,
+)
 from .models import (
     EvaluationResult,
     EvaluationStatus,
@@ -55,7 +67,8 @@ from .models import (
 )
 from .policy_schema import validate_policy_document
 from .remote_policy import fetch_policy_bytes
-from .signing import load_public_key, load_trusted_policy, verify_policy_signature
+from .signing import decode_policy_signature_metadata, load_public_key, load_trusted_policy, verify_policy_signature
+from .version import package_version
 
 
 EXIT_COMPLIANT = 0
@@ -167,6 +180,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_HTTP_TIMEOUT_SECONDS,
         help="HTTP policy fetch timeout.",
+    )
+    parser.add_argument(
+        "--max-policy-bytes",
+        type=int,
+        default=None,
+        help=(
+            "Last-resort safety cap for policy and Microsoft source payloads. "
+            f"Defaults to {DEFAULT_MAX_POLICY_BYTES} bytes."
+        ),
     )
     parser.add_argument(
         "--wua-timeout-seconds",
@@ -408,6 +430,28 @@ def _source_drift_warnings(result: EvaluationResult) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
+def _local_candidate_line(result: EvaluationResult) -> str | None:
+    if result.status is not EvaluationStatus.CHECK_INCOMPLETE or result.candidate_status is None:
+        return None
+    if result.candidate_status is result.status:
+        return None
+    if result.local_scope_status is EvaluationStatus.OUT_OF_SCOPE:
+        return (
+            f"Local candidate: {result.candidate_status.value} "
+            f"(local scope: {result.local_scope_status.value}; source check incomplete)"
+        )
+    return f"Local candidate: {result.candidate_status.value} (source check incomplete)"
+
+
+def _policy_age_line(result: EvaluationResult) -> str | None:
+    if result.policy_age_hours is None:
+        return None
+    feed_age_days = result.feed_age_days
+    if feed_age_days is None:
+        feed_age_days = round(result.policy_age_hours / 24, 2)
+    return f"Policy age: {feed_age_days:g} days ({result.policy_age_hours:g} hours)"
+
+
 def _print_pretty(result: EvaluationResult) -> None:
     target_version = result.target.version if result.target else "unknown"
     target_build = result.baseline_build or (result.target.effective_baseline_build if result.target else None)
@@ -424,6 +468,12 @@ def _print_pretty(result: EvaluationResult) -> None:
         print(f"Required baseline: {target_build or 'unknown'}")
         print(f"Latest observed: {latest_observed or 'unknown'}")
     print(f"Source: {source_status} / {result.policy_source_kind or 'unknown'}")
+    policy_age_line = _policy_age_line(result)
+    if policy_age_line:
+        print(policy_age_line)
+    local_candidate_line = _local_candidate_line(result)
+    if local_candidate_line:
+        print(local_candidate_line)
     source_warning = _source_degradation_warning(result)
     if source_warning:
         print(
@@ -521,7 +571,19 @@ def _config_from_args(args: argparse.Namespace) -> ReleaseCheckerConfig:
         allow_server_evaluation=args.allow_server_evaluation,
         warn_on_preview_installed=not args.no_preview_installed_warning,
         disallow_preview_installed=args.disallow_preview_installed,
+        max_policy_bytes=_max_policy_bytes_from_args(args),
     )
+
+
+def _max_policy_bytes_from_args(args: argparse.Namespace) -> int:
+    value = getattr(args, "max_policy_bytes", None)
+    if value is None:
+        return max_policy_bytes_from_env()
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return max_policy_bytes_from_env()
+    return parsed if parsed > 0 else max_policy_bytes_from_env()
 
 
 def _policy_url_from_args(args: argparse.Namespace) -> tuple[str | None, str]:
@@ -538,20 +600,7 @@ def _policy_url_from_args(args: argparse.Namespace) -> tuple[str | None, str]:
 
 
 def _package_version() -> str:
-    try:
-        return metadata.version("win11_release_guard")
-    except metadata.PackageNotFoundError:
-        pass
-
-    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    try:
-        for line in pyproject_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("version = "):
-                return stripped.split("=", 1)[1].strip().strip('"')
-    except OSError:
-        pass
-    return "unknown"
+    return package_version()
 
 
 def _trusted_public_key_fingerprint(public_key: str | None) -> str:
@@ -648,6 +697,7 @@ def _diagnose_config_payload(args: argparse.Namespace) -> dict[str, object]:
         "policy_url_source": source,
         "policy_url_env_var": POLICY_URL_ENV_VAR,
         "strict_production_env_var": STRICT_PRODUCTION_ENV_VAR,
+        "max_policy_bytes_env_var": MAX_POLICY_BYTES_ENV_VAR,
         "cache_file": str(Path(config.cache_file)) if config.cache_file else str(default_cache_path()),
         "trusted_public_key_fingerprint": _trusted_public_key_fingerprint(config.trusted_policy_public_key),
         "wua_default_enabled": ReleaseCheckerConfig().enable_wua_probe,
@@ -660,6 +710,7 @@ def _diagnose_config_payload(args: argparse.Namespace) -> dict[str, object]:
         "live_remote_fetch_performed": bool(args.check_source),
         "cache_max_age_hours": config.cache_max_age_hours,
         "stale_cache_max_age_hours": config.stale_cache_max_age_hours,
+        "max_policy_bytes": config.max_policy_bytes,
         "use_bundled_policy_fallback": config.use_bundled_policy_fallback,
         "allow_unsigned_policy": config.allow_unsigned_policy,
         "allow_runtime_release_health_html": config.allow_runtime_release_health_html,
@@ -729,7 +780,46 @@ def _is_http_url(value: str | None) -> bool:
     return bool(value and str(value).lower().startswith(("http://", "https://")))
 
 
-def _fetch_public_url(url: str, *, timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS) -> PublicFetchResult:
+def _payload_too_large_message(label: str, max_bytes: int) -> str:
+    return f"{label} is too large: exceeds safety cap of {max_bytes} bytes"
+
+
+def _content_length_from_headers(headers: Mapping[str, object] | None) -> int | None:
+    if headers is None:
+        return None
+    value = None
+    if hasattr(headers, "get"):
+        value = headers.get("content-length") or headers.get("Content-Length")
+    if value is None and hasattr(headers, "items"):
+        for key, candidate in headers.items():
+            if str(key).lower() == "content-length":
+                value = candidate
+                break
+    if value is None:
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _read_public_response_content(response, *, max_bytes: int, label: str) -> bytes:
+    content_length = _content_length_from_headers(response.headers)
+    if content_length is not None and content_length > max_bytes:
+        raise PolicyFetchError(_payload_too_large_message(label, max_bytes))
+    data = response.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise PolicyFetchError(_payload_too_large_message(label, max_bytes))
+    return data
+
+
+def _fetch_public_url(
+    url: str,
+    *,
+    timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_MAX_POLICY_BYTES,
+) -> PublicFetchResult:
     request = urllib.request.Request(
         url,
         headers={
@@ -744,7 +834,11 @@ def _fetch_public_url(url: str, *, timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS
             return PublicFetchResult(
                 url=url,
                 status_code=int(getattr(response, "status", 200)),
-                content=response.read(DEFAULT_MAX_JSON_BYTES + 1),
+                content=_read_public_response_content(
+                    response,
+                    max_bytes=max_bytes,
+                    label="Public Pages response",
+                ),
                 content_type=content_type,
                 headers=headers,
             )
@@ -753,7 +847,11 @@ def _fetch_public_url(url: str, *, timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS
         return PublicFetchResult(
             url=url,
             status_code=int(exc.code),
-            content=exc.read(DEFAULT_MAX_JSON_BYTES + 1),
+            content=_read_public_response_content(
+                exc,
+                max_bytes=max_bytes,
+                label="Public Pages error response",
+            ),
             content_type=headers.get("Content-Type"),
             headers=headers,
         )
@@ -761,9 +859,23 @@ def _fetch_public_url(url: str, *, timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS
         raise PolicyFetchError(f"Failed to fetch public Pages URL {url}: {exc}") from exc
 
 
-def _decode_json_bytes(data: bytes, *, label: str) -> Mapping[str, Any]:
+def _call_fetch_public_url(url: str, *, timeout: float, max_bytes: int) -> PublicFetchResult:
     try:
-        return strict_json_object(data, label=label)
+        return _fetch_public_url(url, timeout=timeout, max_bytes=max_bytes)
+    except TypeError as exc:
+        if "max_bytes" not in str(exc):
+            raise
+        return _fetch_public_url(url, timeout=timeout)
+
+
+def _decode_json_bytes(
+    data: bytes,
+    *,
+    label: str,
+    max_bytes: int = DEFAULT_MAX_POLICY_BYTES,
+) -> Mapping[str, Any]:
+    try:
+        return strict_json_object(data, label=label, max_bytes=max_bytes)
     except StrictJSONError as exc:
         raise PolicyParseError(str(exc)) from exc
 
@@ -802,7 +914,11 @@ def _manifest_check_payload(
         )
 
     try:
-        manifest_bytes, _manifest_content_type = fetch_policy_bytes(manifest_url, timeout=timeout_seconds)
+        manifest_bytes, _manifest_content_type = fetch_policy_bytes(
+            manifest_url,
+            timeout=timeout_seconds,
+            max_bytes=DEFAULT_MAX_MANIFEST_BYTES,
+        )
     except Exception as exc:
         policy_sha256 = hashlib.sha256(policy_bytes).hexdigest()
         return (
@@ -817,7 +933,11 @@ def _manifest_check_payload(
         )
 
     try:
-        manifest = _decode_json_bytes(manifest_bytes, label="Policy manifest")
+        manifest = _decode_json_bytes(
+            manifest_bytes,
+            label="Policy manifest",
+            max_bytes=DEFAULT_MAX_MANIFEST_BYTES,
+        )
     except PolicyParseError as exc:
         return (
             {
@@ -892,12 +1012,13 @@ def _public_page_fetch_check(
     name: str,
     url: str,
     timeout_seconds: float,
+    max_bytes: int,
     expect_json: bool = False,
     expect_signature: bool = False,
     expect_robots: bool = False,
 ) -> tuple[dict[str, object], PublicFetchResult | None, Mapping[str, Any] | None]:
     try:
-        response = _fetch_public_url(url, timeout=timeout_seconds)
+        response = _call_fetch_public_url(url, timeout=timeout_seconds, max_bytes=max_bytes)
     except Exception as exc:
         return (
             {
@@ -915,19 +1036,22 @@ def _public_page_fetch_check(
     decoded_json: Mapping[str, Any] | None = None
     if response.status_code != 200:
         errors.append(f"HTTP {response.status_code}")
-    if len(response.content) > DEFAULT_MAX_JSON_BYTES:
-        errors.append(f"response is too large: exceeds {DEFAULT_MAX_JSON_BYTES} bytes")
+    if len(response.content) > max_bytes:
+        errors.append(_payload_too_large_message(f"{name} endpoint response", max_bytes))
     if response.auth_challenge:
         errors.append("auth challenge present")
 
-    if (expect_json or expect_signature) and not errors:
+    if expect_json and not errors:
         try:
-            decoded_json = _decode_json_bytes(response.content, label=f"{name} endpoint")
+            decoded_json = _decode_json_bytes(response.content, label=f"{name} endpoint", max_bytes=max_bytes)
         except PolicyParseError as exc:
             errors.append(str(exc))
 
-    if expect_signature and not errors and decoded_json is not None and not decoded_json.get("signature"):
-        errors.append("signature field is missing")
+    if expect_signature and not errors:
+        try:
+            decode_policy_signature_metadata(response.content)
+        except PolicyTrustError as exc:
+            errors.append(str(exc))
 
     if expect_robots and not errors:
         text = response.content.decode("utf-8", errors="replace")
@@ -951,6 +1075,7 @@ def _check_public_page_url(
     name: str,
     url: str,
     timeout_seconds: float,
+    max_bytes: int = DEFAULT_MAX_POLICY_BYTES,
     expect_json: bool = False,
     expect_signature: bool = False,
     expect_robots: bool = False,
@@ -959,6 +1084,7 @@ def _check_public_page_url(
         name=name,
         url=url,
         timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
         expect_json=expect_json,
         expect_signature=expect_signature,
         expect_robots=expect_robots,
@@ -1049,32 +1175,106 @@ def _published_url_errors(
     return errors
 
 
+def _utc_now_epoch_s() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def _public_document_generated_epoch(
+    manifest: Mapping[str, Any] | None,
+    policy_document: Mapping[str, Any] | None,
+) -> tuple[int | None, str | None, str | None]:
+    if manifest is not None and "generated_at_epoch_s" in manifest:
+        value = manifest.get("generated_at_epoch_s")
+        if isinstance(value, bool):
+            return None, None, "manifest.generated_at_epoch_s must be an integer epoch timestamp"
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None, None, "manifest.generated_at_epoch_s must be an integer epoch timestamp"
+        if parsed <= 0:
+            return None, None, "manifest.generated_at_epoch_s must be a positive epoch timestamp"
+        return parsed, str(manifest.get("generated_at_utc") or ""), None
+
+    generated_at_utc = None
+    if policy_document is not None:
+        value = policy_document.get("generated_at_utc")
+        if value not in (None, ""):
+            generated_at_utc = str(value)
+    if generated_at_utc is None and manifest is not None:
+        value = manifest.get("generated_at_utc")
+        if value not in (None, ""):
+            generated_at_utc = str(value)
+    if not generated_at_utc:
+        return None, None, "public policy freshness timestamp unavailable"
+    parsed_epoch = epoch_seconds_from_iso(generated_at_utc)
+    if parsed_epoch is None:
+        return None, generated_at_utc, f"generated_at_utc is invalid: {generated_at_utc}"
+    return parsed_epoch, generated_at_utc, None
+
+
+def _public_pages_freshness_check(
+    manifest: Mapping[str, Any] | None,
+    policy_document: Mapping[str, Any] | None,
+) -> dict[str, object]:
+    generated_epoch, generated_at_utc, parse_error = _public_document_generated_epoch(manifest, policy_document)
+    errors: list[str] = []
+    age_days = None
+    freshness_state = "unknown"
+    if parse_error:
+        errors.append(parse_error)
+    elif generated_epoch is not None:
+        now_epoch = _utc_now_epoch_s()
+        age_seconds = max(0, now_epoch - generated_epoch)
+        age_days = round(age_seconds / 86400, 2)
+        if age_seconds >= DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS:
+            freshness_state = "strict_stale"
+            errors.append(
+                f"public policy feed is {age_days:g} days old; age is at or beyond the 45-day strict stale threshold"
+            )
+        elif age_seconds >= DEFAULT_POLICY_WARNING_AGE_SECONDS:
+            freshness_state = "stale"
+            errors.append(
+                f"public policy feed is {age_days:g} days old; age is at or beyond the 14-day public freshness threshold"
+            )
+        else:
+            freshness_state = "fresh"
+    return _public_consistency_check(
+        "public_pages_freshness",
+        errors,
+        generated_at_utc=generated_at_utc,
+        age_days=age_days,
+        freshness_state=freshness_state,
+    )
+
+
 def _check_public_pages_payload(
     policy,
     *,
     timeout_seconds: float,
     trusted_policy_public_key: str | bytes | None = None,
+    max_policy_bytes: int = DEFAULT_MAX_POLICY_BYTES,
 ) -> tuple[dict[str, object], bool]:
     urls = _public_pages_urls(policy)
     endpoint_specs = [
-        ("landing", urls["landing"], False, False, False),
-        ("policy", urls["policy"], True, False, False),
-        ("signature", urls["signature"], False, True, False),
-        ("manifest", urls["manifest"], True, False, False),
-        ("api_policy", urls["api_policy"], True, False, False),
-        ("api_signature", urls["api_signature"], False, True, False),
-        ("api_manifest", urls["api_manifest"], True, False, False),
-        ("robots", urls["robots"], False, False, True),
-        ("sitemap", urls["sitemap"], False, False, False),
+        ("landing", urls["landing"], max_policy_bytes, False, False, False),
+        ("policy", urls["policy"], max_policy_bytes, True, False, False),
+        ("signature", urls["signature"], DEFAULT_MAX_SIGNATURE_BYTES, False, True, False),
+        ("manifest", urls["manifest"], DEFAULT_MAX_MANIFEST_BYTES, True, False, False),
+        ("api_policy", urls["api_policy"], max_policy_bytes, True, False, False),
+        ("api_signature", urls["api_signature"], DEFAULT_MAX_SIGNATURE_BYTES, False, True, False),
+        ("api_manifest", urls["api_manifest"], DEFAULT_MAX_MANIFEST_BYTES, True, False, False),
+        ("robots", urls["robots"], DEFAULT_MAX_MANIFEST_BYTES, False, False, True),
+        ("sitemap", urls["sitemap"], DEFAULT_MAX_MANIFEST_BYTES, False, False, False),
     ]
     checks: list[dict[str, object]] = []
     responses: dict[str, PublicFetchResult] = {}
     decoded_documents: dict[str, Mapping[str, Any]] = {}
-    for name, url, expect_json, expect_signature, expect_robots in endpoint_specs:
+    for name, url, max_bytes, expect_json, expect_signature, expect_robots in endpoint_specs:
         check, response, decoded_json = _public_page_fetch_check(
             name=name,
             url=url,
             timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
             expect_json=expect_json,
             expect_signature=expect_signature,
             expect_robots=expect_robots,
@@ -1192,6 +1392,7 @@ def _check_public_pages_payload(
         *_published_url_errors(decoded_documents.get("api_policy"), urls, label="API"),
     ]
     checks.append(_public_consistency_check("published_urls", published_url_errors))
+    checks.append(_public_pages_freshness_check(manifest, decoded_documents.get("policy")))
 
     ok = all(bool(check.get("ok")) for check in checks)
     return (
@@ -1312,7 +1513,11 @@ def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, ob
 
     signature_url = _policy_signature_source(policy_url)
     try:
-        policy_bytes, content_type = fetch_policy_bytes(policy_url, timeout=args.timeout_seconds)
+        policy_bytes, content_type = fetch_policy_bytes(
+            policy_url,
+            timeout=args.timeout_seconds,
+            max_bytes=_max_policy_bytes_from_args(args),
+        )
     except PolicyFetchError as exc:
         return (
             _policy_source_failure_payload(
@@ -1337,7 +1542,11 @@ def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, ob
         )
 
     try:
-        signature_bytes, _signature_content_type = fetch_policy_bytes(signature_url, timeout=args.timeout_seconds)
+        signature_bytes, _signature_content_type = fetch_policy_bytes(
+            signature_url,
+            timeout=args.timeout_seconds,
+            max_bytes=DEFAULT_MAX_SIGNATURE_BYTES,
+        )
     except PolicyFetchError as exc:
         return (
             _policy_source_failure_payload(
@@ -1446,6 +1655,7 @@ def _check_policy_source_payload(args: argparse.Namespace) -> tuple[dict[str, ob
             trusted.policy,
             timeout_seconds=args.timeout_seconds,
             trusted_policy_public_key=args.trusted_policy_public_key,
+            max_policy_bytes=_max_policy_bytes_from_args(args),
         )
 
     return (

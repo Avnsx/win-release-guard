@@ -102,6 +102,14 @@ def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -
     assert "python tools/scan_for_secret_material.py" in text
 
 
+def test_publish_policy_workflow_fails_on_source_diagnostics_error_events() -> None:
+    text = _workflow_text()
+
+    assert "source_diagnostics" in text
+    assert 'event.get("severity") == "error"' in text
+    assert "source diagnostics error events block publish" in text
+
+
 def test_publish_policy_workflow_uses_pages_artifact_deployment_actions() -> None:
     text = _workflow_text()
 
@@ -132,3 +140,12 @@ def test_publish_policy_workflow_verifies_live_pages_after_deploy() -> None:
     verify_job = text.split("verify-live-pages:", 1)[1]
     assert SECRET_NAME not in verify_job
     assert "contents: write" not in verify_job
+
+
+def test_publish_policy_workflow_does_not_rely_only_on_schedule() -> None:
+    text = _workflow_text()
+
+    assert "workflow_dispatch:" in text
+    assert "schedule:" in text
+    assert "verify-live-pages:" in text
+    assert "python -m win11_release_guard --check-policy-source --check-public-pages" in text

@@ -108,6 +108,31 @@ def test_default_public_pages_urls_use_renamed_repository_path() -> None:
     }
 
 
+def test_program_version_identity_markers_are_current() -> None:
+    from win11_release_guard import __version__
+    from win11_release_guard.config import DEFAULT_USER_AGENT
+    from win11_release_guard.policy_schema import GENERATOR_VERSION
+    from win11_release_guard.version import (
+        client_application_id,
+        generator_version,
+        package_version,
+        runtime_user_agent,
+    )
+    from win11_release_guard.wua_probe import CLIENT_APPLICATION_ID
+
+    expected_version = "0.3.0"
+    expected_identity = f"win11_release_guard/{expected_version}"
+
+    assert __version__ == expected_version
+    assert package_version() == expected_version
+    assert runtime_user_agent() == expected_identity
+    assert generator_version() == expected_identity
+    assert client_application_id() == expected_identity
+    assert DEFAULT_USER_AGENT == expected_identity
+    assert GENERATOR_VERSION == expected_identity
+    assert CLIENT_APPLICATION_ID == expected_identity
+
+
 def test_removed_prototype_entrypoint_is_absent() -> None:
     assert not (ROOT / LEGACY_PROTOTYPE_NAME).exists()
 

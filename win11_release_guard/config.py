@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from .json_utils import DEFAULT_MAX_POLICY_BYTES, max_bytes_from_env
+from .version import runtime_user_agent
+
 
 DEFAULT_RELEASE_HEALTH_URL = (
     "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
@@ -20,12 +23,19 @@ DEFAULT_PUBLISHED_POLICY_URLS = {
 }
 POLICY_URL_ENV_VAR = "WIN11_RELEASE_GUARD_POLICY_URL"
 STRICT_PRODUCTION_ENV_VAR = "WIN11_RELEASE_GUARD_STRICT_PRODUCTION"
+MAX_POLICY_BYTES_ENV_VAR = "WIN11_RELEASE_GUARD_MAX_POLICY_BYTES"
 
-DEFAULT_USER_AGENT = "win11_release_guard/0.2"
+DEFAULT_USER_AGENT = runtime_user_agent()
 DEFAULT_CACHE_FILE_NAME = "windows-release-policy.json"
 DEFAULT_QUALITY_POLICY = "b_release_only"
 DEFAULT_CACHE_MAX_AGE_HOURS = 72
 DEFAULT_STALE_CACHE_MAX_AGE_HOURS = 720
+DEFAULT_POLICY_WARNING_AGE_DAYS = 14
+DEFAULT_POLICY_STRICT_STALE_AGE_DAYS = 45
+DEFAULT_POLICY_WARNING_AGE_SECONDS = DEFAULT_POLICY_WARNING_AGE_DAYS * 24 * 60 * 60
+DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS = DEFAULT_POLICY_STRICT_STALE_AGE_DAYS * 24 * 60 * 60
+LIVE_POLICY_FRESHNESS_WARNING_AGE_HOURS = DEFAULT_POLICY_WARNING_AGE_DAYS * 24
+STRICT_PRODUCTION_MAX_LIVE_POLICY_AGE_HOURS = DEFAULT_POLICY_STRICT_STALE_AGE_DAYS * 24
 DEFAULT_TRUSTED_POLICY_KEY_ID = "win11_release_guard-policy-2026-05"
 DEFAULT_TRUSTED_POLICY_PUBLIC_KEY = "EyYjpk2UGyF2uutZg3PE5+p6gN2sMmSl6mRscTmmz9s="
 DEFAULT_HTTP_TIMEOUT_SECONDS = 12.0
@@ -67,10 +77,12 @@ class ReleaseCheckerConfig:
     allow_server_evaluation: bool = False
     warn_on_preview_installed: bool = True
     disallow_preview_installed: bool = False
+    max_policy_bytes: int = field(default_factory=lambda: max_policy_bytes_from_env())
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "policy_url", normalize_policy_url(self.policy_url))
         object.__setattr__(self, "strict_production", bool(self.strict_production))
+        object.__setattr__(self, "max_policy_bytes", _normalize_positive_int(self.max_policy_bytes, DEFAULT_MAX_POLICY_BYTES))
         if self.strict_production:
             object.__setattr__(self, "allow_runtime_release_health_html", False)
             object.__setattr__(self, "allow_unsigned_policy", False)
@@ -94,6 +106,18 @@ def policy_url_from_env() -> str | None:
 def strict_production_from_env() -> bool:
     value = str(os.environ.get(STRICT_PRODUCTION_ENV_VAR) or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
+
+
+def _normalize_positive_int(value: int | str | None, default: int) -> int:
+    try:
+        parsed = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def max_policy_bytes_from_env() -> int:
+    return max_bytes_from_env(MAX_POLICY_BYTES_ENV_VAR, DEFAULT_MAX_POLICY_BYTES)
 
 
 def resolve_policy_url(configured_policy_url: str | None) -> str | None:
@@ -123,7 +147,11 @@ __all__ = [
     "DEFAULT_PANTHER_TAIL_MAX_BYTES",
     "DEFAULT_PAGES_BASE_URL",
     "DEFAULT_POWERSHELL_TIMEOUT_SECONDS",
+    "DEFAULT_POLICY_STRICT_STALE_AGE_DAYS",
+    "DEFAULT_POLICY_STRICT_STALE_AGE_SECONDS",
     "DEFAULT_POLICY_URL",
+    "DEFAULT_POLICY_WARNING_AGE_DAYS",
+    "DEFAULT_POLICY_WARNING_AGE_SECONDS",
     "DEFAULT_PUBLISHED_POLICY_URLS",
     "DEFAULT_QUALITY_POLICY",
     "DEFAULT_RELEASE_HEALTH_URL",
@@ -134,10 +162,14 @@ __all__ = [
     "DEFAULT_WUA_MAX_HISTORY",
     "DEFAULT_WUA_MAX_RELEVANT_UPDATES",
     "DEFAULT_WUA_TIMEOUT_SECONDS",
+    "LIVE_POLICY_FRESHNESS_WARNING_AGE_HOURS",
+    "MAX_POLICY_BYTES_ENV_VAR",
     "POLICY_URL_ENV_VAR",
     "ReleaseCheckerConfig",
+    "STRICT_PRODUCTION_MAX_LIVE_POLICY_AGE_HOURS",
     "STRICT_PRODUCTION_ENV_VAR",
     "normalize_policy_url",
+    "max_policy_bytes_from_env",
     "policy_url_from_env",
     "policy_url_source",
     "resolve_policy_url",

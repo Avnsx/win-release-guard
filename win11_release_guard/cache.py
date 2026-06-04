@@ -8,7 +8,7 @@ from pathlib import Path, PurePath, PureWindowsPath
 
 from .config import DEFAULT_CACHE_FILE_NAME, DEFAULT_CACHE_MAX_AGE_HOURS
 from .exceptions import PolicyParseError
-from .json_utils import DEFAULT_MAX_JSON_BYTES, StrictJSONError, strict_json_object
+from .json_utils import DEFAULT_MAX_POLICY_BYTES, StrictJSONError, strict_json_object
 from .models import ReleasePolicy
 
 
@@ -65,10 +65,10 @@ def is_policy_cache_fresh(
 def load_policy_cache(path: str | Path) -> ReleasePolicy:
     cache_path = Path(path)
     try:
-        if cache_path.stat().st_size > DEFAULT_MAX_JSON_BYTES:
+        if cache_path.stat().st_size > DEFAULT_MAX_POLICY_BYTES:
             raise StrictJSONError(
                 f"Cached release policy at {cache_path} is too large: "
-                f"exceeds {DEFAULT_MAX_JSON_BYTES} bytes."
+                f"exceeds safety cap of {DEFAULT_MAX_POLICY_BYTES} bytes."
             )
         data = strict_json_object(cache_path.read_bytes(), label=f"Cached release policy at {cache_path}")
         return ReleasePolicy.from_dict(data)

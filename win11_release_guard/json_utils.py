@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from typing import Any
 
-DEFAULT_MAX_JSON_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_POLICY_BYTES = 256 * 1024 * 1024
+DEFAULT_MAX_MICROSOFT_SOURCE_BYTES = 256 * 1024 * 1024
+DEFAULT_MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+DEFAULT_MAX_SIGNATURE_BYTES = 16 * 1024
+DEFAULT_MAX_TRUSTED_POLICY_KEYS_BYTES = 1024 * 1024
+DEFAULT_MAX_JSON_BYTES = DEFAULT_MAX_POLICY_BYTES
+
+
+def max_bytes_from_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 class StrictJSONError(ValueError):
@@ -53,7 +70,7 @@ def strict_json_loads(
         try:
             text = bytes(data).decode("utf-8-sig")
         except UnicodeDecodeError as exc:
-            raise StrictJSONError(f"{label} is not valid UTF-8 JSON: {exc}") from exc
+            raise StrictJSONError(f"{label} is not valid UTF-8 JSON.") from exc
     else:
         text = data.lstrip("\ufeff")
 
@@ -81,7 +98,13 @@ def strict_json_object(
 
 __all__ = [
     "DEFAULT_MAX_JSON_BYTES",
+    "DEFAULT_MAX_MANIFEST_BYTES",
+    "DEFAULT_MAX_MICROSOFT_SOURCE_BYTES",
+    "DEFAULT_MAX_POLICY_BYTES",
+    "DEFAULT_MAX_SIGNATURE_BYTES",
+    "DEFAULT_MAX_TRUSTED_POLICY_KEYS_BYTES",
     "StrictJSONError",
+    "max_bytes_from_env",
     "strict_json_loads",
     "strict_json_object",
 ]

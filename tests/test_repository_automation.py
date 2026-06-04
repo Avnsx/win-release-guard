@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 WORKFLOWS = ROOT / ".github" / "workflows"
 README = ROOT / "README.md"
+RELEASE_WORKFLOW = WORKFLOWS / "release.yml"
 
 
 BAD_TOKEN_PATTERNS = (
@@ -130,7 +131,7 @@ def test_readme_documents_branding_and_runtime_trust_model() -> None:
     text = _read(README)
     normalized = " ".join(text.split())
 
-    assert text.startswith("# win11_release_guard\n\n")
+    assert text.startswith("# Windows 11 Release Guard\n\n")
     assert "Windows release policy guard for broad-fleet Windows 11 version checks." in text
     assert "installed console command, and Python import package use the same `win11_release_guard` name" in normalized
     assert "GitHub repo: `https://github.com/Avnsx/win11_release_guard`" in text
@@ -157,13 +158,85 @@ def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> Non
         text = _read(workflow)
         lowered = text.lower()
 
-        assert "contents: write" not in text
+        if workflow.name == "release.yml":
+            assert "contents: write" in text
+            lowered = lowered.replace("gh_token: ${{ github.token }}", "")
+        else:
+            assert "contents: write" not in text
         assert "pull-requests: write" not in text
         assert "issues: write" not in text
         insecure_node_opt_out = "ACTIONS_ALLOW_USE_" + "UNSECURE_NODE_VERSION"
         assert insecure_node_opt_out not in text
         for pattern in BAD_TOKEN_PATTERNS:
             assert pattern.lower() not in lowered
+
+
+def test_release_workflow_exists_with_explicit_tagged_triggers() -> None:
+    text = _read(RELEASE_WORKFLOW)
+
+    assert RELEASE_WORKFLOW.exists()
+    assert "name: Release" in text
+    assert "workflow_dispatch:" in text
+    assert "tag:" in text
+    assert "create_tag:" in text
+    assert "draft:" in text
+    assert "push:" in text
+    assert '"v*.*.*"' in text
+    assert "contents: write" in text
+    assert "pages: write" not in text
+    assert "id-token: write" not in text
+
+
+def test_release_workflow_validates_tag_version_parity_before_publication() -> None:
+    text = _read(RELEASE_WORKFLOW)
+
+    assert r"^v[0-9]+\.[0-9]+\.[0-9]+$" in text
+    assert 'version="${tag#v}"' in text
+    assert "tomllib.loads" in text
+    assert 'data["project"]["version"]' in text
+    assert "does not match pyproject version" in text
+    assert "python tools/check_version_consistency.py" in text
+    assert "Tag '${tag}' does not exist" in text
+    assert "create_tag=true is allowed only from main" in text
+
+
+def test_release_workflow_runs_required_gates_and_attaches_clean_archive() -> None:
+    text = _read(RELEASE_WORKFLOW)
+
+    assert "actions/checkout@v6" in text
+    assert "actions/setup-python@v6" in text
+    assert 'python-version: "3.12"' in text
+    assert 'python -m pip install -e ".[test]"' in text
+    assert "python -m compileall -q win11_release_guard tools tests" in text
+    assert "python tools/check_project_identity.py" in text
+    assert "python tools/check_github_action_versions.py" in text
+    assert "python tools/check_version_consistency.py" in text
+    assert "python tools/check_dependency_freshness.py --output dependency-freshness.json" in text
+    assert "pytest -q --durations=20" in text
+    assert "python -m win11_release_guard --self-test" in text
+    assert "python -m win11_release_guard --check-policy-source" in text
+    assert "python -m win11_release_guard --check-public-pages" in text
+    assert "python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip --skip-test-run" in text
+    assert "python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip --skip-test-run" in text
+    assert "python tools/scan_for_secret_material.py" in text
+    assert "gh release create" in text
+    assert "dist/win11_release_guard-source.zip#win11_release_guard-source.zip" in text
+    assert "--notes-file \".tmp/release-notes.md\"" in text
+    assert 'if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ inputs.draft }}" = "true" ]; then' in text
+    assert "--draft" in text
+
+
+def test_release_workflow_uses_only_builtin_release_token_reference() -> None:
+    text = _read(RELEASE_WORKFLOW)
+    lowered = text.lower()
+
+    assert "GH_TOKEN: ${{ github.token }}" in text
+    assert ("github" + "_pat_") not in lowered
+    assert ("gh" + "p_") not in lowered
+    assert "personal access token" not in lowered
+    assert "gh-pages" not in lowered
+    assert "actions/upload-artifact@" not in text
+    assert "actions/create-release@" not in text
 
 
 def test_security_automation_documents_action_pinning_policy() -> None:

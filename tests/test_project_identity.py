@@ -83,7 +83,7 @@ def test_project_identity_scanner_rejects_old_identity_in_bundled_policy(tmp_pat
 def test_project_identity_scanner_verifies_clean_bundled_policy_signature(monkeypatch, tmp_path: Path) -> None:
     policy = _write(
         tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY,
-        '{"generator_version": "win11_release_guard/0.2"}\n',
+        '{"generator_version": "win11_release_guard/0.3.0"}\n',
     )
     signature = _write(tmp_path / check_project_identity.SIGNED_BUNDLED_SIGNATURE, "signature\n")
     calls: list[tuple[bytes, bytes]] = []
@@ -100,7 +100,7 @@ def test_project_identity_scanner_verifies_clean_bundled_policy_signature(monkey
 
 
 def test_project_identity_scanner_fails_unsigned_bundled_policy(tmp_path: Path) -> None:
-    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, '{"generator": "win11_release_guard/0.2"}\n')
+    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, '{"generator": "win11_release_guard/0.3.0"}\n')
 
     findings = check_project_identity.check_project_identity(tmp_path, (Path("win11_release_guard"),))
 

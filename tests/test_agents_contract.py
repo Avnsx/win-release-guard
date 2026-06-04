@@ -7,6 +7,10 @@ def _agents_text() -> str:
     return (Path(__file__).resolve().parents[1] / "AGENTS.md").read_text(encoding="utf-8")
 
 
+def _repo_text(relative_path: str) -> str:
+    return (Path(__file__).resolve().parents[1] / relative_path).read_text(encoding="utf-8")
+
+
 def test_agents_contract_exists() -> None:
     assert (Path(__file__).resolve().parents[1] / "AGENTS.md").is_file()
 
@@ -21,6 +25,29 @@ def test_agents_contract_locks_public_and_import_names() -> None:
     assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
     assert "Console script: `win11_release_guard`" in text
     assert "python -m win11_release_guard" in text
+
+
+def test_agents_contract_documents_product_display_name_boundary() -> None:
+    text = _agents_text()
+
+    assert "## Product Display Name" in text
+    assert "`Windows 11 Release Guard`" in text
+    assert "Markdown headings and human-facing prose" in text
+    assert "remain `win11_release_guard`" in text
+    assert "Do not replace technical examples" in text
+
+
+def test_human_facing_markdown_and_pages_headings_use_display_name() -> None:
+    readme = _repo_text("README.md")
+    release_lane = _repo_text("docs/tagged-release-lane.md")
+    generator = _repo_text("win11_release_guard/policy_generator.py")
+    release_lane_text = " ".join(release_lane.split())
+
+    assert readme.startswith("# Windows 11 Release Guard\n")
+    assert "Windows 11 Release Guard tells administrators" in readme
+    assert "distribution checkpoints for Windows 11 Release Guard source archives" in release_lane_text
+    assert "<title>Windows 11 Release Guard</title>" in generator
+    assert "<h1>Windows 11 Release Guard</h1>" in generator
 
 
 def test_agents_contract_locks_secret_and_token_rules() -> None:
@@ -64,6 +91,45 @@ def test_agents_contract_requires_live_gate_for_deployment_affecting_changes() -
     assert "If live network is unavailable" in text
     assert "do not claim live success" in text
     assert "exact failing URL, status, and" in text
+
+
+def test_agents_contract_documents_api_v1_and_key_overlap_compatibility() -> None:
+    agents = _agents_text()
+    signing = _repo_text("docs/policy-signing.md")
+    readme = _repo_text("README.md")
+
+    for text in (agents, signing, readme):
+        assert "/api/v1" in text
+        assert "24 months" in text
+    assert "verification overlap" in signing
+    assert "verify_not_after_utc" in signing
+
+
+def test_agents_contract_links_tagged_release_lane() -> None:
+    agents = _agents_text()
+    readme = _repo_text("README.md")
+    security = _repo_text("docs/security-automation.md")
+    release_lane = _repo_text("docs/tagged-release-lane.md")
+
+    assert "docs/tagged-release-lane.md" in agents
+    assert "[Tagged release lane](docs/tagged-release-lane.md)" in readme
+    assert "docs/tagged-release-lane.md" in security
+    assert "vX.Y.Z" in release_lane
+    assert "create_tag=true" in release_lane
+    assert "python tools/check_version_consistency.py" in release_lane
+    assert "GitHub API token" in release_lane
+    assert "must never be exposed" in release_lane
+
+
+def test_security_automation_docs_do_not_rely_only_on_schedule() -> None:
+    text = _repo_text("docs/security-automation.md")
+
+    assert "workflow_dispatch" in text
+    assert "README badges" in text
+    assert "--check-policy-source" in text
+    assert "--check-public-pages" in text
+    assert "schedule is not the only control" in text
+    assert "source-diagnostics `error` events" in text
 
 
 def test_agents_contract_mentions_codeql_settings_limit() -> None:
