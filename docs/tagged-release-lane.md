@@ -11,6 +11,7 @@ Related links: [docs index](README.md) | [wiki tagged release lane](../wiki/Tagg
 | Tag format | `vX.Y.Z`, matching `pyproject.toml` and runtime identity. |
 | Workflow | `.github/workflows/release.yml`. |
 | Artifact | `dist/win11_release_guard-source.zip`. |
+| License | Repository `LICENSE.txt` is the GPL-3.0 license file and is included in the validated source archive. |
 | Default release state | Draft unless explicitly changed by workflow input. |
 | Token | Built-in `github.token`; no PAT. |
 | Scope | Source archive release, not Pages policy deployment. |

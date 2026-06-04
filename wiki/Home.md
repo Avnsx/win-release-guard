@@ -73,3 +73,4 @@ python -m win11_release_guard --check-public-pages
 | Pages dashboard | https://avnsx.github.io/win11_release_guard/ |
 | Public policy JSON | https://avnsx.github.io/win11_release_guard/windows-release-policy.json |
 | Releases | https://github.com/Avnsx/win11_release_guard/releases |
+| License | https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt |

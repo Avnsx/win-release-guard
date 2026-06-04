@@ -11,6 +11,7 @@ Use this when publishing a GitHub Release with a validated clean source archive.
 | Workflow | `.github/workflows/release.yml` |
 | Tag | `vX.Y.Z`, matching package/runtime version |
 | Artifact | `dist/win11_release_guard-source.zip` |
+| License | `LICENSE.txt` carries the repository GPL-3.0 text and is included in the clean source archive. |
 | Default state | Draft release |
 | Token | Built-in GitHub token only |
 

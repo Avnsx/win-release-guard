@@ -35,6 +35,12 @@ Related links: [docs index](README.md) | [wiki architecture](../wiki/Architectur
 | `check_dependency_freshness.py` | Direct dependency freshness report. |
 | `check_commit_message.py` | Commit message hygiene. |
 
+## Repository Legal File
+
+| File | Responsibility |
+| --- | --- |
+| `LICENSE.txt` | GPL-3.0 license text for repository source distribution and validated clean archive consumers. |
+
 ## Test Layout
 
 | Area | Representative tests |

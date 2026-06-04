@@ -28,6 +28,10 @@ Strict mode requires fresh live signed remote JSON. Cache and bundled fallback r
 
 No. Policy JSON, signatures, manifests, dashboard files, and public keys are non-secret. Private signing keys and tokens must never be committed.
 
+## What license does the repository use?
+
+The repository uses GPL-3.0. The full license text lives in `LICENSE.txt` and is included in validated clean source archives.
+
 ## Can `/api/v1` change?
 
 Fields can be added compatibly. Existing public v1 paths and contract fields should not be removed casually.

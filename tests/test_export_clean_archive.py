@@ -16,6 +16,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert created == archive_path
     assert "AGENTS.md" in names
     assert "README.md" in names
+    assert "LICENSE.txt" in names
     assert "pyproject.toml" in names
     assert ".gitignore" in names
     assert ".gitattributes" in names

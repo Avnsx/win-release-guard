@@ -28,6 +28,7 @@ INCLUDE_PATHS = (
     Path("tools"),
     Path("AGENTS.md"),
     Path("README.md"),
+    Path("LICENSE.txt"),
     Path("pyproject.toml"),
     Path(".gitignore"),
     Path(".gitattributes"),
@@ -82,6 +83,7 @@ EXCLUDED_FILE_PATTERNS = (
 REQUIRED_ARCHIVE_ENTRIES = {
     "AGENTS.md",
     "README.md",
+    "LICENSE.txt",
     "pyproject.toml",
     ".gitignore",
     ".gitattributes",

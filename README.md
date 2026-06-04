@@ -22,6 +22,7 @@ Windows 11 Release Guard tells administrators whether an existing Windows 11 dev
 | WUA role | Optional read-only secondary evidence |
 | Output | Pretty console, JSON, JSON-pretty, file output |
 | Version | `0.3.0` |
+| License | GPL-3.0, see [LICENSE.txt](LICENSE.txt) |
 
 ## Project Identity
 
@@ -144,4 +145,4 @@ See [docs/README.md](docs/README.md) for maintainer documentation and the local 
 
 Do not commit GitHub tokens, private signing keys, raw worktree ZIPs, local handover notes, generated caches, or private key scratch files. Generated policy feed data is public non-secret data, but trust comes from the detached signature and committed public verification keys.
 
-This project is independent open-source software and is not affiliated with Microsoft.
+This project is independent open-source software, licensed under GPL-3.0 in [LICENSE.txt](LICENSE.txt), and is not affiliated with Microsoft.
