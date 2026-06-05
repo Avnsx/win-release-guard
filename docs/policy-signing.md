@@ -68,5 +68,5 @@ python -m win11_release_guard --self-test
 python -m win11_release_guard --check-policy-source
 python -m win11_release_guard --check-public-pages
 pytest -q tests/test_signing.py tests/test_signing_key_management.py tests/test_policy_source_cli.py
-python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github
 ```

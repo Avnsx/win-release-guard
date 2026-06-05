@@ -16,6 +16,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert created == archive_path
     assert "AGENTS.md" in names
     assert "README.md" in names
+    assert "CHANGELOG.md" in names
     assert "LICENSE.txt" in names
     assert "pyproject.toml" in names
     assert ".gitignore" in names
@@ -23,6 +24,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert ".github/dependabot.yml" in names
     assert ".github/workflows/ci.yml" in names
     assert ".github/workflows/publish-policy.yml" in names
+    assert ".github/workflows/pypi-publish.yml" in names
     assert ".github/workflows/codeql.yml" in names
     assert ".github/workflows/pylint.yml" in names
     assert ".github/workflows/dependency-freshness.yml" in names
@@ -35,8 +37,11 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert "tools/check_project_identity.py" in names
     assert "tools/export_clean_archive.py" in names
     assert "docs/security-automation.md" in names
+    assert "wiki/Home.md" in names
+    assert "wiki/Release-v0.3.0.md" in names
     assert any(name.startswith("tests/") for name in names)
     assert any(name.startswith("docs/") for name in names)
+    assert any(name.startswith("wiki/") for name in names)
 
     for name in names:
         parts = set(Path(name).parts)
@@ -129,6 +134,29 @@ def test_export_clean_archive_rejects_old_repo_path_and_archive_name(tmp_path: P
 
     with pytest.raises(RuntimeError, match="stale repo/path identity"):
         export_clean_archive.validate_archive(archive_path, run_tests=False)
+
+
+def test_export_clean_archive_allows_pypi_oidc_but_rejects_microsoft_oidc(tmp_path: Path) -> None:
+    good_archive = tmp_path / "good-pypi-oidc.zip"
+    bad_archive = tmp_path / "bad-microsoft-oidc.zip"
+
+    with zipfile.ZipFile(good_archive, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in sorted(export_clean_archive.REQUIRED_ARCHIVE_ENTRIES):
+            content = "placeholder\n"
+            if entry == "README.md":
+                content = "PyPI Trusted Publishing uses GitHub Actions OIDC.\n"
+            archive.writestr(entry, content)
+
+    with zipfile.ZipFile(bad_archive, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in sorted(export_clean_archive.REQUIRED_ARCHIVE_ENTRIES):
+            content = "placeholder\n"
+            if entry == "README.md":
+                content = "Production generator uses Microsoft OIDC metadata auth.\n"
+            archive.writestr(entry, content)
+
+    export_clean_archive.validate_archive(good_archive, run_tests=False)
+    with pytest.raises(RuntimeError, match="active auth reference"):
+        export_clean_archive.validate_archive(bad_archive, run_tests=False)
 
 
 def test_export_clean_archive_rejects_legacy_name_in_signed_bundled_policy_json(tmp_path: Path) -> None:

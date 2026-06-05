@@ -28,6 +28,7 @@ INCLUDE_PATHS = (
     Path("tools"),
     Path("AGENTS.md"),
     Path("README.md"),
+    Path("CHANGELOG.md"),
     Path("LICENSE.txt"),
     Path("pyproject.toml"),
     Path(".gitignore"),
@@ -36,11 +37,13 @@ INCLUDE_PATHS = (
     Path(".github") / "workflows" / "ci.yml",
     Path(".github") / "workflows" / "publish-policy.yml",
     Path(".github") / "workflows" / "release.yml",
+    Path(".github") / "workflows" / "pypi-publish.yml",
     Path(".github") / "workflows" / "codeql.yml",
     Path(".github") / "workflows" / "pylint.yml",
     Path(".github") / "workflows" / "dependency-freshness.yml",
     Path(".github") / "workflows" / "dependency-audit.yml",
     Path("docs"),
+    Path("wiki"),
 )
 
 EXCLUDED_DIR_NAMES = {
@@ -83,6 +86,7 @@ EXCLUDED_FILE_PATTERNS = (
 REQUIRED_ARCHIVE_ENTRIES = {
     "AGENTS.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE.txt",
     "pyproject.toml",
     ".gitignore",
@@ -91,6 +95,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     ".github/workflows/ci.yml",
     ".github/workflows/publish-policy.yml",
     ".github/workflows/release.yml",
+    ".github/workflows/pypi-publish.yml",
     ".github/workflows/codeql.yml",
     ".github/workflows/pylint.yml",
     ".github/workflows/dependency-freshness.yml",
@@ -111,6 +116,8 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "docs/tagged-release-lane.md",
     "docs/policy-signing.md",
     "docs/security-automation.md",
+    "wiki/Home.md",
+    "wiki/Release-v0.3.0.md",
     "tests/test_no_secret_material.py",
 }
 
@@ -130,9 +137,12 @@ FORBIDDEN_RENAMED_REPO_PATTERNS = (
 FORBIDDEN_ACTIVE_AUTH_PATTERNS = (
     "Microsoft " + "Graph",
     "Az" + "ure",
-    "OI" + "DC",
     "allow-no-" + "subscriptions",
     "WindowsUpdates" + ".Read.All",
+)
+FORBIDDEN_ACTIVE_AUTH_REGEXES = (
+    re.compile(r"\b(?:Microsoft|" + "Az" + r"ure)\b[^\n]{0,80}\bOIDC\b", flags=re.IGNORECASE),
+    re.compile(r"\bOIDC\b[^\n]{0,80}\b(?:Microsoft|" + "Az" + r"ure)\b", flags=re.IGNORECASE),
 )
 ALLOWED_HISTORICAL_AUTH_FILES = {
     "docs/architecture-insight.md",
@@ -244,6 +254,9 @@ def _validate_archive_content(archive_path: Path) -> None:
             for pattern in FORBIDDEN_ACTIVE_AUTH_PATTERNS:
                 if re.search(re.escape(pattern), auth_text, flags=re.IGNORECASE):
                     findings.append(f"{name}: active auth reference {pattern!r}")
+            for pattern in FORBIDDEN_ACTIVE_AUTH_REGEXES:
+                if pattern.search(auth_text):
+                    findings.append(f"{name}: active auth reference {pattern.pattern!r}")
 
     if findings:
         raise RuntimeError("Archive content validation failed: " + "; ".join(sorted(findings)))
@@ -262,7 +275,9 @@ def _validate_archive_extracts_and_tests_run(archive_path: Path) -> None:
             "tests",
             "tools",
             "docs",
+            "wiki",
             "README.md",
+            "CHANGELOG.md",
             "AGENTS.md",
             "pyproject.toml",
             ".github",

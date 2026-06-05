@@ -226,6 +226,20 @@ def test_release_workflow_runs_required_gates_and_attaches_clean_archive() -> No
     assert "--draft" in text
 
 
+def test_release_workflow_body_links_docs_pages_and_feed() -> None:
+    text = _read(RELEASE_WORKFLOW)
+
+    assert "Changelog: https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md" in text
+    assert (
+        "Detailed release notes: https://github.com/Avnsx/win11_release_guard/blob/main/"
+        "docs/releases/v${{ steps.release_ref.outputs.version }}.md"
+    ) in text
+    assert "Pages dashboard: https://avnsx.github.io/win11_release_guard/" in text
+    assert "Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
+    assert "pypi-publish.yml" in text
+    assert "Trusted Publishing / GitHub OIDC" in text
+
+
 def test_release_workflow_uses_only_builtin_release_token_reference() -> None:
     text = _read(RELEASE_WORKFLOW)
     lowered = text.lower()

@@ -7,6 +7,7 @@ Related links: [root README](../README.md) | [local wiki home](../wiki/Home.md) 
 | Document | Audience | Contents |
 | --- | --- | --- |
 | [../LICENSE.txt](../LICENSE.txt) | Users, redistributors, release managers | GPL-3.0 license text for repository source distribution |
+| [releases/v0.3.0.md](releases/v0.3.0.md) | Maintainers, release managers, future agents | Detailed v0.3.0 release notes, comparison basis, validation map |
 | [architecture-insight.md](architecture-insight.md) | Maintainers and future agents | Runtime flow, policy hierarchy, local evidence boundaries, generator boundaries |
 | [policy-signing.md](policy-signing.md) | Release and security maintainers | Ed25519 model, key rotation, signed bundled policy, verification commands |
 | [security-automation.md](security-automation.md) | Repository maintainers | GitHub Actions pinning, permissions, CodeQL, Dependabot, publish security |

@@ -22,6 +22,8 @@ def test_publish_policy_workflow_exists_and_has_expected_triggers() -> None:
     assert ".github/workflows/publish-policy.yml" in text
     assert "tools/generate_policy.py" in text
     assert "tools/check_project_identity.py" in text
+    assert "tools/check_version_consistency.py" in text
+    assert "pyproject.toml" in text
     assert "win11_release_guard/**" in text
 
 
@@ -99,7 +101,10 @@ def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -
     assert "validate_policy_document" in text
     assert "verify_policy_signature" in text
     assert "python tools/check_project_identity.py" in text
+    assert "python tools/check_version_consistency.py" in text
     assert "python tools/scan_for_secret_material.py" in text
+    assert "CHANGELOG.md" in text
+    assert "wiki" in text
 
 
 def test_publish_policy_workflow_fails_on_source_diagnostics_error_events() -> None:

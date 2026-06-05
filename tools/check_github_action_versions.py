@@ -5,7 +5,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -20,17 +20,53 @@ REQUIRED_ACTIONS = {
     "actions/setup-python": "v6",
     "actions/configure-pages": "v6",
     "actions/upload-pages-artifact": "v5",
+    "actions/upload-artifact": "v7",
     "actions/deploy-pages": "v5",
+    "actions/download-artifact": "v8",
 }
 ALLOWED_ACTIONS = {
     "github/codeql-action/init": {"v4"},
     "github/codeql-action/analyze": {"v4"},
 }
-ALLOWED_THIRD_PARTY_ACTIONS: dict[str, str] = {}
+PYPA_PUBLISH_ACTION_SHA = "cef221092ed1bacb1cc03d23a2d87d1d172e277b"
+ALLOWED_THIRD_PARTY_ACTIONS: dict[str, str | Mapping[str, object]] = {
+    "pypa/gh-action-pypi-publish": {
+        "sha": PYPA_PUBLISH_ACTION_SHA,
+        "workflows": (Path(".github/workflows/pypi-publish.yml"),),
+        "reason": "Official PyPA Trusted Publishing action using GitHub OIDC without stored PyPI credentials.",
+    },
+}
 
 
 def _is_github_owned_action(action: str) -> bool:
     return action.startswith("actions/") or action.startswith("github/codeql-action/")
+
+
+def _workflow_key(path: Path) -> Path:
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part == ".github" and index + 2 < len(parts) and parts[index + 1] == "workflows":
+            return Path(*parts[index : index + 3])
+    try:
+        return path.resolve().relative_to(REPO_ROOT)
+    except ValueError:
+        return path
+
+
+def _allowed_third_party_workflows(policy: str | Mapping[str, object]) -> tuple[Path, ...]:
+    if not isinstance(policy, Mapping):
+        return ()
+    workflows = policy.get("workflows")
+    if workflows is None:
+        return ()
+    return tuple(Path(workflow) for workflow in workflows)
+
+
+def _allowed_third_party_sha(policy: str | Mapping[str, object]) -> str | None:
+    if not isinstance(policy, Mapping):
+        return None
+    value = policy.get("sha")
+    return value if isinstance(value, str) else None
 
 
 @dataclass(frozen=True)
@@ -159,7 +195,8 @@ def audit_workflow(path: Path) -> list[Finding]:
             )
             continue
 
-        if use.action not in ALLOWED_THIRD_PARTY_ACTIONS:
+        policy = ALLOWED_THIRD_PARTY_ACTIONS.get(use.action)
+        if policy is None:
             findings.append(
                 Finding(
                     path=path,
@@ -181,6 +218,29 @@ def audit_workflow(path: Path) -> list[Finding]:
                         f"{use.action} is a third-party action and must be pinned to "
                         "a full 40-character commit SHA"
                     ),
+                )
+            )
+            continue
+
+        allowed_workflows = _allowed_third_party_workflows(policy)
+        if allowed_workflows and _workflow_key(use.path) not in allowed_workflows:
+            allowed = ", ".join(workflow.as_posix() for workflow in allowed_workflows)
+            findings.append(
+                Finding(
+                    path=path,
+                    line_number=use.line_number,
+                    message=f"{use.action} is allowed only in {allowed}",
+                )
+            )
+            continue
+
+        required_sha = _allowed_third_party_sha(policy)
+        if required_sha is not None and use.version != required_sha:
+            findings.append(
+                Finding(
+                    path=path,
+                    line_number=use.line_number,
+                    message=f"{use.action} must be pinned to {required_sha}, found {use.version}",
                 )
             )
 

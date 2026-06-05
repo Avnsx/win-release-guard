@@ -32,6 +32,17 @@ def test_distribution_name_and_console_script_match_import_namespace():
     assert 'include = ["win11_release_guard*"]' in pyproject
 
 
+def test_distribution_metadata_maps_author_license_and_project_urls():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'authors = [{ name = \'Mikail ("Avnsx") C.\' }]' in pyproject
+    assert 'license = "GPL-3.0-only"' in pyproject
+    assert 'license-files = ["LICENSE.txt"]' in pyproject
+    assert '[project.urls]' in pyproject
+    assert 'Repository = "https://github.com/Avnsx/win11_release_guard"' in pyproject
+    assert 'Documentation = "https://github.com/Avnsx/win11_release_guard/wiki"' in pyproject
+
+
 def test_import_has_no_side_effects(monkeypatch):
     calls = []
 

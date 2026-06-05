@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +7,20 @@ name = "win11_release_guard"
 version = "0.3.0"
 description = "Windows 11 broad-fleet release compliance guard."
 readme = "README.md"
-license = { file = "LICENSE.txt" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE.txt"]
 authors = [{ name = 'Mikail ("Avnsx") C.' }]
 requires-python = ">=3.10"
 dependencies = ["cryptography>=41"]
+
+[project.urls]
+Homepage = "https://github.com/Avnsx/win11_release_guard"
+Repository = "https://github.com/Avnsx/win11_release_guard"
+Documentation = "https://github.com/Avnsx/win11_release_guard/wiki"
+Changelog = "https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/Avnsx/win11_release_guard/issues"
+"Public Feed" = "https://avnsx.github.io/win11_release_guard/windows-release-policy.json"
+"Pages Dashboard" = "https://avnsx.github.io/win11_release_guard/"
 
 [project.optional-dependencies]
 test = ["packaging>=24", "pytest>=8"]

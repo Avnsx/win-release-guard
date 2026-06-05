@@ -135,7 +135,9 @@ jobs:
           tests
           tools
           docs
+          wiki
           README.md
+          CHANGELOG.md
           AGENTS.md
           pyproject.toml
           .github
@@ -160,7 +162,11 @@ jobs:
           - Version: ${{ steps.release_ref.outputs.version }}
           - Commit: ${commit_sha}
           - Artifact: win11_release_guard-source.zip
+          - Changelog: https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md
+          - Detailed release notes: https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v${{ steps.release_ref.outputs.version }}.md
+          - Pages dashboard: https://avnsx.github.io/win11_release_guard/
           - Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json
+          - PyPI package lane: publishing is separate and runs through `.github/workflows/pypi-publish.yml` with Trusted Publishing / GitHub OIDC.
           - Runtime clients use the signed public JSON feed and detached Ed25519 signature; GitHub Release assets are distribution artifacts, not policy trust roots.
           EOF
 

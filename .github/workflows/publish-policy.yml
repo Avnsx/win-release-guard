@@ -11,6 +11,7 @@ on:
       - ".github/workflows/publish-policy.yml"
       - "tools/generate_policy.py"
       - "tools/check_project_identity.py"
+      - "tools/check_version_consistency.py"
       - "tools/scan_for_secret_material.py"
       - "pyproject.toml"
       - "win11_release_guard/**"
@@ -97,6 +98,9 @@ jobs:
       - name: Check project identity
         run: python tools/check_project_identity.py
 
+      - name: Check version consistency
+        run: python tools/check_version_consistency.py
+
       - name: Scan for secret material
         run: >
           python tools/scan_for_secret_material.py
@@ -105,7 +109,9 @@ jobs:
           tests
           tools
           docs
+          wiki
           README.md
+          CHANGELOG.md
           AGENTS.md
           pyproject.toml
           .github

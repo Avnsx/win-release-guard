@@ -17,6 +17,13 @@ def _write_workflow(tmp_path: Path, text: str) -> Path:
     return workflow
 
 
+def _write_named_workflow(tmp_path: Path, name: str, text: str) -> Path:
+    workflow = tmp_path / ".github" / "workflows" / name
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(text, encoding="utf-8")
+    return workflow
+
+
 def _minimal_workflow(uses_line: str, *, include_node24: bool = True) -> str:
     env = (
         "env:\n"
@@ -135,6 +142,70 @@ def test_audit_allows_allowlisted_third_party_action_with_full_sha(tmp_path: Pat
     findings = check_github_action_versions.audit_workflows([workflow])
 
     assert findings == []
+
+
+def test_audit_allows_pypa_publish_action_only_in_pypi_workflow(tmp_path: Path, monkeypatch) -> None:
+    sha = check_github_action_versions.PYPA_PUBLISH_ACTION_SHA
+    monkeypatch.setattr(
+        check_github_action_versions,
+        "ALLOWED_THIRD_PARTY_ACTIONS",
+        {
+            "pypa/gh-action-pypi-publish": {
+                "sha": sha,
+                "workflows": (Path(".github/workflows/pypi-publish.yml"),),
+            }
+        },
+    )
+    workflow = _write_named_workflow(tmp_path, "pypi-publish.yml", _minimal_workflow(f"pypa/gh-action-pypi-publish@{sha}"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert findings == []
+
+
+def test_audit_rejects_pypa_publish_action_outside_pypi_workflow(tmp_path: Path, monkeypatch) -> None:
+    sha = check_github_action_versions.PYPA_PUBLISH_ACTION_SHA
+    monkeypatch.setattr(
+        check_github_action_versions,
+        "ALLOWED_THIRD_PARTY_ACTIONS",
+        {
+            "pypa/gh-action-pypi-publish": {
+                "sha": sha,
+                "workflows": (Path(".github/workflows/pypi-publish.yml"),),
+            }
+        },
+    )
+    workflow = _write_named_workflow(tmp_path, "not-pypi.yml", _minimal_workflow(f"pypa/gh-action-pypi-publish@{sha}"))
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert len(findings) == 1
+    assert "is allowed only in .github/workflows/pypi-publish.yml" in findings[0].message
+
+
+def test_audit_rejects_pypa_publish_action_wrong_sha(tmp_path: Path, monkeypatch) -> None:
+    sha = check_github_action_versions.PYPA_PUBLISH_ACTION_SHA
+    wrong_sha = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setattr(
+        check_github_action_versions,
+        "ALLOWED_THIRD_PARTY_ACTIONS",
+        {
+            "pypa/gh-action-pypi-publish": {
+                "sha": sha,
+                "workflows": (Path(".github/workflows/pypi-publish.yml"),),
+            }
+        },
+    )
+    workflow = _write_named_workflow(
+        tmp_path,
+        "pypi-publish.yml",
+        _minimal_workflow(f"pypa/gh-action-pypi-publish@{wrong_sha}"),
+    )
+
+    findings = check_github_action_versions.audit_workflows([workflow])
+
+    assert len(findings) == 1
+    assert f"must be pinned to {sha}" in findings[0].message
 
 
 def test_audit_cli_returns_nonzero_for_stale_fixture(tmp_path: Path, capsys) -> None:

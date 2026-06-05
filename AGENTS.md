@@ -81,12 +81,14 @@ Canonical repository and feed:
 ## GitHub Actions Pinning Policy
 
 - GitHub-owned first-party actions may use audited major tags only when listed in `tools/check_github_action_versions.py`.
-- Current audited first-party actions are `actions/checkout@v6`, `actions/setup-python@v6`, `actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`, and `github/codeql-action/*@v4`.
+- Current audited first-party actions are `actions/checkout@v6`, `actions/setup-python@v6`, `actions/configure-pages@v6`, `actions/upload-pages-artifact@v5`, `actions/deploy-pages@v5`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`, and `github/codeql-action/*@v4`.
 - Third-party actions are forbidden unless explicitly allowlisted in the audit tool and pinned to a full 40-character commit SHA.
+- The only current third-party exception is `pypa/gh-action-pypi-publish` in `.github/workflows/pypi-publish.yml`, pinned to `cef221092ed1bacb1cc03d23a2d87d1d172e277b` for PyPI Trusted Publishing via GitHub OIDC without stored PyPI credentials.
 - Do not add third-party actions without updating the audit tool, tests, and security automation docs with the reason.
 - Keep workflow token permissions minimal; the publish workflow must not request `contents: write`.
 - Only `.github/workflows/release.yml` may request `contents: write`, and only
   for explicit tagged GitHub Release publication.
+- `.github/workflows/pypi-publish.yml` may request `id-token: write` only in the PyPI publish job; it must not define PyPI API tokens, Twine credentials, usernames, passwords, or credentialed repository URLs.
 - Dependabot covers `github-actions` updates for GitHub-owned action majors.
 
 ## Deployment-Affecting Live Verification Gate
@@ -103,7 +105,7 @@ python -m compileall -q win11_release_guard tools
 pytest -q
 python tools/generate_signing_key.py --out-dir .tmp/signing-test --key-id test-policy-key --created-at-utc 2026-06-03T00:00:00+00:00
 python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest --signing-key-file .tmp/signing-test/private-key.b64
-python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github
 python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip
 python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip
 python -m win11_release_guard --check-policy-source

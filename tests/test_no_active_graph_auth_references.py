@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -11,9 +12,12 @@ REQUIRED_README_STATEMENT = (
 FORBIDDEN_PATTERNS = (
     "Microsoft " + "Graph",
     "Az" + "ure",
-    "OI" + "DC",
     "allow-no-" + "subscriptions",
     "WindowsUpdates" + ".Read.All",
+)
+FORBIDDEN_REGEXES = (
+    re.compile(r"\b(?:Microsoft|" + "Az" + r"ure)\b[^\n]{0,80}\bOIDC\b", flags=re.IGNORECASE),
+    re.compile(r"\bOIDC\b[^\n]{0,80}\b(?:Microsoft|" + "Az" + r"ure)\b", flags=re.IGNORECASE),
 )
 SCAN_TARGETS = (
     ROOT / "README.md",
@@ -82,5 +86,11 @@ def test_no_active_authenticated_microsoft_api_references() -> None:
                 continue
             line = text.count("\n", 0, index) + 1
             findings.append(f"{path.relative_to(ROOT)}:{line}: {pattern}")
+        for pattern in FORBIDDEN_REGEXES:
+            match = pattern.search(text)
+            if match is None:
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            findings.append(f"{path.relative_to(ROOT)}:{line}: {pattern.pattern}")
 
     assert findings == []

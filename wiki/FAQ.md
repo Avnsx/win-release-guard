@@ -32,6 +32,22 @@ No. Policy JSON, signatures, manifests, dashboard files, and public keys are non
 
 The repository uses GPL-3.0. The full license text lives in `LICENSE.txt` and is included in validated clean source archives.
 
+## Does PyPI publishing need a PyPI token?
+
+No. The current publish workflow uses PyPI Trusted Publishing with GitHub Actions OIDC. Configure PyPI with project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, and environment `pypi`.
+
+## Does local wiki source publish automatically?
+
+No. The repository `wiki/` folder is source/staging only. Push the live GitHub Wiki repository separately when explicitly intended.
+
+## Does a Pending Trusted Publisher reserve the package name?
+
+No. If the PyPI name is already owned by someone else, stop and report instead of publishing.
+
+## Is TestPyPI configured?
+
+No. Add it only as a separate lane with its own TestPyPI Trusted Publisher and GitHub Environment such as `testpypi`.
+
 ## Can `/api/v1` change?
 
 Fields can be added compatibly. Existing public v1 paths and contract fields should not be removed casually.

@@ -10,7 +10,7 @@ REQUIRED_GATE_COMMANDS = (
     "python -m compileall -q win11_release_guard tools",
     "pytest -q",
     "python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html",
-    "python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github",
+    "python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github",
     "python -m win11_release_guard --check-policy-source",
     "python -m win11_release_guard --check-public-pages",
 )

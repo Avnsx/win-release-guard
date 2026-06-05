@@ -13,7 +13,7 @@ Related links: [docs index](README.md) | [wiki agent chokepoints](../wiki/Agent-
 | Fallback cache/bundled policy appears production-green in strict mode. | Strict mode needs live signed remote JSON. | `pytest -q tests/test_runtime_policy_sources.py` |
 | 26H1 becomes existing-device target. | Keep special/new-devices-only exclusion semantics. | `pytest -q tests/test_remote_policy.py tests/test_policy_generator.py` |
 | Public API aliases break. | Preserve `/api/v1` compatibility. | `python -m win11_release_guard --check-public-pages` |
-| Private material enters source or generated Pages. | Keep private keys in GitHub secret / ignored scratch only. | `python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github` |
+| Private material enters source or generated Pages. | Keep private keys in GitHub secret / ignored scratch only. | `python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github` |
 
 ## Do Not
 

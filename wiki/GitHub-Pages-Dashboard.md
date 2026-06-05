@@ -28,6 +28,8 @@ Use this when changing the generated static dashboard or public Pages endpoint c
 | `api/v1/manifest.json` | Yes |
 | `robots.txt`, `sitemap.xml`, `.nojekyll` | Yes for Pages support |
 
+Local `site/` is generated output for testing and must not be committed. The Pages workflow regenerates `site/`, signs policy output, uploads the Pages artifact, deploys it, and then verifies live endpoints. Use workflow_dispatch to refresh Pages manually. Docs/wiki-only changes do not need a Pages rebuild unless they change dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+
 ## Rules
 
 | Do | Do not |

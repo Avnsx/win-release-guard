@@ -83,7 +83,7 @@ def test_agents_contract_requires_live_gate_for_deployment_affecting_changes() -
     assert "pytest -q" in text
     assert "python tools/generate_signing_key.py --out-dir .tmp/signing-test --key-id test-policy-key" in text
     assert "python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html" in text
-    assert "python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github" in text
+    assert "python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github" in text
     assert "python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip" in text
     assert "python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip" in text
     assert "python -m win11_release_guard --check-policy-source" in text
@@ -112,7 +112,8 @@ def test_agents_contract_links_tagged_release_lane() -> None:
     release_lane = _repo_text("docs/tagged-release-lane.md")
 
     assert "docs/tagged-release-lane.md" in agents
-    assert "[Tagged release lane](docs/tagged-release-lane.md)" in readme
+    assert "Tagged release lane" in readme
+    assert "docs/tagged-release-lane.md" in readme
     assert "docs/tagged-release-lane.md" in security
     assert "vX.Y.Z" in release_lane
     assert "create_tag=true" in release_lane

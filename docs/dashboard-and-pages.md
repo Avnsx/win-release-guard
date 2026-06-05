@@ -17,6 +17,8 @@ Related links: [docs index](README.md) | [wiki dashboard](../wiki/GitHub-Pages-D
 | `site/api/v1/manifest.json` | Compatibility manifest alias. |
 | `site/robots.txt`, `site/sitemap.xml`, `site/.nojekyll` | GitHub Pages support files. |
 
+`site/` is generated output. Local `site/` is for testing and must not be committed; `.github/workflows/publish-policy.yml` regenerates it inside GitHub Actions, uploads it with `actions/upload-pages-artifact`, and deploys it with `actions/deploy-pages`. Use workflow_dispatch to refresh Pages manually. Docs/wiki-only changes do not need a Pages rebuild unless they affect dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+
 ## Dashboard Contract
 
 | Area | Must show |

@@ -1,0 +1,97 @@
+# Release v0.3.0
+
+Compact human summary of the `0.3.0` hardening and packaging release. Code, tests, workflows, `pyproject.toml`, README, docs, local wiki source, and `AGENTS.md` remain source truth.
+
+---
+
+## Pick Your Path
+
+| You are | Read | Why |
+| --- | --- | --- |
+| User | [[Quick Start|Quick-Start]] | Run the guard and understand output/exit codes. |
+| Admin / RMM owner | [[CLI and RMM Usage|CLI-and-RMM-Usage]] | Integrate JSON output and strict-production checks. |
+| Maintainer | [[Build, Test and Release|Build-Test-and-Release]] | Reproduce local gates and release checks. |
+| Release manager | [[Tagged Release Lane|Tagged-Release-Lane]] | Publish a validated source archive and understand the separate PyPI lane. |
+| Future agent | [[Agent Chokepoints|Agent-Chokepoints]] | Avoid known regression traps. |
+
+## Highlights
+
+| Area | 0.3.0 state |
+| --- | --- |
+| Versioning | Package/runtime/generator/WUA identity is centralized at `win11_release_guard/0.3.0`. |
+| Packaging | `pyproject.toml` defines GPL-3.0-only metadata, `LICENSE.txt`, project URLs, console script, dependencies, test extras, and package data. |
+| Trust | Runtime uses public policy JSON plus detached Ed25519 signature; clients do not authenticate to GitHub. |
+| Freshness | Manifest/dashboard carry epoch freshness fields; browser age uses `Date.now()` and CLI checks enforce 14/45-day gates. |
+| Dashboard | Static Pages shows trust, Source Diagnostics, target builds, feed currency, and API links. |
+| JSON hardening | Strict JSON rejects duplicate keys, non-finite numbers, invalid UTF-8, wrong object top-level shape, and oversized payloads. |
+| Local truth | Build evidence beats `ProductName`, WMI `Caption`, and `DisplayVersion`; those values remain raw diagnostics. |
+| WUA | Optional read-only secondary probe; never decides the policy verdict. |
+| Release lane | `release.yml` validates `vX.Y.Z` tag/version parity, links changelog/release notes/Pages/feed in the release body, and attaches only a validated clean source archive. |
+| PyPI lane | `pypi-publish.yml` builds wheel/sdist and publishes through Trusted Publishing / GitHub OIDC only after tag or published-release gates. |
+
+## What Changed By Area
+
+| Area | Files / functions |
+| --- | --- |
+| Versioning | `version.py`, `package_version()`, `runtime_user_agent()`, `generator_version()`, `client_application_id()`, `tools/check_version_consistency.py` |
+| Policy feed | `ReleasePolicy`, `ReleasePolicyEntry`, `generate_policy()`, `render_policy_manifest()` |
+| Pages dashboard | `render_policy_index()`, `_render_source_diagnostics_panel()`, `_safe_json_script_payload()` |
+| Freshness | `freshness.py`, `freshness_policy_metadata()`, `freshness_thresholds()`, `_public_pages_freshness_check()` |
+| Runtime loading | `check_current_system()`, `_load_runtime_policy()`, `_load_cache_policy()`, `decide_source_degradation()` |
+| Local detection | `get_local_windows_state()`, `derive_local_consensus()`, `evaluate_windows_update_state()`, `query_wua_secondary()` |
+| JSON/signature/cache | `strict_json_loads()`, `strict_json_object()`, `verify_policy_signature()`, `load_trusted_policy()` |
+| Workflows | `publish-policy.yml`, `release.yml`, `pypi-publish.yml`, `ci.yml`, action/dependency workflows |
+| PyPI publishing | Project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`, no PyPI token |
+| Documentation | `README.md`, `CHANGELOG.md`, `docs/releases/v0.3.0.md`, `docs/`, `wiki/` |
+
+## PyPI Lane
+
+| Check | Rule |
+| --- | --- |
+| Manual without tag | Build/test/scan/build distributions/Twine check only; publish job is skipped. |
+| Manual with tag | Tag must already exist, match `vX.Y.Z`, and match `pyproject.toml` version. |
+| Published GitHub Release | Triggers the separate PyPI workflow from the release tag. |
+| Package name | Must be `win11_release_guard`. |
+| Artifact path | Workflow-generated `dist/`, uploaded/downloaded between jobs. |
+| Publish job | GitHub Environment `pypi`; `id-token: write` only in that job. |
+| Credentials | No PyPI API token, Twine password, username, or credentialed repository URL. |
+
+## Pages And Wiki
+
+| Topic | Rule |
+| --- | --- |
+| Local `site/` | Generated output only; do not commit. |
+| Pages refresh | `.github/workflows/publish-policy.yml` regenerates and deploys Pages; `workflow_dispatch` can refresh manually. |
+| Docs/wiki-only changes | No Pages rebuild unless dashboard-rendered content, generated metadata, public URLs, or workflow path filters change. |
+| Local `wiki/` | Source/staging only; it does not auto-publish to the live GitHub Wiki. |
+| Live wiki | Push the GitHub Wiki repository separately only when explicitly intended. |
+
+## Verify Commands
+
+```powershell
+python -m compileall -q win11_release_guard tools tests
+python tools/check_version_consistency.py
+python tools/check_project_identity.py
+python tools/check_github_action_versions.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/test_pypi_publish_workflow.py tests/test_repository_automation.py tests/test_agents_contract.py tests/test_branding_contract.py tests/test_project_identity.py tests/test_import_contract.py -k "pypi or release or changelog or docs or wiki or readme or version or workflow"
+python tools/scan_for_secret_material.py README.md CHANGELOG.md AGENTS.md docs wiki win11_release_guard tests tools pyproject.toml .github
+python -m build
+python -m twine check dist/*
+```
+
+## Common Mistakes
+
+| Mistake | Correct behavior |
+| --- | --- |
+| Treat `schema_version` or `api_version` as the package version. | Use `pyproject.toml` and `package_version()` for program version. |
+| Treat `ProductName` or WMI `Caption` as OS authority. | Use build-first evidence and signed policy mapping. |
+| Let WUA offers override the policy target. | Keep WUA optional, read-only, and diagnostic. |
+| Target existing devices at 26H1. | Keep 26H1 new-devices-only / excluded for existing devices. |
+| Commit local `site/` or `dist/`. | Regenerate those as workflow/local build output only. |
+| Publish raw worktree ZIPs. | Use `tools/export_clean_archive.py` and validate the archive. |
+| Add PyPI credentials to Actions. | Use Trusted Publishing with GitHub OIDC. |
+| Assume local `wiki/` auto-publishes. | Push the live wiki repository separately when approved. |
+
+## Related Pages
+
+[[Home]] | [[Architecture]] | [[Policy Feed and Trust Model|Policy-Feed-and-Trust-Model]] | [[Anti-Static Freshness|Anti-Static-Freshness]] | [[Tagged Release Lane|Tagged-Release-Lane]] | [[Build, Test and Release|Build-Test-and-Release]]

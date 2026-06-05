@@ -45,7 +45,7 @@ python tools/export_clean_archive.py --validate dist/win11_release_guard-source.
 ```powershell
 python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip
 python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip
-python tools/scan_for_secret_material.py site win11_release_guard tests tools docs README.md AGENTS.md pyproject.toml .github
+python tools/scan_for_secret_material.py site win11_release_guard tests tools docs wiki README.md CHANGELOG.md AGENTS.md pyproject.toml .github
 ```
 
 ## Related Pages
