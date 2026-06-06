@@ -1,6 +1,6 @@
-# Release v0.3.0
+# Release v0.3.1
 
-Compact human summary of the `0.3.0` hardening and packaging release. Code, tests, workflows, `pyproject.toml`, README, docs, local wiki source, and `AGENTS.md` remain source truth.
+Compact human summary of the `0.3.1` hardening and packaging release. Code, tests, workflows, `pyproject.toml`, README, docs, local wiki source, and `AGENTS.md` remain source truth.
 
 ---
 
@@ -16,16 +16,18 @@ Compact human summary of the `0.3.0` hardening and packaging release. Code, test
 
 ## Highlights
 
-| Area | 0.3.0 state |
+| Area | 0.3.1 state |
 | --- | --- |
-| Versioning | Package/runtime/generator/WUA identity is centralized at `win11_release_guard/0.3.0`. |
+| Versioning | Package/runtime/generator/WUA identity is centralized at `win11_release_guard/0.3.1`. |
 | Packaging | `pyproject.toml` defines GPL-3.0-only metadata, `LICENSE.txt`, project URLs, console script, dependencies, test extras, and package data. |
 | Trust | Runtime uses public policy JSON plus detached Ed25519 signature; clients do not authenticate to GitHub. |
 | Freshness | Manifest/dashboard carry epoch freshness fields; browser age uses `Date.now()` and CLI checks enforce 14/45-day gates. |
 | Dashboard | Static Pages shows trust, Source Diagnostics, target builds, feed currency, and API links. |
 | JSON hardening | Strict JSON rejects duplicate keys, non-finite numbers, invalid UTF-8, wrong object top-level shape, and oversized payloads. |
 | Local truth | Build evidence beats `ProductName`, WMI `Caption`, and `DisplayVersion`; those values remain raw diagnostics. |
+| Local diagnostic output | Default JSON compacts bulky Panther/setup log tails; `--include-raw-local-diagnostics` restores raw bounded local log tails; Panther reads use fixed known paths, 5 MiB per-file tails, and a generous 512 MiB total guard. |
 | WUA | Optional read-only secondary probe; never decides the policy verdict. |
+| Panther/setup logs | Administrator troubleshooting evidence only; never overrides signed public policy; collection is narrow, tail-bounded, and globally guarded. |
 | Release lane | `release.yml` validates `vX.Y.Z` tag/version parity, links changelog/release notes/Pages/feed in the release body, and attaches only a validated clean source archive. |
 | PyPI lane | `pypi-publish.yml` builds wheel/sdist and publishes through Trusted Publishing / GitHub OIDC only after tag or published-release gates. |
 
@@ -35,7 +37,7 @@ Compact human summary of the `0.3.0` hardening and packaging release. Code, test
 | --- | --- |
 | PyPI project | [win11_release_guard](https://pypi.org/project/win11_release_guard/) |
 | End-user install | `python -m pip install win11_release_guard` |
-| Package metadata | `pyproject.toml` defines `win11_release_guard` version `0.3.0`, GPL-3.0-only license, console script, project URLs, and package data. |
+| Package metadata | `pyproject.toml` defines `win11_release_guard` version `0.3.1`, GPL-3.0-only license, console script, project URLs, and package data. |
 | Build artifacts | Wheel and sdist are generated in `dist/`, checked with `python -m twine check dist/*`, and never committed. |
 | Publishing | `.github/workflows/pypi-publish.yml` uses PyPI Trusted Publishing / GitHub OIDC with environment `pypi`. |
 | First publish | Pending Trusted Publisher setup is required if the project is absent; a PyPI 404 is not a name reservation. |
@@ -51,10 +53,11 @@ Compact human summary of the `0.3.0` hardening and packaging release. Code, test
 | Freshness | `freshness.py`, `freshness_policy_metadata()`, `freshness_thresholds()`, `_public_pages_freshness_check()` |
 | Runtime loading | `check_current_system()`, `_load_runtime_policy()`, `_load_cache_policy()`, `decide_source_degradation()` |
 | Local detection | `get_local_windows_state()`, `derive_local_consensus()`, `evaluate_windows_update_state()`, `query_wua_secondary()` |
+| Local diagnostic output | `--include-raw-local-diagnostics`, compact markers such as `content_omitted`, `content_chars`, and `content_bytes_utf8` |
 | JSON/signature/cache | `strict_json_loads()`, `strict_json_object()`, `verify_policy_signature()`, `load_trusted_policy()` |
 | Workflows | `publish-policy.yml`, `release.yml`, `pypi-publish.yml`, `ci.yml`, action/dependency workflows |
 | PyPI publishing | Project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`, no PyPI token |
-| Documentation | `README.md`, `CHANGELOG.md`, `docs/releases/v0.3.0.md`, `docs/`, `wiki/` |
+| Documentation | `README.md`, `CHANGELOG.md`, `docs/releases/v0.3.1.md`, `docs/`, `wiki/` |
 
 ## PyPI Lane
 

@@ -630,6 +630,7 @@ def _get_local_state(config: ReleaseCheckerConfig) -> LocalWindowsState:
             dism_timeout_seconds=config.dism_timeout_seconds,
             powershell_timeout_seconds=config.powershell_timeout_seconds,
             panther_tail_max_bytes=config.panther_tail_max_bytes,
+            panther_total_max_bytes=config.panther_total_max_bytes,
         )
     except TypeError as exc:
         if "unexpected keyword" not in str(exc):
@@ -644,6 +645,7 @@ def _with_audit_diagnostics(result: EvaluationResult, config: ReleaseCheckerConf
         audit = collect_audit_diagnostics(
             dism_timeout_seconds=config.dism_timeout_seconds,
             panther_tail_max_bytes=config.panther_tail_max_bytes,
+            panther_total_max_bytes=config.panther_total_max_bytes,
         )
     except Exception as exc:
         audit = {"errors": [f"Audit diagnostics failed: {exc}"]}

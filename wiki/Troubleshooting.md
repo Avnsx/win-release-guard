@@ -53,10 +53,13 @@ python -m win11_release_guard --json-pretty --no-wua
 | WUA availability | Enable WUA only for diagnostics. |
 | WUfB / WSUS | Check target-release pins, WSUS/SCCM source, deferrals. |
 | Pending reboot | Review read-only pending reboot evidence. |
-| Panther/setup logs | Review bounded setup diagnostic tails. |
+| Panther/setup logs | Review fixed-path, bounded setup diagnostic tails; collection also has a generous total guard. |
+
+Panther/setup logs are administrator troubleshooting evidence only. They never decide compliance or override the signed public policy verdict.
+Default JSON keeps raw Panther content compacted; raw bounded tails are restored only with `--include-raw-local-diagnostics`.
 
 ```powershell
-python -m win11_release_guard --json-pretty --wua
+python -m win11_release_guard --json-pretty --wua --include-raw-local-diagnostics
 ```
 
 ## Generator Fails After Microsoft Page Change

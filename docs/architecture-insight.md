@@ -40,7 +40,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | Do | Do not |
 | --- | --- |
 | Keep runtime JSON-first and signed by default. | Re-enable Microsoft HTML parsing in normal runtime paths. |
-| Preserve raw local diagnostic values. | Treat marketing/display labels as decisive identity evidence. |
+| Preserve raw local diagnostic values behind explicit opt-ins when default JSON compacts bulky Panther/setup log tails; keep Panther reads fixed-path, tail-bounded, and guarded by a generous total collection cap. | Treat marketing/display labels as decisive identity evidence. |
 | Keep WUA optional, bounded, and read-only. | Use WUA offers/history to replace the signed policy verdict. |
 | Add fields compatibly to public `/api/v1`. | Remove or rename v1 fields/paths casually. |
 

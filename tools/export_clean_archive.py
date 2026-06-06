@@ -117,7 +117,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "docs/policy-signing.md",
     "docs/security-automation.md",
     "wiki/Home.md",
-    "wiki/Release-v0.3.0.md",
+    "wiki/Release-v0.3.1.md",
     "tests/test_no_secret_material.py",
 }
 

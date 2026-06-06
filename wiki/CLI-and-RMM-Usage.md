@@ -14,6 +14,7 @@ Use this when integrating Windows 11 Release Guard into scripts, RMM tools, dash
 | UTF-8 console JSON | `python -m win11_release_guard --json --unicode` |
 | Write output file | `python -m win11_release_guard --json --output release-check.json` |
 | Include full bounded WUA history | `python -m win11_release_guard --json --include-raw-wua-history --wua` |
+| Include raw local Panther/setup log tails | `python -m win11_release_guard --json --include-raw-local-diagnostics --wua` |
 | Diagnose config | `python -m win11_release_guard --diagnose-config` |
 | Check source only | `python -m win11_release_guard --check-policy-source` |
 
@@ -48,6 +49,15 @@ Use this when integrating Windows 11 Release Guard into scripts, RMM tools, dash
 | `is_source_check_complete` | Whether source requirements were fully satisfied. |
 | `policy_signature_status` | Signature trust state. |
 | `feed_age_days` | Age of live policy feed where available. |
+
+Default JSON compacts bulky local Panther/setup log tails and emits omission markers
+such as `content_omitted`, `content_chars`, and `content_bytes_utf8`. Use
+`--include-raw-local-diagnostics` only when troubleshooting needs the raw bounded
+local log tails. Panther/setup logs are administrator troubleshooting evidence
+only; they never decide compliance or override the signed public policy verdict.
+Panther reads use fixed known paths, per-file tail reads, and a deliberately
+generous global collection guard to keep IO predictable without constraining
+normal trusted troubleshooting.
 
 ## Verify
 

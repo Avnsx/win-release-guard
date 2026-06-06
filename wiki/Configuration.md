@@ -27,6 +27,7 @@ Use this when choosing runtime defaults or documenting CLI/env knobs for fleet u
 | `--stale-cache-max-age-hours` | CLI | Stale cache allowance. |
 | `--max-policy-bytes` | CLI/env | Policy fetch/parse size cap. |
 | `--wua` / `--no-wua` | CLI | Enable or disable optional WUA probe. |
+| `--include-raw-local-diagnostics` | CLI | Include raw bounded local Panther/setup log tails instead of default JSON compaction. |
 | `--quality-policy` | CLI | Choose B-release default or broader quality policy. |
 
 ## Runtime Clamps / Fallbacks
@@ -36,9 +37,11 @@ Use this when choosing runtime defaults or documenting CLI/env knobs for fleet u
 | HTTP fetch | Bounded timeout and byte cap. |
 | WUA subprocess | Bounded timeout. |
 | DISM / PowerShell probes | Bounded timeouts. |
-| Panther logs | Bounded tail size. |
+| Panther logs | Fixed known paths, bounded per-file tail reads, a generous global collection guard, and default JSON compaction unless `--include-raw-local-diagnostics` is used. |
 | WUA output | History and relevant OS update lists are bounded. |
 | Cache fallback | Visible degraded source status. |
+
+Panther/setup logs are administrator troubleshooting evidence only. They do not decide compliance or override the signed public policy verdict.
 
 ## Deprecated / Avoid
 

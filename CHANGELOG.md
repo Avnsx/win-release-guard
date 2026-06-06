@@ -1,10 +1,10 @@
 # Changelog
 
-## v0.3.0 - 2026-06-05
+## v0.3.1 - 2026-06-05
 
 ### Summary
 
-Version 0.3.0 documents and hardens the current `win11_release_guard` worktree: package/runtime version identity, signed public policy feed handling, static GitHub Pages output, strict JSON trust boundaries, tagged source releases, and the PyPI Trusted Publishing lane. Windows release semantics are unchanged: existing broad-fleet devices target Windows 11 `25H2`; `26H1` remains excluded for existing-device targeting; local build evidence outranks display labels; WUA remains optional secondary evidence; policy `schema_version` and public `api_version` are not program versions.
+Version 0.3.1 documents and hardens the current `win11_release_guard` worktree: package/runtime version identity, signed public policy feed handling, static GitHub Pages output, strict JSON trust boundaries, tagged source releases, and the PyPI Trusted Publishing lane. Windows release semantics are unchanged: existing broad-fleet devices target Windows 11 `25H2`; `26H1` remains excluded for existing-device targeting; local build evidence outranks display labels; WUA remains optional secondary evidence; policy `schema_version` and public `api_version` are not program versions.
 
 Comparison basis: no local `v*` tags are present in this checkout. These notes are based on the current worktree at `main` `56915c9` plus uncommitted worktree files, not on earlier handover text or old release-note drafts.
 
@@ -14,12 +14,13 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 * Static feed freshness helpers in `win11_release_guard/freshness.py` for UTC parsing, epoch timestamps, 14-day warning metadata, and 45-day strict-stale metadata.
 * Tagged GitHub Release workflow in `.github/workflows/release.yml` for `vX.Y.Z` tag validation, version parity, tests, live checks, dependency freshness, clean archive creation, and draft release publication.
 * PyPI Trusted Publishing workflow in `.github/workflows/pypi-publish.yml` with build-only manual dispatch, existing-tag publish, published GitHub Release publish, package name and tag/version checks, wheel/sdist build, Twine check, dist artifact handoff, GitHub Environment `pypi`, and OIDC publishing.
-* Local `wiki/` source tree and `docs/releases/v0.3.0.md` release notes for staged GitHub Wiki and maintainer documentation.
+* Local `wiki/` source tree and `docs/releases/v0.3.1.md` release notes for staged GitHub Wiki and maintainer documentation.
 * GPL-3.0-only packaging metadata and `LICENSE.txt` inclusion in validated clean archives.
+* Panther JSON support tooling: a Windows live regression harness, a developer leak debugger, and a dedicated `docs/panther-support.md` implementation/operations guide.
 
 ### Changed
 
-* Program/package version is `0.3.0` in `pyproject.toml`; runtime user-agent, generator identity, and WUA client application ID derive from the shared version helper.
+* Program/package version is `0.3.1` in `pyproject.toml`; runtime user-agent, generator identity, and WUA client application ID derive from the shared version helper.
 * `ReleasePolicyEntry` rendering keeps `latest_observed_build` separate from `required_baseline_build`, so preview/current-table observations do not become mandatory B-release compliance floors.
 * The static Pages dashboard now exposes program version, release link, public endpoint links, source tiles, Source Diagnostics rows, feed currency, target build details, and signature/hash state.
 * `render_policy_manifest()` carries manifest/API metadata, freshness epochs, source diagnostics, hashes, published URLs, and broad-target build fields used by public checks.
@@ -36,8 +37,13 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 
 * `win11_release_guard/json_utils.py` rejects duplicate JSON keys, non-finite numbers, invalid UTF-8, wrong object top-level shapes where objects are required, and oversized trust-boundary payloads.
 * Strict JSON and byte caps are applied to policy JSON, manifest JSON, signature JSON, trusted public-key JSON, cache JSON, public endpoint checks, and Microsoft source payload reads.
+* Default JSON output compacts bulky local Panther/setup log tails; raw bounded local diagnostics remain available with `--include-raw-local-diagnostics`.
+* The live Panther JSON harness treats missing readable Panther/setup sources as a normal clean-machine pass condition and reports `no_panther_source_present` instead of requiring an affected machine.
+* Panther/setup logs remain administrator troubleshooting evidence only; they do not decide compliance or override signed public policy.
 * Ed25519 verification and key-rotation windows remain enforced in `win11_release_guard/signing.py`; retired or retiring keys need bounded `verify_not_after_utc`.
 * Source Diagnostics validation is structured across generator, schema, dashboard, CLI checks, and the publish workflow; `severity: error` blocks Pages publishing.
+* Panther/setup collection uses bounded, encoding-aware tail reads across current, UnattendGC, NewOS, `$Windows.~BT`, and rollback locations, with per-path read-error isolation and a deliberately generous global collection cap.
+* Panther privacy diagnostics report category, finding type, marker, path, line number, line length, safe hint, count, truncation, and notice metadata only; matched password/token/key/secret values are not copied into privacy findings.
 
 ### Documentation
 
@@ -45,6 +51,7 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 * Documented that local `wiki/` is staging/source only and does not auto-publish to the live GitHub Wiki.
 * Documented that local `site/` is generated output; Pages is regenerated by `.github/workflows/publish-policy.yml` and can be refreshed manually with workflow_dispatch.
 * Clarified that docs/wiki-only changes do not require a Pages rebuild unless they affect dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+* Added `docs/panther-support.md` to describe Panther entry points, supported paths, default/opt-in JSON behavior, privacy notices, useful troubleshooting scenarios, limits, and safe extension rules.
 
 ### Workflows
 
@@ -56,15 +63,14 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 
 ### Packaging And PyPI
 
-* `pyproject.toml` package name is `win11_release_guard`, version is `0.3.0`, readme is `README.md`, license is `GPL-3.0-only`, license file is `LICENSE.txt`, author metadata is `Mikail ("Avnsx") C.`, runtime dependency is `cryptography>=41`, and test extras are `packaging>=24` plus `pytest>=8`.
+* `pyproject.toml` package name is `win11_release_guard`, version is `0.3.1`, readme is `README.md`, license is `GPL-3.0-only`, license file is `LICENSE.txt`, author metadata is `Mikail ("Avnsx") C.`, runtime dependency is `cryptography>=41`, and test extras are `packaging>=24` plus `pytest>=8`.
 * PyPI project URL is `https://pypi.org/project/win11_release_guard/`; end users install released packages with `python -m pip install win11_release_guard`.
 * Console script remains `win11_release_guard = "win11_release_guard.__main__:main"`.
 * Package data includes `win11_release_guard/data/*.json` and `win11_release_guard/data/*.sig`.
 * Project URLs cover Homepage, Repository, Documentation, Changelog, Bug Tracker, Public Feed, and Pages Dashboard.
 * `.github/workflows/pypi-publish.yml` builds wheel and sdist artifacts in generated `dist/`, uploads/downloads that workflow artifact between jobs, and runs `python -m twine check dist/*` before publication.
-* PyPI publishing is Trusted Publishing / GitHub OIDC only: project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`; no PyPI API token, Twine username/password, or credentialed repository URL is defined.
-* First publish requires PyPI Pending Trusted Publisher setup if the project is not already live. A PyPI 404 before first publish is not a reservation guarantee; if another owner controls the name, stop and report.
-* TestPyPI is not implemented in the current workflow; add it only as a separate Trusted Publisher lane and environment.
+* PyPI publishing is Trusted Publishing / GitHub OIDC only: project `win11_release_guard`, owner `Avnsx`.
+* First publish requires PyPI Pending Trusted Publisher setup if the project is not already live; TestPyPI is not implemented in the current workflow.
 
 ### Tests
 

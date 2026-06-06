@@ -33,7 +33,7 @@ Use this to understand the current codebase shape before changing runtime behavi
 | --- | --- |
 | Keep runtime JSON-first. | Parse Microsoft HTML in normal runtime mode. |
 | Keep generator parsing centralized. | Duplicate upstream parsing in clients. |
-| Preserve raw admin diagnostics. | Hide surprising local values. |
+| Preserve raw admin diagnostics behind explicit opt-ins when default JSON compacts bulky Panther/setup log tails; keep Panther collection fixed-path, tail-bounded, and guarded by a generous total cap. | Hide surprising local values. |
 | Add public API fields compatibly. | Break `/api/v1` paths or remove existing contract fields. |
 
 ## Verify

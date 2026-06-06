@@ -2,7 +2,7 @@
 
 Purpose: document the explicit GitHub Release path for clean source archives. These are distribution checkpoints for Windows 11 Release Guard source archives, separate from the twice-daily public policy feed publish workflow.
 
-Related links: [maintainer guide](maintainer-guide.md) | [v0.3.0 release notes](releases/v0.3.0.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
+Related links: [maintainer guide](maintainer-guide.md) | [v0.3.1 release notes](releases/v0.3.1.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
 
 ## Release Contract
 

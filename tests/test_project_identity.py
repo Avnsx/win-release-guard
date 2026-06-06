@@ -70,7 +70,7 @@ def test_project_identity_scanner_fails_old_project_name_in_active_source(tmp_pa
 def test_project_identity_scanner_requires_packaging_author_metadata(tmp_path: Path) -> None:
     _write(
         tmp_path / "pyproject.toml",
-        "[project]\nname = \"win11_release_guard\"\nversion = \"0.3.0\"\n",
+        "[project]\nname = \"win11_release_guard\"\nversion = \"0.3.1\"\n",
     )
 
     findings = check_project_identity.check_project_identity(tmp_path, (Path("pyproject.toml"),))
@@ -94,7 +94,7 @@ def test_project_identity_scanner_rejects_old_identity_in_bundled_policy(tmp_pat
 def test_project_identity_scanner_verifies_clean_bundled_policy_signature(monkeypatch, tmp_path: Path) -> None:
     policy = _write(
         tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY,
-        '{"generator_version": "win11_release_guard/0.3.0"}\n',
+        '{"generator_version": "win11_release_guard/0.3.1"}\n',
     )
     signature = _write(tmp_path / check_project_identity.SIGNED_BUNDLED_SIGNATURE, "signature\n")
     calls: list[tuple[bytes, bytes]] = []
@@ -111,7 +111,7 @@ def test_project_identity_scanner_verifies_clean_bundled_policy_signature(monkey
 
 
 def test_project_identity_scanner_fails_unsigned_bundled_policy(tmp_path: Path) -> None:
-    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, '{"generator": "win11_release_guard/0.3.0"}\n')
+    _write(tmp_path / check_project_identity.SIGNED_BUNDLED_POLICY, '{"generator": "win11_release_guard/0.3.1"}\n')
 
     findings = check_project_identity.check_project_identity(tmp_path, (Path("win11_release_guard"),))
 

@@ -6,14 +6,32 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
-from .config import DEFAULT_DISM_TIMEOUT_SECONDS, DEFAULT_PANTHER_TAIL_MAX_BYTES
+from .config import (
+    DEFAULT_DISM_TIMEOUT_SECONDS,
+    DEFAULT_PANTHER_TAIL_MAX_BYTES,
+    DEFAULT_PANTHER_TOTAL_MAX_BYTES,
+)
+from .diagnostic_tail import (
+    read_diagnostic_tail,
+    summarize_privacy_marker_entries,
+    summarize_privacy_markers,
+)
 
 
 DISM_PACKAGES_COMMAND = ["dism.exe", "/Online", "/Get-Packages", "/Format:List"]
 PANTHER_SETUP_LOG_PATHS = (
     r"%WINDIR%\Panther\setupact.log",
+    r"%WINDIR%\Panther\setuperr.log",
+    r"%WINDIR%\Panther\UnattendGC\setupact.log",
+    r"%WINDIR%\Panther\UnattendGC\setuperr.log",
+    r"%WINDIR%\Panther\NewOS\Panther\setupact.log",
+    r"%WINDIR%\Panther\NewOS\Panther\setuperr.log",
     r"C:\$Windows.~BT\Sources\Panther\setupact.log",
+    r"C:\$Windows.~BT\Sources\Panther\setuperr.log",
     r"C:\$Windows.~BT\Sources\Rollback\setupact.log",
+    r"C:\$Windows.~BT\Sources\Rollback\setuperr.log",
+    r"C:\$Windows.~BT\NewOS\Windows\Panther\setupact.log",
+    r"C:\$Windows.~BT\NewOS\Windows\Panther\setuperr.log",
 )
 WINDOWS_UPDATE_POLICY_PATH = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
 WINDOWS_UPDATE_AU_POLICY_PATH = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
@@ -124,21 +142,26 @@ def _expand_windows_path(path: str) -> str:
 
 
 def read_file_tail(path: str | Path, max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES) -> str:
-    log_path = Path(path)
-    size = log_path.stat().st_size
-    bytes_to_read = max(0, min(int(max_bytes), int(size)))
-    with log_path.open("rb") as handle:
-        if bytes_to_read and size > bytes_to_read:
-            handle.seek(-bytes_to_read, os.SEEK_END)
-        return handle.read(bytes_to_read).decode("utf-8", errors="replace")
+    return read_diagnostic_tail(path, max_bytes=max_bytes).content
 
 
 def read_panther_logs(
     paths: tuple[str, ...] = PANTHER_SETUP_LOG_PATHS,
     max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES,
+    total_max_bytes: int = DEFAULT_PANTHER_TOTAL_MAX_BYTES,
 ) -> dict[str, Any]:
     logs: list[dict[str, Any]] = []
     errors: list[str] = []
+    try:
+        per_file_cap_bytes = max(0, int(max_bytes))
+    except (TypeError, ValueError):
+        per_file_cap_bytes = DEFAULT_PANTHER_TAIL_MAX_BYTES
+    try:
+        total_cap_bytes = max(0, int(total_max_bytes))
+    except (TypeError, ValueError):
+        total_cap_bytes = DEFAULT_PANTHER_TOTAL_MAX_BYTES
+    remaining_bytes = total_cap_bytes
+    total_cap_reached = False
     for raw_path in paths:
         try:
             path = Path(_expand_windows_path(raw_path))
@@ -147,29 +170,51 @@ def read_panther_logs(
             continue
         if not path.exists() or not path.is_file():
             continue
+        if remaining_bytes <= 0:
+            total_cap_reached = True
+            errors.append(f"Panther log read skipped {path}: total cap of {total_cap_bytes} bytes reached.")
+            continue
+        read_limit = min(per_file_cap_bytes, remaining_bytes)
         try:
-            content = read_file_tail(path, max_bytes=max_bytes)
+            tail = read_diagnostic_tail(path, max_bytes=read_limit)
         except OSError as exc:
             errors.append(f"Panther log read failed {path}: {exc}")
             continue
-        logs.append(
-            {
-                "path": str(path),
-                "tail_bytes": len(content.encode("utf-8", errors="replace")),
-                "content": content,
-                "evidence": extract_setup_log_evidence(content, source_path=str(path)),
-            }
-        )
+        if read_limit < per_file_cap_bytes and tail.tail_truncated:
+            total_cap_reached = True
+        remaining_bytes = max(0, remaining_bytes - int(tail.tail_bytes))
+        content = tail.content
+        entry = {
+            "path": str(path),
+            "tail_bytes": tail.tail_bytes,
+            "file_size_bytes": tail.file_size_bytes,
+            "tail_start_offset": tail.tail_start_offset,
+            "tail_truncated": tail.tail_truncated,
+            "encoding_detected": tail.encoding_detected,
+            "decode_errors_replaced": tail.decode_errors_replaced,
+            "content": content,
+            "evidence": extract_setup_log_evidence(content, source_path=str(path)),
+        }
+        entry.update(summarize_privacy_markers(content))
+        logs.append(entry)
+    if total_cap_reached:
+        for log in logs:
+            log["collection_total_cap_bytes"] = total_cap_bytes
+            log["collection_total_cap_reached"] = True
     setup_failure_evidence = [
         evidence
         for log in logs
         for evidence in log.get("evidence", [])
         if evidence.get("kind") in {"setup_failure", "rollback"}
     ]
+    privacy_summary = summarize_privacy_marker_entries(
+        ((str(log.get("path") or ""), log) for log in logs)
+    )
     return {
         "available": bool(logs),
         "logs": logs,
         "setup_failure_evidence": setup_failure_evidence,
+        "privacy_findings": privacy_summary if privacy_summary["privacy_findings_count"] else None,
         "errors": errors,
     }
 
@@ -282,11 +327,12 @@ def collect_audit_diagnostics(
     *,
     dism_timeout_seconds: float = DEFAULT_DISM_TIMEOUT_SECONDS,
     panther_tail_max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES,
+    panther_total_max_bytes: int = DEFAULT_PANTHER_TOTAL_MAX_BYTES,
 ) -> dict[str, Any]:
     """Collect read-only audit evidence for conflict resolution."""
 
     dism_packages = query_dism_packages(timeout_seconds=dism_timeout_seconds)
-    panther_logs = read_panther_logs(max_bytes=panther_tail_max_bytes)
+    panther_logs = read_panther_logs(max_bytes=panther_tail_max_bytes, total_max_bytes=panther_total_max_bytes)
     windows_update_policy = read_windows_update_policy_registry()
     pending_reboot = read_pending_reboot_state()
     return {

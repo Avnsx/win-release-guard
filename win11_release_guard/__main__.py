@@ -10,6 +10,7 @@ import traceback
 import urllib.error
 import urllib.request
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import resources
@@ -108,6 +109,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--include-raw-wua-history",
         action="store_true",
         help="Include full bounded WUA history in JSON output.",
+    )
+    parser.add_argument(
+        "--include-raw-local-diagnostics",
+        action="store_true",
+        help="Include full bounded local diagnostic log tails such as Panther setup logs in JSON output.",
     )
     parser.add_argument("--policy-url", default=None, help="Generated JSON policy URL or file path.")
     parser.add_argument(
@@ -335,8 +341,115 @@ def _compact_wua_output(wua: dict[str, object], *, target_offer_expected: bool) 
     }
 
 
-def _output_payload(result: EvaluationResult, *, include_raw_wua_history: bool) -> dict[str, object]:
-    payload = result.to_dict()
+def _omitted_local_diagnostic_string(value: str, *, field: str = "content") -> dict[str, object]:
+    return {
+        f"{field}_omitted": True,
+        f"{field}_chars": len(value),
+        f"{field}_bytes_utf8": len(value.encode("utf-8", errors="replace")),
+    }
+
+
+def _looks_like_panther_log_path(value: object) -> bool:
+    text = str(value).lower()
+    return "panther" in text and text.endswith(".log")
+
+
+def _compact_local_diagnostic_value(value: object) -> object:
+    if isinstance(value, str):
+        return _omitted_local_diagnostic_string(value)
+    if isinstance(value, list):
+        return [_compact_local_diagnostic_value(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    compacted: dict[str, object] = {}
+    for key, item in value.items():
+        key_text = str(key)
+        if key_text in {"errors", "warnings"}:
+            compacted[key_text] = item
+        elif key_text == "content" and isinstance(item, str):
+            compacted.update(_omitted_local_diagnostic_string(item))
+        elif key_text == "line" and isinstance(item, str):
+            compacted.update(_omitted_local_diagnostic_string(item, field="line"))
+        elif key_text in {"path", "source_path"} and isinstance(item, str):
+            compacted.update(_omitted_local_diagnostic_string(item, field=key_text))
+        elif isinstance(item, str):
+            compacted[key_text] = (
+                _omitted_local_diagnostic_string(item)
+                if _looks_like_panther_log_path(key_text)
+                else item
+            )
+        else:
+            compacted[key_text] = _compact_local_diagnostic_value(item)
+    return compacted
+
+
+def _compact_panther_consensus(consensus: object) -> None:
+    if not isinstance(consensus, dict):
+        return
+
+    signal_set = consensus.get("signal_set")
+    if not isinstance(signal_set, dict):
+        return
+
+    signals = signal_set.get("signals")
+    if not isinstance(signals, list):
+        return
+
+    for signal in signals:
+        if isinstance(signal, dict) and signal.get("source") == "panther":
+            signal["value"] = _compact_local_diagnostic_value(signal.get("value"))
+
+
+def _compact_recursive_panther_signals(value: object) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _compact_recursive_panther_signals(item)
+        return
+    if not isinstance(value, dict):
+        return
+
+    if value.get("source") == "panther" and "value" in value:
+        value["value"] = _compact_local_diagnostic_value(value.get("value"))
+        return
+
+    for item in value.values():
+        _compact_recursive_panther_signals(item)
+
+
+def _compact_local_diagnostics(payload: dict[str, object]) -> dict[str, object]:
+    local = payload.get("local")
+    if isinstance(local, dict):
+        raw = local.get("raw")
+        if isinstance(raw, dict):
+            for key in ("panther_logs",):
+                if key in raw:
+                    raw[key] = _compact_local_diagnostic_value(raw[key])
+
+    _compact_panther_consensus(payload.get("local_consensus"))
+    for key in ("details", "metadata"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            _compact_panther_consensus(value.get("local_consensus"))
+
+    details = payload.get("details")
+    if isinstance(details, dict):
+        diagnostics = details.get("silent_feature_update_missing")
+        if isinstance(diagnostics, dict):
+            audit = diagnostics.get("audit_diagnostics")
+            if isinstance(audit, dict) and "panther_logs" in audit:
+                audit["panther_logs"] = _compact_local_diagnostic_value(audit["panther_logs"])
+    _compact_recursive_panther_signals(payload)
+    return payload
+
+
+def _output_payload(
+    result: EvaluationResult,
+    *,
+    include_raw_wua_history: bool,
+    include_raw_local_diagnostics: bool,
+) -> dict[str, object]:
+    payload = deepcopy(result.to_dict())
     wua = payload.get("wua_secondary")
     if isinstance(wua, dict):
         if include_raw_wua_history:
@@ -347,6 +460,8 @@ def _output_payload(result: EvaluationResult, *, include_raw_wua_history: bool) 
                 wua,
                 target_offer_expected=result.target_feature_update_offer_expected,
             )
+    if not include_raw_local_diagnostics:
+        payload = _compact_local_diagnostics(payload)
     return payload
 
 
@@ -356,9 +471,14 @@ def _json_text(
     pretty: bool,
     unicode_output: bool,
     include_raw_wua_history: bool,
+    include_raw_local_diagnostics: bool,
 ) -> str:
     return json.dumps(
-        _output_payload(result, include_raw_wua_history=include_raw_wua_history),
+        _output_payload(
+            result,
+            include_raw_wua_history=include_raw_wua_history,
+            include_raw_local_diagnostics=include_raw_local_diagnostics,
+        ),
         indent=2 if pretty else None,
         sort_keys=True,
         ensure_ascii=not unicode_output,
@@ -372,6 +492,7 @@ def _print_json(
     pretty: bool,
     unicode_output: bool,
     include_raw_wua_history: bool,
+    include_raw_local_diagnostics: bool,
 ) -> None:
     print(
         _json_text(
@@ -379,6 +500,7 @@ def _print_json(
             pretty=pretty,
             unicode_output=unicode_output,
             include_raw_wua_history=include_raw_wua_history,
+            include_raw_local_diagnostics=include_raw_local_diagnostics,
         )
     )
 
@@ -390,12 +512,14 @@ def _write_json_output(
     pretty: bool,
     unicode_output: bool,
     include_raw_wua_history: bool,
+    include_raw_local_diagnostics: bool,
 ) -> None:
     json_text = _json_text(
         result,
         pretty=pretty,
         unicode_output=unicode_output,
         include_raw_wua_history=include_raw_wua_history,
+        include_raw_local_diagnostics=include_raw_local_diagnostics,
     )
     path.write_text(json_text + "\n", encoding="utf-8", newline="\n")
 
@@ -1819,6 +1943,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pretty=bool(args.json_pretty),
                 unicode_output=bool(args.unicode),
                 include_raw_wua_history=bool(args.include_raw_wua_history),
+                include_raw_local_diagnostics=bool(args.include_raw_local_diagnostics),
             )
         if args.json or args.json_pretty:
             _print_json(
@@ -1826,6 +1951,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pretty=bool(args.json_pretty),
                 unicode_output=bool(args.unicode),
                 include_raw_wua_history=bool(args.include_raw_wua_history),
+                include_raw_local_diagnostics=bool(args.include_raw_local_diagnostics),
             )
         elif args.output is None or args.pretty:
             _print_pretty(result)

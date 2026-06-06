@@ -21,7 +21,7 @@ Windows 11 Release Guard tells administrators whether an existing Windows 11 dev
 | Fact | Value |
 | --- | --- |
 | Project / package | `win11_release_guard` |
-| Version | `0.3.0` |
+| Version | `0.3.1` |
 | Console script | `win11_release_guard` |
 | Python entry point | `python -m win11_release_guard` |
 | Repository | `https://github.com/Avnsx/win11_release_guard` |
@@ -33,6 +33,9 @@ Windows 11 Release Guard tells administrators whether an existing Windows 11 dev
 - Checks Windows 11 release/build/baseline compliance from a signed public JSON release policy feed.
 - Uses build-first local evidence; `ProductName`, WMI `Caption`, and `DisplayVersion` stay diagnostic.
 - Keeps Windows Update Agent data optional and secondary; WUA diagnostics never override the policy verdict.
+- Compacts local Panther/setup log tails in JSON by default while keeping raw bounded local diagnostics available through an explicit CLI opt-in.
+- Keeps Panther reads narrow and fast with fixed known paths, per-file tail reads, and a generous global collection guard.
+- Treats Panther/setup logs as administrator troubleshooting evidence only; they never decide compliance or override signed public policy.
 - Treats existing devices as targeting 25H2 while 26H1 remains excluded for existing-device targeting.
 - Emits human output, JSON, JSON-pretty, file output, and stable exit codes for RMM/fleet checks.
 - Publishes a static GitHub Pages dashboard plus `/api/v1` policy, signature, and manifest aliases.
@@ -45,6 +48,7 @@ Install the released package:
 python -m pip install win11_release_guard
 win11_release_guard --pretty
 win11_release_guard --json-pretty --no-wua
+win11_release_guard --json-pretty --wua --include-raw-local-diagnostics
 ```
 
 Use the source checkout for development or release-candidate validation:
@@ -99,7 +103,7 @@ Deep dive: [GitHub Pages Dashboard](https://github.com/Avnsx/win11_release_guard
 | Local detection | Build and signed policy evidence are the release truth. | [Local Windows Detection](https://github.com/Avnsx/win11_release_guard/wiki/Local-Windows-Detection) |
 | WUA role | Optional read-only explanation for offers/history. | [Troubleshooting](https://github.com/Avnsx/win11_release_guard/wiki/Troubleshooting) |
 | Release targeting | 25H2 is the existing-device target; 26H1 is excluded for existing devices. | [Architecture Insight](docs/architecture-insight.md) |
-| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.0 notes](docs/releases/v0.3.0.md) |
+| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.1 notes](docs/releases/v0.3.1.md) |
 | Source diagnostics | Parser/source drift stays visible and can block policy publishing. | [Source Diagnostics](https://github.com/Avnsx/win11_release_guard/wiki/Source-Diagnostics) |
 
 ## Maintainer Commands
@@ -139,7 +143,7 @@ Deep dive: [policy signing](docs/policy-signing.md), [security automation](docs/
 | Wiki home | https://github.com/Avnsx/win11_release_guard/wiki |
 | Full architecture | [Architecture](https://github.com/Avnsx/win11_release_guard/wiki/Architecture) |
 | Maintainer guide | [docs/maintainer-guide.md](docs/maintainer-guide.md) |
-| Release notes | [CHANGELOG.md](CHANGELOG.md) and [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md) |
+| Release notes | [CHANGELOG.md](CHANGELOG.md) and [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) |
 | Safe source archives | [Safe Exports and Clean Archives](https://github.com/Avnsx/win11_release_guard/wiki/Safe-Exports-and-Clean-Archives) |
 | FAQ | [FAQ](https://github.com/Avnsx/win11_release_guard/wiki/FAQ) |
 

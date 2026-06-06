@@ -12,7 +12,13 @@ from typing import Any, Mapping
 from .config import (
     DEFAULT_DISM_TIMEOUT_SECONDS,
     DEFAULT_PANTHER_TAIL_MAX_BYTES,
+    DEFAULT_PANTHER_TOTAL_MAX_BYTES,
     DEFAULT_POWERSHELL_TIMEOUT_SECONDS,
+)
+from .diagnostic_tail import (
+    read_diagnostic_tail,
+    summarize_privacy_marker_entries,
+    summarize_privacy_markers,
 )
 from .models import EditionScope, LocalWindowsState, ServicingChannel
 
@@ -22,6 +28,16 @@ KERNEL_IMAGE_PATH = r"C:\Windows\System32\ntoskrnl.exe"
 PANTHER_LOG_PATHS = (
     r"C:\Windows\Panther\setupact.log",
     r"C:\Windows\Panther\setuperr.log",
+    r"C:\Windows\Panther\UnattendGC\setupact.log",
+    r"C:\Windows\Panther\UnattendGC\setuperr.log",
+    r"C:\Windows\Panther\NewOS\Panther\setupact.log",
+    r"C:\Windows\Panther\NewOS\Panther\setuperr.log",
+    r"C:\$Windows.~BT\Sources\Panther\setupact.log",
+    r"C:\$Windows.~BT\Sources\Panther\setuperr.log",
+    r"C:\$Windows.~BT\Sources\Rollback\setupact.log",
+    r"C:\$Windows.~BT\Sources\Rollback\setuperr.log",
+    r"C:\$Windows.~BT\NewOS\Windows\Panther\setupact.log",
+    r"C:\$Windows.~BT\NewOS\Windows\Panther\setuperr.log",
 )
 
 DEFAULT_BUILD_FAMILY_RELEASES: Mapping[int, str] = {
@@ -615,21 +631,26 @@ def _read_file_tail(
     path: str | Path,
     max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES,
 ) -> str:
-    log_path = Path(path)
-    size = log_path.stat().st_size
-    bytes_to_read = max(0, min(int(max_bytes), int(size)))
-    with log_path.open("rb") as handle:
-        if bytes_to_read and size > bytes_to_read:
-            handle.seek(-bytes_to_read, os.SEEK_END)
-        data = handle.read(bytes_to_read)
-    return data.decode("utf-8", errors="replace")
+    return read_diagnostic_tail(path, max_bytes=max_bytes).content
 
 
 def _read_panther_logs(
     paths: tuple[str, ...] = PANTHER_LOG_PATHS,
     max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES,
-) -> dict[str, str]:
-    logs: dict[str, str] = {}
+    total_max_bytes: int = DEFAULT_PANTHER_TOTAL_MAX_BYTES,
+    errors: list[str] | None = None,
+) -> dict[str, dict[str, object]]:
+    logs: dict[str, dict[str, object]] = {}
+    try:
+        per_file_cap_bytes = max(0, int(max_bytes))
+    except (TypeError, ValueError):
+        per_file_cap_bytes = DEFAULT_PANTHER_TAIL_MAX_BYTES
+    try:
+        total_cap_bytes = max(0, int(total_max_bytes))
+    except (TypeError, ValueError):
+        total_cap_bytes = DEFAULT_PANTHER_TOTAL_MAX_BYTES
+    remaining_bytes = total_cap_bytes
+    total_cap_reached = False
     for path in paths:
         try:
             log_path = Path(path)
@@ -637,7 +658,28 @@ def _read_panther_logs(
             continue
         if not log_path.exists() or not log_path.is_file():
             continue
-        logs[str(log_path)] = _read_file_tail(log_path, max_bytes=max_bytes)
+        if remaining_bytes <= 0:
+            total_cap_reached = True
+            if errors is not None:
+                errors.append(f"Panther log read skipped {log_path}: total cap of {total_cap_bytes} bytes reached.")
+            continue
+        read_limit = min(per_file_cap_bytes, remaining_bytes)
+        try:
+            tail = read_diagnostic_tail(log_path, max_bytes=read_limit)
+        except OSError as exc:
+            if errors is not None:
+                errors.append(f"Panther log read failed {log_path}: {exc}")
+            continue
+        if read_limit < per_file_cap_bytes and tail.tail_truncated:
+            total_cap_reached = True
+        remaining_bytes = max(0, remaining_bytes - int(tail.tail_bytes))
+        entry = tail.to_dict()
+        entry.update(summarize_privacy_markers(tail.content))
+        logs[str(log_path)] = entry
+    if total_cap_reached and logs:
+        for entry in logs.values():
+            entry["collection_total_cap_bytes"] = total_cap_bytes
+            entry["collection_total_cap_reached"] = True
     return logs
 
 
@@ -655,6 +697,7 @@ def get_local_windows_state(
     dism_timeout_seconds: float = DEFAULT_DISM_TIMEOUT_SECONDS,
     powershell_timeout_seconds: float = DEFAULT_POWERSHELL_TIMEOUT_SECONDS,
     panther_tail_max_bytes: int = DEFAULT_PANTHER_TAIL_MAX_BYTES,
+    panther_total_max_bytes: int = DEFAULT_PANTHER_TOTAL_MAX_BYTES,
 ) -> LocalWindowsState:
     """Read local Windows release state without network or mutation."""
 
@@ -726,9 +769,20 @@ def get_local_windows_state(
         raw["kernel_file_version_error"] = str(exc)
 
     try:
-        panther_logs = _read_panther_logs(max_bytes=panther_tail_max_bytes)
+        panther_log_errors: list[str] = []
+        panther_logs = _read_panther_logs(
+            max_bytes=panther_tail_max_bytes,
+            total_max_bytes=panther_total_max_bytes,
+            errors=panther_log_errors,
+        )
         if panther_logs:
             raw["panther_logs"] = panther_logs
+            panther_privacy_summary = summarize_privacy_marker_entries(panther_logs.items())
+            if panther_privacy_summary["privacy_findings_count"]:
+                raw["panther_privacy_findings"] = panther_privacy_summary
+        if panther_log_errors:
+            errors.extend(panther_log_errors)
+            raw["panther_log_errors"] = panther_log_errors
     except Exception as exc:
         errors.append(f"Panther log read failed: {exc}")
         raw["panther_error"] = str(exc)

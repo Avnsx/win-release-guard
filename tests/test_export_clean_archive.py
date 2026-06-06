@@ -38,7 +38,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert "tools/export_clean_archive.py" in names
     assert "docs/security-automation.md" in names
     assert "wiki/Home.md" in names
-    assert "wiki/Release-v0.3.0.md" in names
+    assert "wiki/Release-v0.3.1.md" in names
     assert any(name.startswith("tests/") for name in names)
     assert any(name.startswith("docs/") for name in names)
     assert any(name.startswith("wiki/") for name in names)

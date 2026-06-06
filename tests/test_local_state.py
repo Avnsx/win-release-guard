@@ -1,6 +1,10 @@
+import json
 import subprocess
+from pathlib import Path
 
-from win11_release_guard import local_state
+from win11_release_guard import audit_probes, local_state
+from win11_release_guard.config import DEFAULT_PANTHER_TAIL_MAX_BYTES, DEFAULT_PANTHER_TOTAL_MAX_BYTES
+from win11_release_guard.diagnostic_tail import DiagnosticTail
 from win11_release_guard.models import EditionScope, LocalWindowsState, ServicingChannel
 
 
@@ -589,3 +593,228 @@ def test_read_file_tail_bounds_huge_panther_file(tmp_path):
 
     assert tail.endswith("TAIL")
     assert len(tail.encode("utf-8")) == 5 * 1024 * 1024
+
+
+def test_read_panther_logs_include_tail_metadata(tmp_path):
+    log = tmp_path / "setupact.log"
+    log.write_bytes(b"SetupPlatform.exe\n")
+
+    logs = local_state._read_panther_logs(paths=(str(log),), max_bytes=4096)
+
+    entry = logs[str(log)]
+    assert entry["content"] == "SetupPlatform.exe\n"
+    assert entry["file_size_bytes"] == log.stat().st_size
+    assert entry["tail_start_offset"] == 0
+    assert entry["tail_truncated"] is False
+    assert entry["encoding_detected"] == "utf-8"
+    assert entry["decode_errors_replaced"] is False
+    assert entry["privacy_scan_completed"] is True
+    assert entry["privacy_findings_count"] == 0
+
+
+def test_read_panther_logs_accepts_missing_sources_without_errors(tmp_path):
+    missing = tmp_path / "missing" / "setupact.log"
+    errors: list[str] = []
+
+    logs = local_state._read_panther_logs(paths=(str(missing),), errors=errors)
+
+    assert logs == {}
+    assert errors == []
+
+
+def test_default_panther_total_cap_is_generous_for_known_path_set():
+    assert DEFAULT_PANTHER_TOTAL_MAX_BYTES >= DEFAULT_PANTHER_TAIL_MAX_BYTES * len(local_state.PANTHER_LOG_PATHS)
+    assert DEFAULT_PANTHER_TOTAL_MAX_BYTES >= DEFAULT_PANTHER_TAIL_MAX_BYTES * len(audit_probes.PANTHER_SETUP_LOG_PATHS)
+
+
+def test_read_panther_logs_applies_total_cap_across_multiple_large_files(tmp_path):
+    first = tmp_path / "setupact.log"
+    second = tmp_path / "setuperr.log"
+    third = tmp_path / "rollback.log"
+    first.write_bytes(b"A" * 10)
+    second.write_bytes(b"B" * 10)
+    third.write_bytes(b"C" * 10)
+    errors: list[str] = []
+
+    logs = local_state._read_panther_logs(
+        paths=(str(first), str(second), str(third)),
+        max_bytes=10,
+        total_max_bytes=15,
+        errors=errors,
+    )
+
+    assert set(logs) == {str(first), str(second)}
+    assert logs[str(first)]["content"] == "A" * 10
+    assert logs[str(second)]["content"] == "B" * 5
+    assert sum(int(entry["tail_bytes"]) for entry in logs.values()) == 15
+    assert all(entry["collection_total_cap_reached"] is True for entry in logs.values())
+    assert all(entry["collection_total_cap_bytes"] == 15 for entry in logs.values())
+    assert any(str(third) in error and "total cap of 15 bytes reached" in error for error in errors)
+
+
+def test_read_panther_logs_marks_total_cap_when_single_large_file_is_clipped(tmp_path):
+    log = tmp_path / "setupact.log"
+    log.write_bytes(b"A" * 20)
+
+    logs = local_state._read_panther_logs(
+        paths=(str(log),),
+        max_bytes=20,
+        total_max_bytes=7,
+    )
+
+    entry = logs[str(log)]
+    assert entry["content"] == "A" * 7
+    assert entry["tail_bytes"] == 7
+    assert entry["tail_truncated"] is True
+    assert entry["collection_total_cap_reached"] is True
+    assert entry["collection_total_cap_bytes"] == 7
+
+
+def test_read_panther_logs_reports_privacy_findings_without_values(tmp_path):
+    log = tmp_path / "setupact.log"
+    log.write_text(
+        "Password: never-print-this\n"
+        "Authorization: Bearer short\n"
+        "ProductKey: never-print-this-either\n",
+        encoding="utf-8",
+    )
+
+    logs = local_state._read_panther_logs(paths=(str(log),), max_bytes=4096)
+
+    entry = logs[str(log)]
+    findings = entry["privacy_findings"]
+    marker_names = {str(finding["marker"]) for finding in findings}
+    serialized_findings = json.dumps(findings, sort_keys=True)
+    assert entry["privacy_scan_completed"] is True
+    assert entry["privacy_findings_count"] == 3
+    assert marker_names == {"password", "authorization_header", "product_key"}
+    assert "never-print-this" in entry["content"]
+    assert "never-print-this" not in serialized_findings
+    assert "short" not in serialized_findings
+
+
+def test_read_panther_logs_continues_after_unreadable_path(monkeypatch, tmp_path):
+    blocked = tmp_path / "blocked-setupact.log"
+    readable = tmp_path / "setupact.log"
+    blocked.write_bytes(b"blocked")
+    readable.write_bytes(b"SetupPlatform.exe\n")
+
+    def fake_tail(path, *, max_bytes):
+        if Path(path) == blocked:
+            raise PermissionError("access denied")
+        return DiagnosticTail(
+            content="SetupPlatform.exe\n",
+            file_size_bytes=18,
+            tail_start_offset=0,
+            tail_truncated=False,
+            tail_bytes=18,
+            encoding_detected="utf-8",
+            decode_errors_replaced=False,
+        )
+
+    monkeypatch.setattr(local_state, "read_diagnostic_tail", fake_tail)
+    errors: list[str] = []
+
+    logs = local_state._read_panther_logs(
+        paths=(str(blocked), str(readable)),
+        max_bytes=4096,
+        errors=errors,
+    )
+
+    assert str(readable) in logs
+    assert str(blocked) not in logs
+    assert errors
+    assert "access denied" in errors[0]
+
+
+def test_audit_panther_logs_include_tail_metadata(tmp_path):
+    log = tmp_path / "setuperr.log"
+    log.write_bytes(b"SetupPlatform.exe failed\n")
+
+    result = audit_probes.read_panther_logs(paths=(str(log),), max_bytes=4096)
+
+    entry = result["logs"][0]
+    assert entry["content"] == "SetupPlatform.exe failed\n"
+    assert entry["tail_bytes"] == log.stat().st_size
+    assert entry["file_size_bytes"] == log.stat().st_size
+    assert entry["tail_start_offset"] == 0
+    assert entry["tail_truncated"] is False
+    assert entry["encoding_detected"] == "utf-8"
+    assert entry["decode_errors_replaced"] is False
+    assert entry["privacy_scan_completed"] is True
+    assert entry["privacy_findings_count"] == 0
+    assert result["privacy_findings"] is None
+
+
+def test_audit_panther_logs_accepts_missing_sources_without_errors(tmp_path):
+    missing = tmp_path / "missing" / "setuperr.log"
+
+    result = audit_probes.read_panther_logs(paths=(str(missing),))
+
+    assert result["available"] is False
+    assert result["logs"] == []
+    assert result["setup_failure_evidence"] == []
+    assert result["privacy_findings"] is None
+    assert result["errors"] == []
+
+
+def test_audit_panther_logs_applies_total_cap_across_multiple_large_files(tmp_path):
+    first = tmp_path / "setupact.log"
+    second = tmp_path / "setuperr.log"
+    third = tmp_path / "rollback.log"
+    first.write_bytes(b"A" * 10)
+    second.write_bytes(b"B" * 10)
+    third.write_bytes(b"C" * 10)
+
+    result = audit_probes.read_panther_logs(
+        paths=(str(first), str(second), str(third)),
+        max_bytes=10,
+        total_max_bytes=15,
+    )
+
+    logs = result["logs"]
+    assert [entry["path"] for entry in logs] == [str(first), str(second)]
+    assert logs[0]["content"] == "A" * 10
+    assert logs[1]["content"] == "B" * 5
+    assert sum(int(entry["tail_bytes"]) for entry in logs) == 15
+    assert all(entry["collection_total_cap_reached"] is True for entry in logs)
+    assert all(entry["collection_total_cap_bytes"] == 15 for entry in logs)
+    assert any(str(third) in error and "total cap of 15 bytes reached" in error for error in result["errors"])
+
+
+def test_audit_panther_logs_report_privacy_findings_without_values(tmp_path):
+    log = tmp_path / "setuperr.log"
+    log.write_text(
+        "client_secret: never-print-this\n"
+        "connection_string=server=db;uid=admin;password=never-print-this\n",
+        encoding="utf-8",
+    )
+
+    result = audit_probes.read_panther_logs(paths=(str(log),), max_bytes=4096)
+
+    entry = result["logs"][0]
+    findings = entry["privacy_findings"]
+    marker_names = {str(finding["marker"]) for finding in findings}
+    serialized_findings = json.dumps(findings, sort_keys=True)
+    assert entry["privacy_scan_completed"] is True
+    assert entry["privacy_findings_count"] == 3
+    assert marker_names == {"secret_assignment", "connection_string", "password"}
+    assert "never-print-this" in entry["content"]
+    assert "never-print-this" not in serialized_findings
+    assert result["privacy_findings"]["privacy_findings_count"] == 3
+    assert "uploading or sharing" in result["privacy_findings"]["notice"]
+    assert "never-print-this" not in json.dumps(result["privacy_findings"], sort_keys=True)
+
+
+def test_panther_path_sets_include_setup_compatibility_locations():
+    local_paths = set(local_state.PANTHER_LOG_PATHS)
+    audit_paths = set(audit_probes.PANTHER_SETUP_LOG_PATHS)
+
+    assert r"C:\$Windows.~BT\Sources\Panther\setuperr.log" in local_paths
+    assert r"C:\$Windows.~BT\Sources\Rollback\setuperr.log" in local_paths
+    assert r"C:\$Windows.~BT\NewOS\Windows\Panther\setupact.log" in local_paths
+    assert r"C:\Windows\Panther\UnattendGC\setuperr.log" in local_paths
+    assert r"C:\$Windows.~BT\Sources\Panther\setuperr.log" in audit_paths
+    assert r"C:\$Windows.~BT\Sources\Rollback\setuperr.log" in audit_paths
+    assert r"C:\$Windows.~BT\NewOS\Windows\Panther\setupact.log" in audit_paths
+    assert r"%WINDIR%\Panther\UnattendGC\setuperr.log" in audit_paths

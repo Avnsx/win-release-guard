@@ -15,7 +15,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | `evaluator.py` | Target selection and verdict computation. |
 | `local_state.py` | Local Windows build/edition evidence. |
 | `wua_probe.py` | Optional bounded read-only WUA probe. |
-| `audit_probes.py`, `policy_diagnostics.py` | Read-only blocker diagnostics. |
+| `audit_probes.py`, `diagnostic_tail.py`, `policy_diagnostics.py` | Read-only blocker diagnostics, bounded Panther/setup tail decoding, privacy markers, and collection-cap metadata. |
 | `remote_policy.py` | JSON loading plus generator-only Release Health parsing. |
 | `policy_generator.py` | Policy/dashboard/manifest/API generation. |
 | `signing.py`, `json_utils.py`, `policy_schema.py` | Trust, strict JSON, schema validation. |
@@ -34,6 +34,8 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | `check_github_action_versions.py` | Workflow action pinning audit. |
 | `check_dependency_freshness.py` | Direct dependency freshness report. |
 | `check_commit_message.py` | Commit message hygiene. |
+| `debug_panther_json_leaks.py` | Developer-only JSON leak debugger for raw Panther/setup strings and compaction fix recommendations. |
+| `live_panther_json_regression.py` | Windows-only live JSON output regression for Panther/setup compaction and raw opt-in behavior. |
 
 ## Repository Legal File
 

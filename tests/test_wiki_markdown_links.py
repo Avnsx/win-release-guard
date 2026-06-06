@@ -277,13 +277,13 @@ def test_sidebar_keeps_wiki_link_syntax_outside_tables() -> None:
 
 def test_home_and_release_wiki_pages_have_no_broken_table_link_fragments() -> None:
     home = (WIKI / "Home.md").read_text(encoding="utf-8")
-    release = (WIKI / "Release-v0.3.0.md").read_text(encoding="utf-8")
+    release = (WIKI / "Release-v0.3.1.md").read_text(encoding="utf-8")
 
     assert "## Pick Your Path" in home
     assert "[[Quick Start" not in home
     assert "Quick-Start]]" not in home
     release_table_has_wiki_link = any(
-        "[[" in row.raw or "]]" in row.raw for row in _iter_table_rows(WIKI / "Release-v0.3.0.md")
+        "[[" in row.raw or "]]" in row.raw for row in _iter_table_rows(WIKI / "Release-v0.3.1.md")
     )
     assert not release_table_has_wiki_link
     assert "[Quick Start](Quick-Start)" in release

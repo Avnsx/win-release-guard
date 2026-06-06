@@ -34,7 +34,7 @@
 
 **Releases**
 
-- [[Release v0.3.0|Release-v0.3.0]]
+- [[Release v0.3.1|Release-v0.3.1]]
 - [[Tagged Release Lane|Tagged-Release-Lane]]
 
 **Troubleshooting**

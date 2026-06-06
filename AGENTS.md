@@ -53,6 +53,22 @@ Canonical repository and feed:
 - Do not inspect or print credentials, tokens, private signing keys, GitHub Actions secret values, or credentialed remote URLs.
 - Preserve administrator-facing diagnostic data in normal product output unless the user explicitly asks for masking.
 - Keep WUA, Panther, DISM, and local system evidence subordinate to signed policy truth.
+- Panther/setup privacy diagnostics must report metadata only in default JSON
+  (category, marker, path, line, count, and notice). Do not copy matched
+  password, token, key, or secret values into privacy finding metadata. Raw
+  Panther/setup values remain behind `--include-raw-local-diagnostics` and
+  should be reviewed before uploading or sharing.
+- Panther/setup reads must stay fixed-path and tail-bounded. Any global Panther
+  collection cap must remain deliberately generous so trusted-environment
+  troubleshooting is not constrained; use tests with small explicit caps when
+  validating cap behavior.
+- For Windows live harnesses that must test native redirection, prefer
+  `cmd.exe /d /c` with a raw command line and `call` before quoted executable
+  paths, for example `cmd.exe /d /c call "C:\Program Files\Python\python.exe" -m win11_release_guard --json-pretty > "out.json"`.
+  Passing `["cmd.exe", "/d", "/c", command]` through Python `subprocess` can
+  make `cmd.exe` misparse quoted executable paths; PowerShell 5 plain `>` can
+  write UTF-16LE, so prefer `cmd.exe` redirection or `Out-File -Encoding utf8`
+  for JSON captures.
 - CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub code scanning is disabled in repository settings, enable it under Settings, Code security and analysis.
 - Handover files are temporary local artifacts. Do not commit or publish `*handover*.md`; they are ignored and excluded from clean archives.
 - The only recommended handoff artifact is the validated clean archive created
