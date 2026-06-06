@@ -2,7 +2,7 @@
 
 Purpose: document the current implementation boundaries that future maintainers must preserve. This is technical context, not a substitute for code, tests, workflows, and `AGENTS.md`.
 
-Related links: [docs index](README.md) | [wiki architecture](../wiki/Architecture.md) | [local detection](../wiki/Local-Windows-Detection.md) | [policy trust](../wiki/Policy-Feed-and-Trust-Model.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../wiki/Architecture.md) | [local detection](../wiki/Local-Windows-Detection.md) | [policy trust](../wiki/Policy-Feed-and-Trust-Model.md)
 
 ## Runtime Flow
 

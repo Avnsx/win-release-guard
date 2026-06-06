@@ -54,13 +54,17 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 * `.github/workflows/pypi-publish.yml` uses `contents: read` globally and `id-token: write` only in `publish-to-pypi`.
 * `tools/check_github_action_versions.py` allows `pypa/gh-action-pypi-publish` only in `pypi-publish.yml`, pinned to `cef221092ed1bacb1cc03d23a2d87d1d172e277b`.
 
-### Packaging
+### Packaging And PyPI
 
 * `pyproject.toml` package name is `win11_release_guard`, version is `0.3.0`, readme is `README.md`, license is `GPL-3.0-only`, license file is `LICENSE.txt`, author metadata is `Mikail ("Avnsx") C.`, runtime dependency is `cryptography>=41`, and test extras are `packaging>=24` plus `pytest>=8`.
+* PyPI project URL is `https://pypi.org/project/win11_release_guard/`; end users install released packages with `python -m pip install win11_release_guard`.
 * Console script remains `win11_release_guard = "win11_release_guard.__main__:main"`.
 * Package data includes `win11_release_guard/data/*.json` and `win11_release_guard/data/*.sig`.
 * Project URLs cover Homepage, Repository, Documentation, Changelog, Bug Tracker, Public Feed, and Pages Dashboard.
+* `.github/workflows/pypi-publish.yml` builds wheel and sdist artifacts in generated `dist/`, uploads/downloads that workflow artifact between jobs, and runs `python -m twine check dist/*` before publication.
 * PyPI publishing is Trusted Publishing / GitHub OIDC only: project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`; no PyPI API token, Twine username/password, or credentialed repository URL is defined.
+* First publish requires PyPI Pending Trusted Publisher setup if the project is not already live. A PyPI 404 before first publish is not a reservation guarantee; if another owner controls the name, stop and report.
+* TestPyPI is not implemented in the current workflow; add it only as a separate Trusted Publisher lane and environment.
 
 ### Tests
 

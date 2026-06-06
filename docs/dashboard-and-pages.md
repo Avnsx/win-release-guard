@@ -2,7 +2,7 @@
 
 Purpose: document the generated static Pages surface and the public endpoint contract that maintainers must preserve.
 
-Related links: [docs index](README.md) | [wiki dashboard](../wiki/GitHub-Pages-Dashboard.md) | [anti-static freshness](anti-static-freshness.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki dashboard](../wiki/GitHub-Pages-Dashboard.md) | [anti-static freshness](anti-static-freshness.md)
 
 ## Generated Files
 

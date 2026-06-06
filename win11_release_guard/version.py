@@ -30,7 +30,7 @@ def source_tree_package_version(root: Path | None = None) -> str | None:
     in_project_section = False
     try:
         lines = pyproject.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     for raw_line in lines:
         line = raw_line.strip()
@@ -53,7 +53,7 @@ def _metadata_version() -> tuple[str | None, Path | None]:
     version = distribution.version
     try:
         location = Path(distribution.locate_file("")).resolve()
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         location = None
     return version, location
 

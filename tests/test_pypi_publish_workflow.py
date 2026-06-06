@@ -7,10 +7,25 @@ from tools.check_github_action_versions import PYPA_PUBLISH_ACTION_SHA
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "pypi-publish.yml"
+README = ROOT / "README.md"
+PYPI_DOC_PATHS = (
+    ROOT / "CHANGELOG.md",
+    ROOT / "docs" / "releases" / "v0.3.0.md",
+    ROOT / "docs" / "tagged-release-lane.md",
+    ROOT / "docs" / "security-automation.md",
+    ROOT / "wiki" / "Build-Test-and-Release.md",
+    ROOT / "wiki" / "Tagged-Release-Lane.md",
+    ROOT / "wiki" / "Release-v0.3.0.md",
+    ROOT / "wiki" / "FAQ.md",
+)
 
 
 def _workflow_text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _repo_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def test_pypi_publish_workflow_exists_with_manual_and_release_triggers() -> None:
@@ -139,3 +154,73 @@ def test_pypi_publish_workflow_enforces_tag_version_parity_without_tag_creation(
     assert "Unexpected package name" in text
     assert "git tag" not in text
     assert "git push" not in text
+
+
+def test_readme_pypi_badges_install_and_publish_links_are_visible() -> None:
+    text = _repo_text(README)
+
+    assert "[![PyPI](https://img.shields.io/pypi/v/win11_release_guard?logo=pypi&label=PyPI)]" in text
+    assert "[![Python](https://img.shields.io/pypi/pyversions/win11_release_guard?logo=python&label=Python)]" in text
+    assert "[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)]" in text
+    assert "[![PyPI downloads](https://img.shields.io/pypi/dm/win11_release_guard?label=PyPI%20downloads)]" in text
+    assert "[![GitHub Release](https://img.shields.io/github/v/release/Avnsx/win11_release_guard?label=release)]" in text
+    assert "[![Publish Python package](https://github.com/Avnsx/win11_release_guard/actions/workflows/pypi-publish.yml/badge.svg)]" in text
+    assert "https://pypi.org/project/win11_release_guard/" in text
+    assert "python -m pip install win11_release_guard" in text
+    assert 'python -m pip install -e ".[test]"' in text
+    assert "win11_release_guard --pretty" in text
+    assert "python -m win11_release_guard --self-test" in text
+
+
+def test_readme_pypi_docs_do_not_document_token_secret_setup() -> None:
+    texts = [("README.md", _repo_text(README))]
+    texts.extend((path.relative_to(ROOT).as_posix(), _repo_text(path)) for path in PYPI_DOC_PATHS)
+    forbidden = (
+        "PYPI_API_TOKEN",
+        "PYPI_TOKEN",
+        "TWINE_PASSWORD",
+        "username: __token__",
+        "password: ${{ secrets",
+        "repository-url: https://upload.pypi.org/legacy/",
+    )
+
+    findings = [
+        f"{name}: {pattern}"
+        for name, text in texts
+        for pattern in forbidden
+        if pattern in text
+    ]
+
+    assert findings == []
+
+
+def test_pypi_docs_connect_release_lane_package_artifacts_and_oidc() -> None:
+    for path in PYPI_DOC_PATHS:
+        text = _repo_text(path)
+        assert "pypi-publish.yml" in text
+        assert "Trusted Publishing" in text
+        assert "OIDC" in text
+
+    changelog = _repo_text(ROOT / "CHANGELOG.md")
+    detailed_release = _repo_text(ROOT / "docs" / "releases" / "v0.3.0.md")
+    wiki_release = _repo_text(ROOT / "wiki" / "Release-v0.3.0.md")
+    for text in (changelog, detailed_release, wiki_release):
+        assert ".github/workflows/pypi-publish.yml" in text
+        assert "wheel" in text
+        assert "sdist" in text
+        assert "twine check" in text.lower()
+        assert "Pending Trusted Publisher" in text
+        assert "TestPyPI" in text
+
+
+def test_pypi_docs_keep_package_name_and_release_urls_connected() -> None:
+    readme = _repo_text(README)
+    tagged_docs = _repo_text(ROOT / "docs" / "tagged-release-lane.md")
+    tagged_wiki = _repo_text(ROOT / "wiki" / "Tagged-Release-Lane.md")
+
+    for text in (readme, tagged_docs, tagged_wiki):
+        assert "https://pypi.org/project/win11_release_guard/" in text
+        assert "win11_release_guard" in text
+        assert "https://github.com/Avnsx/win11_release_guard/releases" in readme
+    assert "Publishing a GitHub Release can trigger the separate PyPI workflow" in tagged_docs
+    assert "published GitHub Release" in tagged_wiki

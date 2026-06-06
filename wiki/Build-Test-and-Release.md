@@ -40,12 +40,13 @@ python -m win11_release_guard --self-test
 Use this before enabling PyPI publication or handing off a release candidate:
 
 ```powershell
+python -m pip install -e ".[test]"
 python -m pip install --upgrade build twine
 python -m build
 python -m twine check dist/*
 ```
 
-`dist/` is generated output. Do not commit it.
+`python -m build` creates wheel and sdist artifacts under generated `dist/`. Do not commit `dist/`.
 
 ## Deployment-Affecting Gate
 
@@ -80,10 +81,14 @@ The repository `wiki/` folder is GitHub Wiki source/staging only. It does not au
 | Check | Rule |
 | --- | --- |
 | Trusted Publisher values | Project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`. |
+| PyPI project | `https://pypi.org/project/win11_release_guard/` |
 | Trigger | Manual dispatch without a tag is build-only; manual dispatch with an existing `vX.Y.Z` tag, or a published GitHub Release, can publish. No normal push. |
+| Publishing model | PyPI Trusted Publishing / GitHub OIDC. |
 | Permission | `id-token: write` in the publish job only. |
 | Credential rule | No PyPI API token, Twine password, username, or credentialed URL. |
+| Package artifacts | Wheel and sdist from generated `dist/`, checked by Twine before publish. |
 | Name availability | If PyPI already owns the name under another owner, stop and report. |
+| TestPyPI | Not configured in this workflow. |
 
 ## Related Pages
 

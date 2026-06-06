@@ -32,9 +32,9 @@ No. Policy JSON, signatures, manifests, dashboard files, and public keys are non
 
 The repository uses GPL-3.0. The full license text lives in `LICENSE.txt` and is included in validated clean source archives.
 
-## Does PyPI publishing need a PyPI token?
+## Do I need a PyPI API token?
 
-No. The current publish workflow uses PyPI Trusted Publishing with GitHub Actions OIDC. Configure PyPI with project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, and environment `pypi`.
+No. The current publish workflow uses PyPI Trusted Publishing with GitHub Actions OIDC. Configure PyPI with project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, and environment `pypi`. Do not paste publishing tokens, usernames, passwords, or credentialed repository URLs into workflow YAML.
 
 ## Does local wiki source publish automatically?
 

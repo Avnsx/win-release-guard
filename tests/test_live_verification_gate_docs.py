@@ -16,20 +16,32 @@ REQUIRED_GATE_COMMANDS = (
 )
 
 
-def test_readme_documents_deployment_affecting_live_gate() -> None:
+def test_readme_links_deployment_affecting_live_gate() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "Deployment-affecting changes require the live Pages gate before handover." in text
-    assert "workflow changes" in text
-    assert "policy generator changes" in text
-    assert "signing changes" in text
+    assert "AGENTS.md#deployment-affecting-live-verification-gate" in text
+    assert "Build, Test and Release" in text
+    assert "changing workflows" in text
+    assert "the policy generator" in text
+    assert "signing" in text
+    assert "Pages" in text
+    assert "manifest/API aliases" in text
+    assert "source URLs" in text
+    assert "public-check CLI behavior" in text
+
+
+def test_agents_documents_deployment_affecting_live_gate_commands() -> None:
+    text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "Deployment-Affecting Live Verification Gate" in text
     assert "Pages landing page changes" in text
     assert "manifest/API alias changes" in text
-    assert "source URL or published URL changes" in text
-    assert "CLI changes to `--check-policy-source`" in text
+    assert "CLI changes to" in text
     assert "`--check-public-pages`" in text
     assert "do not claim live success" in text
-    assert "exact failing URL, status, and error" in text
+    normalized = " ".join(text.split())
+    assert "exact failing URL, status, and error" in normalized
 
     for command in REQUIRED_GATE_COMMANDS:
         assert command in text

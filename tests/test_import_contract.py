@@ -3,6 +3,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from win11_release_guard.version import source_tree_package_version
+
 from win11_release_guard.config import ReleaseCheckerConfig
 from win11_release_guard.exceptions import PolicyFetchError
 from win11_release_guard.models import (
@@ -41,6 +43,14 @@ def test_distribution_metadata_maps_author_license_and_project_urls():
     assert '[project.urls]' in pyproject
     assert 'Repository = "https://github.com/Avnsx/win11_release_guard"' in pyproject
     assert 'Documentation = "https://github.com/Avnsx/win11_release_guard/wiki"' in pyproject
+
+
+def test_source_tree_package_version_handles_unreadable_pyproject(tmp_path):
+    package_dir = tmp_path / "win11_release_guard"
+    package_dir.mkdir()
+    (tmp_path / "pyproject.toml").write_bytes(b"\xff")
+
+    assert source_tree_package_version(tmp_path) is None
 
 
 def test_import_has_no_side_effects(monkeypatch):

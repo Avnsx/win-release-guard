@@ -8,11 +8,11 @@ Compact human summary of the `0.3.0` hardening and packaging release. Code, test
 
 | You are | Read | Why |
 | --- | --- | --- |
-| User | [[Quick Start|Quick-Start]] | Run the guard and understand output/exit codes. |
-| Admin / RMM owner | [[CLI and RMM Usage|CLI-and-RMM-Usage]] | Integrate JSON output and strict-production checks. |
-| Maintainer | [[Build, Test and Release|Build-Test-and-Release]] | Reproduce local gates and release checks. |
-| Release manager | [[Tagged Release Lane|Tagged-Release-Lane]] | Publish a validated source archive and understand the separate PyPI lane. |
-| Future agent | [[Agent Chokepoints|Agent-Chokepoints]] | Avoid known regression traps. |
+| User | [Quick Start](Quick-Start) | Run the guard and understand output/exit codes. |
+| Admin / RMM owner | [CLI and RMM Usage](CLI-and-RMM-Usage) | Integrate JSON output and strict-production checks. |
+| Maintainer | [Build, Test and Release](Build-Test-and-Release) | Reproduce local gates and release checks. |
+| Release manager | [Tagged Release Lane](Tagged-Release-Lane) | Publish a validated source archive and understand the separate PyPI lane. |
+| Future agent | [Agent Chokepoints](Agent-Chokepoints) | Avoid known regression traps. |
 
 ## Highlights
 
@@ -28,6 +28,18 @@ Compact human summary of the `0.3.0` hardening and packaging release. Code, test
 | WUA | Optional read-only secondary probe; never decides the policy verdict. |
 | Release lane | `release.yml` validates `vX.Y.Z` tag/version parity, links changelog/release notes/Pages/feed in the release body, and attaches only a validated clean source archive. |
 | PyPI lane | `pypi-publish.yml` builds wheel/sdist and publishes through Trusted Publishing / GitHub OIDC only after tag or published-release gates. |
+
+## Packaging And PyPI
+
+| Item | State |
+| --- | --- |
+| PyPI project | [win11_release_guard](https://pypi.org/project/win11_release_guard/) |
+| End-user install | `python -m pip install win11_release_guard` |
+| Package metadata | `pyproject.toml` defines `win11_release_guard` version `0.3.0`, GPL-3.0-only license, console script, project URLs, and package data. |
+| Build artifacts | Wheel and sdist are generated in `dist/`, checked with `python -m twine check dist/*`, and never committed. |
+| Publishing | `.github/workflows/pypi-publish.yml` uses PyPI Trusted Publishing / GitHub OIDC with environment `pypi`. |
+| First publish | Pending Trusted Publisher setup is required if the project is absent; a PyPI 404 is not a name reservation. |
+| TestPyPI | Not implemented in the current workflow. |
 
 ## What Changed By Area
 

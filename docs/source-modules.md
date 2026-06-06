@@ -2,7 +2,7 @@
 
 Purpose: provide a compact maintainer map of source modules, scripts, and tests without duplicating implementation details.
 
-Related links: [docs index](README.md) | [wiki architecture](../wiki/Architecture.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../wiki/Architecture.md)
 
 ## Runtime Modules
 

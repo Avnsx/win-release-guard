@@ -1,4 +1,4 @@
-# Maintainer Documentation
+# Maintainer Guide
 
 Purpose: this directory keeps compact technical documents for maintainers who change policy generation, signing, automation, release, or Pages behavior. The local `wiki/` folder is documentation-only and mirrors the long-form GitHub Wiki source; code, tests, workflows, and `AGENTS.md` remain source of truth.
 

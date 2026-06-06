@@ -1,24 +1,34 @@
 # Quick Start
 
-Use this when you want to install the source tree, run a human check, and verify the public policy feed quickly.
+Use this when you want to install the released package or source tree, run a human check, and verify the public policy feed quickly.
 
 ---
 
 ## Install
 
+Released package:
+
+```powershell
+python -m pip install win11_release_guard
+```
+
+Source checkout or unreleased local changes:
+
 ```powershell
 python -m pip install -e ".[test]"
 ```
+
+PyPI install is the normal path for published releases. Source install remains the fallback for local validation and release-candidate testing.
 
 ## Run
 
 | Need | Command |
 | --- | --- |
-| Human console output | `python -m win11_release_guard --pretty` |
-| JSON for RMM/scripts | `python -m win11_release_guard --json-pretty --no-wua` |
-| Production-style source gating | `python -m win11_release_guard --strict-production --json-pretty --no-wua` |
-| Check signed policy source | `python -m win11_release_guard --check-policy-source` |
-| Check public Pages surface | `python -m win11_release_guard --check-public-pages` |
+| Human console output | `win11_release_guard --pretty` |
+| JSON for RMM/scripts | `win11_release_guard --json-pretty --no-wua` |
+| Production-style source gating | `win11_release_guard --strict-production --json-pretty --no-wua` |
+| Check signed policy source | `win11_release_guard --check-policy-source` |
+| Check public Pages surface | `win11_release_guard --check-public-pages` |
 
 ## Local Integrity
 

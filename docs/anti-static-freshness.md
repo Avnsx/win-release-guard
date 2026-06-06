@@ -2,7 +2,7 @@
 
 Purpose: define how runtime and Pages avoid treating old static feed output as current production evidence.
 
-Related links: [docs index](README.md) | [wiki freshness](../wiki/Anti-Static-Freshness.md) | [dashboard docs](dashboard-and-pages.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki freshness](../wiki/Anti-Static-Freshness.md) | [dashboard docs](dashboard-and-pages.md)
 
 ## Fields
 

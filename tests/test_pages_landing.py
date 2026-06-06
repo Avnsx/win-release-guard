@@ -182,7 +182,9 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Document trust state" in index
     assert "Detached signature metadata for the published policy artifact." in index
     assert "signature-kv" in index
-    assert ".signature-kv div{display:grid;grid-template-columns:minmax(112px,34%) minmax(0,1fr)" in index
+    assert ".signature-panel{position:relative;overflow:hidden;display:flex;flex-direction:column" in index
+    assert ".signature-panel:before{content:'';position:absolute;inset:0 0 auto;height:3px" in index
+    assert ".signature-kv div{display:grid;grid-template-columns:minmax(104px,30%) minmax(0,1fr)" in index
     assert "<h2>Sources</h2>" not in index
     assert "Programmatic JSON endpoint for automation and fleet dashboards." not in index
     assert "Independent Windows release-policy dashboard. Not affiliated with Microsoft." in index
@@ -238,6 +240,77 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert freshness["warning_age_seconds"] == 14 * 24 * 60 * 60
     assert freshness["strict_stale_age_seconds"] == 45 * 24 * 60 * 60
     assert freshness["freshness_policy"]["client_recomputes_age"] is True
+
+
+def test_pages_index_signature_trust_pulse_is_lightweight_and_can_render_red() -> None:
+    policy = ReleasePolicy(metadata={"signature_status": "invalid"})
+
+    index = render_policy_index(
+        policy,
+        policy_bytes=b'{"policy":"demo"}',
+        signature={"algorithm": "ed25519", "key_id": "test-key", "signature": "bad"},
+    )
+    HTMLParser().feed(index)
+
+    assert "html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}" in index
+    assert 'class="trust-indicator error">Signed policy trust</span>' in index
+    assert '<section class="panel span-5 signature-panel error">' in index
+    assert 'class="signature-status-card error"' in index
+    assert "font-size:12px;font-weight:650;white-space:nowrap" in index
+    assert (
+        ".trust-indicator.error{color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);"
+        "border-color:#f6b7ad"
+        in index
+    )
+    assert "--trust-ring:rgba(180,35,24,.2)" in index
+    assert ".signature-panel.error{border-color:#f6b7ad;background:linear-gradient(180deg,#fff7f5,#fffdfc)}" in index
+    assert ".signature-panel.error:before{background:linear-gradient(90deg,var(--err),rgba(180,35,24,.22))}" in index
+    assert ".signature-status-card.error{border-color:#f6b7ad;background:linear-gradient(135deg,var(--err-soft),#fff8f6)}" in index
+    assert "box-shadow:0 0 0 5px var(--trust-ring)" in index
+    assert "width:9px;height:9px" in index
+    assert "animation:trustPulse 2.2s cubic-bezier(.4,0,.2,1) infinite" in index
+    assert "will-change:transform" in index
+    keyframes = index.split("@keyframes trustPulse", 1)[1].split(".trust-indicator.warning", 1)[0]
+    assert "transform:scale(1.7)" in keyframes
+    assert "transform:scale(1.18)" in keyframes
+    assert "box-shadow" not in keyframes
+    assert "animation:none!important" in index
+
+
+def test_pages_index_signature_boxes_hover_without_double_animating_api_rows() -> None:
+    index = render_policy_index(ReleasePolicy(), policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert (
+        ".signature-kv div{display:grid;grid-template-columns:minmax(104px,30%) minmax(0,1fr);"
+        "gap:12px;align-items:center;border:1px solid #d5e2f0;border-radius:8px;"
+        "background:linear-gradient(180deg,#fbfdff,#f5f8fc);padding:10px 12px;"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,.7);"
+        "transition:transform .16s ease,border-color .16s ease,background-color .16s ease}"
+        in index
+    )
+    assert ".signature-kv dd{margin:0;color:#172033;font-weight:560;line-height:1.25;overflow-wrap:anywhere}" in index
+    assert ".signature-kv .mono{font-size:13px;font-weight:560}" in index
+    assert (
+        ".signature-kv div:hover{border-color:#b8c9dd;background:#fff;"
+        "box-shadow:0 7px 16px rgba(31,79,143,.07);transform:translateY(-1px)}"
+        in index
+    )
+    assert (
+        ".api-endpoint-row{display:grid;grid-template-columns:minmax(0,1fr) auto;"
+        "gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;"
+        "background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;"
+        "color:inherit;text-decoration:none}"
+        in index
+    )
+    assert ".api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}" in index
+    api_base_rule = index.split(".api-endpoint-row{", 1)[1].split("}", 1)[0]
+    api_hover_rule = index.split(".api-endpoint-row:hover{", 1)[1].split("}", 1)[0]
+    assert "transition:" not in api_base_rule
+    assert "transform:" not in api_hover_rule
+    assert "box-shadow:" not in api_hover_rule
+    assert ".api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28)" in index
+    assert ".signature-kv div:hover{transform:none!important}" in index
 
 
 def test_pages_index_source_diagnostics_empty_state_is_compact() -> None:

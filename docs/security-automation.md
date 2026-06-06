@@ -2,7 +2,7 @@
 
 Purpose: document repository automation that protects public feed generation, release publication, dependency posture, and GitHub Actions execution.
 
-Related links: [docs index](README.md) | [docs/tagged-release-lane.md](tagged-release-lane.md) | [wiki build/test/release](../wiki/Build-Test-and-Release.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md)
+Related links: [maintainer guide](maintainer-guide.md) | [docs/tagged-release-lane.md](tagged-release-lane.md) | [wiki build/test/release](../wiki/Build-Test-and-Release.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md)
 
 ## Automation Configuration Files
 
@@ -53,12 +53,13 @@ Production Pages publishing must not use PATs, branch pushes, or `gh-pages` bran
 | Field | Value |
 | --- | --- |
 | PyPI project name | Derived from `pyproject.toml` `[project].name`: `win11_release_guard` |
+| PyPI project URL | `https://pypi.org/project/win11_release_guard/` |
 | Owner | `Avnsx` |
 | Repository | `win11_release_guard` |
 | Workflow | `pypi-publish.yml` |
 | Environment | `pypi` |
 
-PyPI and GitHub exchange a short-lived OIDC publishing identity during the workflow run. Artifact transfer is workflow-initiated: the workflow builds `dist/`, checks it with Twine, uploads the artifact between jobs, and actively publishes it only after an existing tag is checked out and the `pypi` environment gate approves. Manual dispatch without a tag is build-only. If the PyPI project does not exist yet, configure a Pending Trusted Publisher first; that does not reserve the name.
+PyPI and GitHub exchange a short-lived OIDC publishing identity during the workflow run. Artifact transfer is workflow-initiated: the workflow builds generated wheel/sdist files in `dist/`, checks them with Twine, uploads the artifact between jobs, and actively publishes it only after an existing tag is checked out and the `pypi` environment gate approves. Manual dispatch without a tag is build-only. If the PyPI project does not exist yet, configure a Pending Trusted Publisher first; that does not reserve the name. Do not add workflow YAML that asks maintainers to paste publishing tokens, usernames, passwords, or credentialed repository URLs.
 
 No TestPyPI lane is currently implemented. If one is added later, use a separate TestPyPI Trusted Publisher and a separate GitHub Environment such as `testpypi`.
 

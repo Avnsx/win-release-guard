@@ -2,7 +2,7 @@
 
 Purpose: define how public policy JSON becomes trusted by runtime clients. The feed is public static data; trust comes from Ed25519 verification with committed public keys.
 
-Related links: [docs index](README.md) | [wiki trust model](../wiki/Policy-Feed-and-Trust-Model.md) | [security automation](security-automation.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki trust model](../wiki/Policy-Feed-and-Trust-Model.md) | [security automation](security-automation.md)
 
 ## Artifacts
 

@@ -2,7 +2,7 @@
 
 Purpose: list the narrow areas where future documentation or implementation agents most often regress product safety or project identity.
 
-Related links: [docs index](README.md) | [wiki agent chokepoints](../wiki/Agent-Chokepoints.md)
+Related links: [maintainer guide](maintainer-guide.md) | [wiki agent chokepoints](../wiki/Agent-Chokepoints.md)
 
 ## Chokepoints
 

@@ -130,15 +130,17 @@ def test_readme_contains_truthful_workflow_badges() -> None:
 def test_readme_documents_branding_and_runtime_trust_model() -> None:
     text = _read(README)
     normalized = " ".join(text.split())
+    agents = _read(ROOT / "AGENTS.md")
+    ci_workflow = _read(WORKFLOWS / "ci.yml")
 
     assert text.startswith("# Windows 11 Release Guard\n\n")
     assert "Windows release policy guard for broad-fleet Windows 11 version checks." in text
     assert "installed console command, and Python import package use the same `win11_release_guard` name" in normalized
-    assert "GitHub repo: `https://github.com/Avnsx/win11_release_guard`" in text
-    assert "Public feed: `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`" in text
-    assert "Python entry point: `python -m win11_release_guard`" in text
-    assert "Console script: `win11_release_guard`" in text
-    assert "Do not reintroduce the old prototype script named by joining `windows`" in text
+    assert "Repository | `https://github.com/Avnsx/win11_release_guard`" in text
+    assert "Public feed | `https://avnsx.github.io/win11_release_guard/windows-release-policy.json`" in text
+    assert "Python entry point | `python -m win11_release_guard`" in text
+    assert "Console script | `win11_release_guard`" in text
+    assert "Do not reintroduce the removed root prototype script" in agents
     assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
     assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json.sig" in text
     assert "https://avnsx.github.io/win11_release_guard/policy-manifest.json" in text
@@ -147,7 +149,7 @@ def test_readme_documents_branding_and_runtime_trust_model() -> None:
     assert "private repository access" in text
     assert "paid signing" in text
     assert "diagnostics never override the policy verdict" in text
-    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in text
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in ci_workflow
     assert "python -m win11_release_guard --check-policy-source" in text
     assert "python -m win11_release_guard --check-public-pages" in text
     assert "python tools/export_clean_archive.py" in text

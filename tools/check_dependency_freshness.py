@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEFAULT_OUTPUT = Path("dependency-freshness.json")
 PYPI_JSON_URL = "https://pypi.org/pypi/{name}/json"
+MAX_PYPI_JSON_BYTES = 256 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,10 @@ def load_pyproject(path: Path) -> dict[str, Any]:
         return tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise RuntimeError(f"pyproject file not found: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"pyproject read failed: {path}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(f"pyproject is not valid UTF-8: {path}: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise RuntimeError(f"pyproject parse failed: {exc}") from exc
 
@@ -83,9 +88,11 @@ def fetch_pypi_json(name: str, *, timeout_seconds: float) -> dict[str, Any]:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            data = response.read()
+            data = response.read(MAX_PYPI_JSON_BYTES + 1)
     except (OSError, urllib.error.URLError) as exc:
         raise RuntimeError(f"failed to query PyPI for {name}: {exc}") from exc
+    if len(data) > MAX_PYPI_JSON_BYTES:
+        raise RuntimeError(f"PyPI JSON for {name} exceeds {MAX_PYPI_JSON_BYTES} byte limit")
     try:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -210,7 +217,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     summary, exit_code = build_summary(args.pyproject, timeout_seconds=args.timeout_seconds)
-    args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    try:
+        args.output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    except OSError as exc:
+        print(f"Failed to write dependency freshness output {args.output}: {exc}")
+        return 2
     _print_summary(summary)
     return exit_code
 
