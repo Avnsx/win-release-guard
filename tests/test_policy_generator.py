@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,7 +21,9 @@ from win11_release_guard.freshness import epoch_milliseconds_from_iso
 from win11_release_guard.models import QualityPolicy, ReleasePolicy
 import win11_release_guard.policy_generator as policy_generator_module
 from win11_release_guard.policy_generator import (
+    SOURCE_DIAGNOSTIC_ID_PREFIX,
     _source_label,
+    _source_diagnostic_id,
     build_policy_from_sources,
     generate_policy,
     parse_atom_feed,
@@ -385,10 +388,53 @@ def test_source_diagnostics_notice_when_atom_oob_is_newer_than_release_history()
     assert any(
         event["kind"] == "atom_newer_than_release_history"
         and event["severity"] == "notice"
+        and event["id"].startswith(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
         and event["affects_required_baseline"] is False
         for event in events
     )
     assert not any("Atom feed shows a newer non-preview build" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostic_id_is_stable_for_equivalent_input():
+    first = _source_diagnostic_id(
+        severity="Warning",
+        source="Atom feed",
+        title="Atom Newer Than Release History",
+        message="Atom feed reports a newer baseline build.",
+        tags=("Release 25H2", "Build 26200.8461", "KB5089600"),
+    )
+    second = _source_diagnostic_id(
+        severity=" warning ",
+        source="Atom  feed",
+        title="Atom Newer Than Release History",
+        message="Atom feed reports a newer baseline   build.",
+        tags=("Release 25H2", "Build 26200.8461", "KB5089600"),
+    )
+
+    assert first == second
+    assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", first)
+
+
+def test_source_diagnostic_id_changes_when_meaning_changes():
+    base = {
+        "severity": "warning",
+        "source": "Atom feed",
+        "title": "Atom Newer Than Release History",
+        "message": "Atom feed reports a newer baseline build.",
+        "tags": ("Release 25H2", "Build 26200.8461", "KB5089600"),
+    }
+    base_id = _source_diagnostic_id(**base)
+
+    for key, value in (
+        ("severity", "error"),
+        ("source", "Release Health"),
+        ("title", "Current Versions Lag Release History"),
+        ("message", "Current Versions is behind Release History."),
+        ("tags", ("Release 25H2", "Build 26200.8462", "KB5089600")),
+    ):
+        changed = dict(base)
+        changed[key] = value
+        assert _source_diagnostic_id(**changed) != base_id
 
 
 def test_source_diagnostics_warn_when_atom_has_newer_b_release_for_broad_target():
@@ -408,6 +454,7 @@ def test_source_diagnostics_warn_when_atom_has_newer_b_release_for_broad_target(
     assert event["release"] == "25H2"
     assert event["affects_broad_target"] is True
     assert event["affects_required_baseline"] is True
+    assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", event["id"])
     assert any("newer non-preview build for the broad target" in warning for warning in policy.validation_warnings)
 
 
@@ -452,7 +499,69 @@ def test_policy_schema_accepts_structured_source_diagnostics_events():
     validate_policy_document(data)
 
     assert data["source_diagnostics"]["events"]
+    assert all(
+        re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", event["id"])
+        for event in data["source_diagnostics"]["events"]
+    )
     assert data["source_diagnostics"]["event_counts"]["warning"] >= 1
+
+
+def test_policy_schema_rejects_invalid_source_diagnostics_event_id():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    data["source_diagnostics"]["events"][0]["id"] = "not-a-diagnostic-id"
+
+    with pytest.raises(PolicyParseError, match=r"source_diagnostics\.events\[0\]\.id"):
+        validate_policy_document(data)
+
+
+def test_policy_schema_accepts_source_diagnostic_issue_status():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    diagnostic_id = data["source_diagnostics"]["events"][0]["id"]
+    data["source_diagnostics"]["issue_status"] = {
+        diagnostic_id: {
+            "number": 42,
+            "state": "open",
+            "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+        }
+    }
+
+    warnings = validate_policy_document(data)
+    assert not any("issue_status" in warning for warning in warnings)
+
+
+def test_policy_schema_rejects_invalid_source_diagnostic_issue_status_url():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    diagnostic_id = data["source_diagnostics"]["events"][0]["id"]
+    data["source_diagnostics"]["issue_status"] = {
+        diagnostic_id: {
+            "number": 42,
+            "state": "open",
+            "url": "https://github.com/Avnsx/not-the-repo/issues/42",
+        }
+    }
+
+    with pytest.raises(PolicyParseError, match=r"source_diagnostics\.issue_status\..*\.url"):
+        validate_policy_document(data)
+
+
+def test_policy_schema_rejects_extra_source_diagnostic_issue_status_fields():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    diagnostic_id = data["source_diagnostics"]["events"][0]["id"]
+    data["source_diagnostics"]["issue_status"] = {
+        diagnostic_id: {
+            "number": 42,
+            "state": "open",
+            "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+            "body": "raw API body must not be public policy metadata",
+        }
+    }
+
+    with pytest.raises(PolicyParseError, match=r"source_diagnostics\.issue_status\..*unsupported fields"):
+        validate_policy_document(data)
 
 
 def test_policy_schema_rejects_invalid_source_diagnostics_shape():
@@ -577,6 +686,170 @@ def test_generator_cli_writes_pages_support_files(tmp_path):
     assert (output_dir / "robots.txt").read_bytes() == EXPECTED_ROBOTS_TXT.encode("utf-8")
 
 
+def test_generator_cli_does_not_accept_github_issue_mutation_flags():
+    help_text = generate_policy_cli._build_parser().format_help()
+
+    assert "--sync-source-diagnostics-issues" not in help_text
+    assert "--github-token-env" not in help_text
+    assert "--issue-sync-dry-run" not in help_text
+    assert "GITHUB_TOKEN" not in help_text
+    assert "--source-diagnostic-issue-status-file" in help_text
+
+
+def test_generator_cli_merges_static_source_diagnostic_issue_status(tmp_path):
+    output_dir = tmp_path / "site"
+    preview_policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
+    diagnostic_id = preview_policy.source_diagnostics["events"][0]["id"]
+    issue_status = tmp_path / "issue-status.json"
+    issue_status.write_text(
+        json.dumps(
+            {
+                "issue_status": {
+                    diagnostic_id: {
+                        "number": 42,
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = generate_policy_cli.main([
+        "--release-health-html",
+        str(FIXTURES / "windows11-release-health.html"),
+        "--atom-feed",
+        str(FIXTURES / "windows11-atom.xml"),
+        "--output-dir",
+        str(output_dir),
+        "--write-index",
+        "--write-manifest",
+        "--source-diagnostic-issue-status-file",
+        str(issue_status),
+    ])
+
+    assert code == 0
+    policy = json.loads((output_dir / "windows-release-policy.json").read_text(encoding="utf-8"))
+    validate_policy_document(policy)
+    assert policy["source_diagnostics"]["issue_status"][diagnostic_id]["number"] == 42
+    index = (output_dir / "index.html").read_text(encoding="utf-8")
+    assert "#Ticket 42" in index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/issues/42"' in index
+
+
+def test_generator_cli_strips_extra_source_diagnostic_issue_status_fields(tmp_path):
+    output_dir = tmp_path / "site"
+    preview_policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
+    diagnostic_id = preview_policy.source_diagnostics["events"][0]["id"]
+    issue_status = tmp_path / "issue-status.json"
+    forbidden = "safe-test-token-value-that-must-not-print"
+    issue_status.write_text(
+        json.dumps(
+            {
+                "issue_status": {
+                    diagnostic_id: {
+                        "number": "42",
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                        "token": forbidden,
+                        "body": "raw API body must not become public policy data",
+                        "labels": ["internals: notices"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = generate_policy_cli.main([
+        "--release-health-html",
+        str(FIXTURES / "windows11-release-health.html"),
+        "--atom-feed",
+        str(FIXTURES / "windows11-atom.xml"),
+        "--output-dir",
+        str(output_dir),
+        "--write-index",
+        "--write-manifest",
+        "--source-diagnostic-issue-status-file",
+        str(issue_status),
+    ])
+
+    assert code == 0
+    for path in (
+        output_dir / "windows-release-policy.json",
+        output_dir / "policy-manifest.json",
+        output_dir / "index.html",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert forbidden not in text
+        assert "raw API body" not in text
+        assert '"labels"' not in text
+    policy = json.loads((output_dir / "windows-release-policy.json").read_text(encoding="utf-8"))
+    record = policy["source_diagnostics"]["issue_status"][diagnostic_id]
+    assert record == {
+        "number": 42,
+        "state": "open",
+        "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+    }
+
+
+def test_generator_cli_rejects_invalid_source_diagnostic_issue_status_key(tmp_path, capsys):
+    output_dir = tmp_path / "site"
+    issue_status = tmp_path / "issue-status.json"
+    issue_status.write_text(json.dumps({"issue_status": {"not-a-diagnostic-id": {"number": 42}}}), encoding="utf-8")
+
+    code = generate_policy_cli.main([
+        "--release-health-html",
+        str(FIXTURES / "windows11-release-health.html"),
+        "--atom-feed",
+        str(FIXTURES / "windows11-atom.xml"),
+        "--output-dir",
+        str(output_dir),
+        "--source-diagnostic-issue-status-file",
+        str(issue_status),
+    ])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "source diagnostic issue status keys must be deterministic diagnostic IDs" in captured.err
+
+
+def test_generator_cli_rejects_noncanonical_source_diagnostic_issue_status_url(tmp_path, capsys):
+    output_dir = tmp_path / "site"
+    diagnostic_id = "wrg-source-diagnostic-v1:1111111111111111"
+    issue_status = tmp_path / "issue-status.json"
+    issue_status.write_text(
+        json.dumps(
+            {
+                "issue_status": {
+                    diagnostic_id: {
+                        "number": 42,
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/42?token=blocked",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = generate_policy_cli.main([
+        "--release-health-html",
+        str(FIXTURES / "windows11-release-health.html"),
+        "--atom-feed",
+        str(FIXTURES / "windows11-atom.xml"),
+        "--output-dir",
+        str(output_dir),
+        "--source-diagnostic-issue-status-file",
+        str(issue_status),
+    ])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "source diagnostic issue status URL must be canonical" in captured.err
+
+
 def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_path):
     policy = generate_policy(
         release_health_html=_html(),
@@ -651,6 +924,17 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert manifest["published_urls"]["policy"] == DEFAULT_POLICY_URL
     assert manifest["published_urls"]["api_policy"].endswith("/api/v1/policy.json")
     assert manifest["source_diagnostics"]["atom_feed"]["newest_atom_build"] == "26200.8460"
+    source_diagnostic_ids = [
+        event["id"] for event in generated_policy["source_diagnostics"]["events"]
+    ]
+    assert source_diagnostic_ids
+    assert all(
+        re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", diagnostic_id)
+        for diagnostic_id in source_diagnostic_ids
+    )
+    assert [
+        event["id"] for event in manifest["source_diagnostics"]["events"]
+    ] == source_diagnostic_ids
     assert manifest["broad_target_existing_devices"]["latest_observed_build"] == "26200.8457"
     assert manifest["broad_target_existing_devices"]["required_baseline_build"] == "26200.8457"
     assert manifest["required_baseline_build"] == "26200.8457"
@@ -697,15 +981,22 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "initHeaderNav" in index
     assert "reportUiError" in index
     assert "data-ui-last-error" in index
+    assert "dataset.uiLastError" in index
+    assert "data-ui-error-count" in index
+    assert "reportMissingNode" in index
     assert "shutdownUi" in index
     assert "pagehide" in index
     assert "beforeunload" in index
     assert "safeSetTimeout" in index
     assert "safeSetInterval" in index
     assert "safeRequestFrame" in index
+    assert "safeCancelFrame" in index
+    assert "header nav leave" in index
+    assert "header nav focusout" in index
     assert "button.isConnected" in index
     assert "nav.isConnected" in index
     assert "freshness update" in index
+    assert "freshness update','data" in index
     assert "Bookmarks" not in index
     assert "Blogs" not in index
     assert "E-books" not in index
@@ -790,6 +1081,14 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "Source diagnostics" in index
     assert "diag-feed" in index
     assert 'aria-label="Source diagnostic event feed"' in index
+    assert "data-diagnostic-id" in index
+    assert f'data-diagnostic-id="{source_diagnostic_ids[0]}"' in index
+    assert "data-diagnostic-filter-root" in index
+    assert "guard('source diagnostics filter'" in index
+    assert "source diagnostics filter','root" in index
+    assert "source diagnostics filter','status" in index
+    assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
+    assert '<article class="diag-row notice" data-diagnostic-severity="notice" hidden' not in index
     assert "<h2>Sources</h2>" not in index
     assert "sources-panel" not in index
     assert "source-health" in index
@@ -831,6 +1130,10 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "private-" + "key" not in index.lower()
     assert "http://cdn" not in index.lower()
     assert "https://cdn" not in index.lower()
+    assert "<link" not in index.lower()
+    assert "@import" not in index.lower()
+    assert "fonts.googleapis" not in index.lower()
+    assert "fonts.gstatic" not in index.lower()
     assert '<script type="application/json" id="policy-freshness-data">' in index
     assert "script src" not in index.lower()
 

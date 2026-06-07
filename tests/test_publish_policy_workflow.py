@@ -34,6 +34,21 @@ def test_publish_policy_workflow_uses_minimum_pages_permissions() -> None:
     assert "contents: read" in text
     assert "pages: write" in text
     assert "id-token: write" in text
+    assert "sync-source-diagnostics-issues:" in text
+    issue_sync_job = text.split("sync-source-diagnostics-issues:", 1)[1].split("\n  build:", 1)[0]
+    assert "issues: write" in issue_sync_job
+    assert SECRET_NAME not in issue_sync_job
+    assert 'python -m pip install -e ".[test]"' in issue_sync_job
+    assert "python -m compileall -q win11_release_guard tools" in issue_sync_job
+    assert "tests/test_source_diagnostics_issue_sync.py" in issue_sync_job
+    assert "tests/test_source_diagnostics_issue_metadata.py" in issue_sync_job
+    build_job = text.split("\n  build:", 1)[1].split("\n  deploy:", 1)[0]
+    assert "issues: write" not in build_job
+    assert "GITHUB_TOKEN: ${{ github.token }}" not in build_job
+    deploy_job = text.split("\n  deploy:", 1)[1].split("\n  verify-live-pages:", 1)[0]
+    assert "pages: write" in deploy_job
+    assert "id-token: write" in deploy_job
+    assert "GITHUB_TOKEN: ${{ github.token }}" not in deploy_job
     assert "contents: write" not in text
 
 
@@ -45,6 +60,7 @@ def test_publish_policy_workflow_has_no_pat_or_branch_publish_mode() -> None:
     assert ("gh" + "p_") not in lowered
     assert "personal access token" not in lowered
     assert "gh_token" not in lowered
+    lowered = lowered.replace("github_token: ${{ github.token }}", "")
     assert "github_token" not in lowered
     assert "gh-pages" not in lowered
     assert "git push" not in lowered
@@ -93,6 +109,9 @@ def test_publish_policy_workflow_runs_required_build_validate_and_scan_steps() -
     assert "python -m compileall -q win11_release_guard tools" in text
     assert "pytest -q" in text
     assert "python tools/generate_policy.py" in text
+    assert "python tools/sync_source_diagnostics_issues.py" in text
+    assert "--issue-status-output" in text
+    assert "--source-diagnostic-issue-status-file" in text
     assert "--output-dir site" in text
     assert "--write-index" in text
     assert "--write-robots" in text

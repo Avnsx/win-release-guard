@@ -26,14 +26,23 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki dashboard](../wik
 | Target summary | Broad target, baseline, latest observed build. |
 | Excluded releases | Data-driven 26H1 existing-device exclusion summary. |
 | Feed currency | Generated time, live age state, 14/45-day thresholds. |
-| Source diagnostics | Counts, events, source health tiles, drift warnings. |
+| Source diagnostics | Keyboard-accessible severity filters, deterministic diagnostic IDs, counts, events, source health tiles, drift warnings. |
 | Programmatic API | Canonical and `/api/v1` endpoint links. |
+
+Optional source-diagnostic issue status must be static generated metadata, not
+browser-fetched data. When `source_diagnostics.issue_status` maps a deterministic
+diagnostic ID to a GitHub issue number/state, the dashboard may render a
+hover/focus-only `#Ticket <number>` link only to
+`https://github.com/Avnsx/win11_release_guard/issues/<number>`. Invalid IDs,
+non-positive issue numbers, and non-canonical issue URLs are ignored. Browser
+JavaScript must not fetch GitHub issue state.
 
 ## Rules
 
 | Do | Do not |
 | --- | --- |
 | Keep Pages static and GitHub-Pages-compatible. | Add external JS, CSS, fonts, CDN dependencies, or backend runtime assumptions. |
+| Keep Source Diagnostics issue sync in GitHub Actions. | Create GitHub Issues from browser JavaScript or embed GitHub tokens in the dashboard. |
 | Keep API aliases byte-equivalent unless manifest documents a compatible difference. | Break `/api/v1` paths. |
 | Preserve no-JavaScript fallback text for feed age. | Rely only on render-time generated age. |
 

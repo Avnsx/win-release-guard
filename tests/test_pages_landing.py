@@ -25,6 +25,7 @@ FRESHNESS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="policy-freshness-data">(.*?)</script>',
     re.DOTALL,
 )
+SOURCE_DIAGNOSTIC_ID_RE = re.compile(r'data-diagnostic-id="(wrg-source-diagnostic-v1:[0-9a-f]{16})"')
 
 
 def _render_landing(tmp_path: Path) -> str:
@@ -50,11 +51,17 @@ def _assert_no_external_page_dependencies(index: str) -> None:
     assert "<link" not in lower
     assert "fonts.googleapis" not in lower
     assert "fonts.gstatic" not in lower
+    assert "@import" not in lower
     assert "cdnjs" not in lower
     assert "cdn.jsdelivr" not in lower
     assert "unpkg.com" not in lower
     assert "fontawesome" not in lower
     assert "lucide" not in lower
+    assert "github_token" not in lower
+    assert "gh_token" not in lower
+    assert "authorization:" not in lower
+    assert "bearer " not in lower
+    assert "credential" not in lower
 
 
 def _assert_glass_dashboard_ui_contract(index: str) -> None:
@@ -82,10 +89,24 @@ def _assert_glass_dashboard_ui_contract(index: str) -> None:
 
 def _assert_diag_count_tile(index: str, severity: str, count: int, label: str) -> None:
     assert (
-        f'<div class="diag-tile {severity}"><strong>{count}</strong><span>{label}</span>'
+        f'<button type="button" class="diag-tile {severity}" '
+        f'data-diagnostic-filter="{severity}" data-diagnostic-severity="{severity}" '
+        'aria-pressed="false" aria-controls="source-diagnostics-feed"'
+        in index
+    )
+    assert (
+        f'<strong>{count}</strong><span>{label}</span>'
         '<svg class="ui-icon diag-tile-icon"'
         in index
     )
+
+
+def _diag_row_marker(severity: str) -> str:
+    return f'<article class="diag-row {severity}" data-diagnostic-severity="{severity}" data-diagnostic-id="'
+
+
+def _diagnostic_ids(index: str) -> list[str]:
+    return SOURCE_DIAGNOSTIC_ID_RE.findall(index)
 
 
 def test_excluded_release_summary_uses_curated_26h1_copy(tmp_path: Path) -> None:
@@ -120,6 +141,10 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "document.execCommand('copy')" in index
     assert "reportUiError" in index
     assert "data-ui-last-error" in index
+    assert "dataset.uiLastError" in index
+    assert "data-ui-error-count" in index
+    assert "reportMissingNode" in index
+    assert "missing '+name" in index
     assert "shutdownUi" in index
     assert "pagehide" in index
     assert "beforeunload" in index
@@ -127,11 +152,22 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "safeSetInterval" in index
     assert "safeRequestFrame" in index
     assert "safeCancelFrame" in index
+    assert "timer setup" in index
+    assert "interval setup" in index
+    assert "animation frame request" in index
+    assert "animation cancel" in index
+    assert "timer cancel" in index
     assert "button.isConnected" in index
     assert "nav.isConnected" in index
     assert "passive:true" in index
     assert "header nav pointer" in index
+    assert "header nav focus" in index
+    assert "header nav leave" in index
+    assert "header nav focusout" in index
     assert "freshness update" in index
+    assert "freshness update','data" in index
+    assert "@media(prefers-reduced-motion:reduce)" in index
+    assert "animation:none!important" in index
     assert "epoch-copy" in index
     assert 'aria-label="Copy policy generated UTC epoch millisecond timestamp 1780236710000"' in index
     assert 'data-epoch="1780236710000"' in index
@@ -205,9 +241,40 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Warnings" in index
     assert "Errors" in index
     _assert_diag_count_tile(index, "notice", 3, "Notices")
-    assert index.count('<article class="diag-row notice">') == 3
+    assert index.count(_diag_row_marker("notice")) == 3
+    diagnostic_ids = _diagnostic_ids(index)
+    assert len(diagnostic_ids) >= 3
+    assert len(set(diagnostic_ids)) == len(diagnostic_ids)
+    assert "data-diagnostic-id=&quot;" not in index
     assert 'id="source-diagnostics-feed"' in index
-    assert 'href="#source-health">View all</a>' in index
+    assert (
+        '<button type="button" class="panel-action diag-filter-reset" '
+        'data-diagnostic-filter="all" aria-controls="source-diagnostics-feed" aria-pressed="true">View all</button>'
+        in index
+    )
+    assert '<a class="panel-action" href="#source-health">Source health</a>' not in index
+    assert 'id="source-diagnostics-filter-status" class="diag-filter-status" aria-live="polite"' in index
+    assert "Showing all 3 source diagnostic rows." in index
+    assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
+    assert "No diagnostic rows match the selected severity filter." in index
+    assert "data-diagnostic-filter-root" in index
+    assert "initDiagnosticFilters" in index
+    assert "source diagnostics filter init" in index
+    assert "source diagnostics filter" in index
+    assert "guard('source diagnostics filter'" in index
+    assert "source diagnostics filter','root" in index
+    assert "source diagnostics filter','feed" in index
+    assert "source diagnostics filter','controls" in index
+    assert "source diagnostics filter','rows" in index
+    assert "source diagnostics filter','status" in index
+    assert "source diagnostics filter','empty state" in index
+    assert ".diag-row[hidden]" in index
+    assert ".diag-more[hidden]" in index
+    assert "row.hidden=!match" in index
+    assert "aria-pressed" in index
+    assert "data-diagnostic-filter" in index
+    assert "data-diagnostic-severity" in index
+    assert "data-diagnostic-id" in index
     assert ".diag-tile.notice{border-color:#bfdbfe" in index
     assert ".diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}" in index
     assert ".severity-badge.notice{color:var(--blue-strong)" in index
@@ -224,6 +291,9 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert ".diag-feed::-webkit-scrollbar-thumb" in index
     assert ".diag-events{gap:10px;padding:2px 4px 12px 2px}" in index
     assert "diag-row-icon" in index
+    assert '<article class="diag-row notice" data-diagnostic-severity="notice" hidden' not in index
+    assert '<article class="diag-row warning" data-diagnostic-severity="warning" hidden' not in index
+    assert '<article class="diag-row error" data-diagnostic-severity="error" hidden' not in index
     assert "source-chip src-diagnostics" in index
     assert "source-chip src-atom-feed" in index
     assert "source-chip src-release-policy" in index
@@ -424,7 +494,7 @@ def test_pages_index_uses_balanced_ui_font_weights() -> None:
     assert ".thresholds strong{display:block;font-size:17px;font-weight:640}" in index
     assert ".diag-tile strong{display:block;font-size:22px;font-weight:650" in index
     assert ".diag-row-head strong{font-size:13px;font-weight:640}" in index
-    assert ".severity-badge,.source-chip,.diag-tags span{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600" in index
+    assert ".severity-badge,.source-chip,.diag-tags span,.diag-tags a{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600" in index
     assert ".api-endpoint-row strong{display:block;color:#172033;font-size:13px;font-weight:640" in index
     assert "footer{position:relative;display:grid;gap:8px;justify-items:center;margin-top:34px;padding:20px 12px 4px" in index
     assert "footer:before{content:'';width:min(640px,100%);height:1px;margin-bottom:8px" in index
@@ -446,10 +516,19 @@ def test_pages_index_source_diagnostics_empty_state_is_compact() -> None:
     assert "1</strong><span>Notices" in index
     assert "0</strong><span>Warnings" in index
     assert "0</strong><span>Errors" in index
-    assert '<article class="diag-row notice">' in index
-    assert index.count('<article class="diag-row notice">') == 1
+    _assert_diag_count_tile(index, "notice", 1, "Notices")
+    _assert_diag_count_tile(index, "warning", 0, "Warnings")
+    _assert_diag_count_tile(index, "error", 0, "Errors")
+    assert _diag_row_marker("notice") in index
+    assert index.count(_diag_row_marker("notice")) == 1
+    assert _diag_row_marker("warning") not in index
+    assert _diag_row_marker("error") not in index
     assert "diag-feed" in index
     assert "diag-events-empty" in index
+    assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
+    assert "No diagnostic rows match the selected severity filter." in index
+    assert "setEmptyState" in index
+    assert "labels={notice:'notice',warning:'warning',error:'error'}" in index
     assert "No warnings" in index
     assert "No errors" in index
     assert "26H1 excluded for existing devices" not in index
@@ -483,7 +562,7 @@ def test_pages_index_excluded_release_notice_is_data_driven() -> None:
     assert "Notice" in index
     assert "Release 26H1" in index
     assert "Existing devices" in index
-    assert index.count('<article class="diag-row notice">') == 2
+    assert index.count(_diag_row_marker("notice")) == 2
     assert index.find("No source issues reported") < index.find("26H1 excluded for existing devices")
 
 
@@ -511,7 +590,7 @@ def test_pages_index_source_diagnostics_render_structured_warning_event() -> Non
     index = render_policy_index(policy, policy_bytes=None, signature=None)
     HTMLParser().feed(index)
 
-    assert '<article class="diag-row warning">' in index
+    assert _diag_row_marker("warning") in index
     assert "Atom Newer Than Release History" in index
     assert "Atom feed" in index
     assert "Warning" in index
@@ -520,6 +599,21 @@ def test_pages_index_source_diagnostics_render_structured_warning_event() -> Non
     assert "KB5089600" in index
     assert "Required baseline" in index
     assert "Atom feed reports a newer baseline build." in index
+    expected_id = policy_generator_module._source_diagnostic_id(
+        severity="warning",
+        source="Atom feed",
+        title="Atom Newer Than Release History",
+        message="Atom feed reports a newer baseline build.",
+        tags=(
+            "Release 25H2",
+            "Build 26200.8461",
+            "KB5089600",
+            "Family 26200",
+            "Required baseline",
+            "2026-06-09T18:00:00Z",
+        ),
+    )
+    assert f'data-diagnostic-id="{expected_id}"' in index
     _assert_diag_count_tile(index, "warning", 1, "Warnings")
     _assert_diag_count_tile(index, "notice", 0, "Notices")
     assert '<span class="severity-badge warning">Warning</span>' in index
@@ -555,8 +649,10 @@ def test_pages_index_source_diagnostics_render_warning_and_error_color_states() 
     _assert_diag_count_tile(index, "warning", 1, "Warnings")
     _assert_diag_count_tile(index, "error", 1, "Errors")
     _assert_diag_count_tile(index, "notice", 0, "Notices")
-    assert '<article class="diag-row warning">' in index
-    assert '<article class="diag-row error">' in index
+    assert _diag_row_marker("warning") in index
+    assert _diag_row_marker("error") in index
+    assert '<article class="diag-row warning" data-diagnostic-severity="warning" hidden' not in index
+    assert '<article class="diag-row error" data-diagnostic-severity="error" hidden' not in index
     assert '<span class="severity-badge warning">Warning</span>' in index
     assert '<span class="severity-badge error">Error</span>' in index
     assert "Current Versions Lag Release History" in index
@@ -578,8 +674,8 @@ def test_pages_index_source_diagnostics_warning_error_counts_suppress_clear_plac
     _assert_diag_count_tile(index, "notice", 0, "Notices")
     _assert_diag_count_tile(index, "warning", 1, "Warnings")
     _assert_diag_count_tile(index, "error", 1, "Errors")
-    assert index.count('<article class="diag-row warning">') == 1
-    assert index.count('<article class="diag-row error">') == 1
+    assert index.count(_diag_row_marker("warning")) == 1
+    assert index.count(_diag_row_marker("error")) == 1
     assert "2 warning diagnostic entries reported without structured row details." in index
     assert "1 error diagnostic entry reported without structured row details." in index
 
@@ -770,6 +866,9 @@ def test_pages_index_source_diagnostics_escape_event_message_without_script_inje
 
     assert "Parser Warning" in index
     assert "Parser saw &lt;script src=&quot;https://cdn.example/x.js&quot;&gt; bad markup." in index
+    diagnostic_ids = _diagnostic_ids(index)
+    assert diagnostic_ids
+    assert all(diagnostic_id.startswith("wrg-source-diagnostic-v1:") for diagnostic_id in diagnostic_ids)
     assert "<script src" not in index.lower()
     assert index.lower().count("<script") == 2
 
@@ -795,7 +894,7 @@ def test_pages_index_source_diagnostics_collapses_overflow_events() -> None:
     HTMLParser().feed(index)
 
     assert "8</strong><span>Notices" in index
-    assert index.count('<article class="diag-row notice">') == 8
+    assert index.count(_diag_row_marker("notice")) == 8
     assert "+2 more" in index
     assert "Notice event 0" in index
     assert "Notice event 6" in index
@@ -847,7 +946,9 @@ def test_pages_index_release_link_tracks_future_program_versions(monkeypatch) ->
 def test_excluded_release_reason_summaries_do_not_end_with_half_words(tmp_path: Path) -> None:
     index = _render_landing(tmp_path)
     summaries = re.findall(
-        r"<article class=\"diag-row notice\">.*?<strong>[^<]*excluded for existing devices</strong>.*?<p>(.*?)</p>",
+        r"<article class=\"diag-row notice\" data-diagnostic-severity=\"notice\" "
+        r"data-diagnostic-id=\"wrg-source-diagnostic-v1:[0-9a-f]{16}\">.*?"
+        r"<strong>[^<]*excluded for existing devices</strong>.*?<p>(.*?)</p>",
         index,
         re.DOTALL,
     )

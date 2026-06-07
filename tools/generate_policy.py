@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,6 +21,12 @@ from win11_release_guard.policy_generator import (
     DEFAULT_WINDOWS11_ATOM_FEED_URL,
     build_policy_from_sources,
     write_policy_outputs,
+)
+
+
+SOURCE_DIAGNOSTIC_ID_RE = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
+SOURCE_DIAGNOSTIC_ISSUE_URL_RE = re.compile(
+    r"^https://github\.com/Avnsx/win11_release_guard/issues/([1-9][0-9]*)$"
 )
 
 
@@ -37,6 +45,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-robots", action="store_true", help="Write site/robots.txt.")
     parser.add_argument("--write-sitemap", action="store_true", help="Write site/sitemap.xml.")
     parser.add_argument("--write-manifest", action="store_true", help="Write site/policy-manifest.json and API aliases.")
+    parser.add_argument(
+        "--source-diagnostic-issue-status-file",
+        type=Path,
+        default=None,
+        help="Merge static source-diagnostic issue metadata before rendering Pages artifacts.",
+    )
     parser.add_argument(
         "--signing-key-env",
         default=None,
@@ -64,6 +78,55 @@ def _signing_key(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _issue_status_mapping(value: Any) -> dict[str, Mapping[str, Any]]:
+    if isinstance(value, Mapping) and isinstance(value.get("issue_status"), Mapping):
+        value = value.get("issue_status")
+    if not isinstance(value, Mapping):
+        raise ValueError("source diagnostic issue status must be an object.")
+    records: dict[str, Mapping[str, Any]] = {}
+    for diagnostic_id, record in value.items():
+        if not isinstance(diagnostic_id, str) or not SOURCE_DIAGNOSTIC_ID_RE.fullmatch(diagnostic_id):
+            raise ValueError("source diagnostic issue status keys must be deterministic diagnostic IDs.")
+        if not isinstance(record, Mapping):
+            raise ValueError("source diagnostic issue status records must be objects.")
+        try:
+            number = int(record.get("number"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source diagnostic issue status number must be a positive integer.") from exc
+        if number <= 0:
+            raise ValueError("source diagnostic issue status number must be a positive integer.")
+        state = str(record.get("state") or "open").strip().lower()
+        if state not in {"open", "closed"}:
+            raise ValueError("source diagnostic issue status state must be open or closed.")
+        canonical_url = f"https://github.com/Avnsx/win11_release_guard/issues/{number}"
+        supplied_url = str(record.get("url") or canonical_url).strip()
+        match = SOURCE_DIAGNOSTIC_ISSUE_URL_RE.fullmatch(supplied_url)
+        if match is None or int(match.group(1)) != number:
+            raise ValueError("source diagnostic issue status URL must be canonical and match the issue number.")
+        records[diagnostic_id] = {
+            "number": number,
+            "state": state,
+            "url": canonical_url,
+        }
+    return records
+
+
+def _load_issue_status(path: Path | None) -> dict[str, Mapping[str, Any]]:
+    if path is None:
+        return {}
+    return _issue_status_mapping(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _policy_with_issue_status(policy: object, issue_status: Mapping[str, Mapping[str, Any]]) -> object:
+    if not issue_status:
+        return policy
+    data = policy.to_dict()
+    source_diagnostics = dict(data.get("source_diagnostics") or {})
+    source_diagnostics["issue_status"] = dict(issue_status)
+    data["source_diagnostics"] = source_diagnostics
+    return type(policy).from_dict(data)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -78,6 +141,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=args.timeout,
             signature_status="valid" if signing_key else "unsigned",
         )
+        issue_status = _load_issue_status(args.source_diagnostic_issue_status_file)
+        policy = _policy_with_issue_status(policy, issue_status)
         written = write_policy_outputs(
             policy,
             output_dir=args.output_dir,
@@ -88,7 +153,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_sitemap=args.write_sitemap,
             write_manifest=args.write_manifest,
         )
-    except (OSError, WindowsReleaseCheckerError) as exc:
+    except (OSError, ValueError, WindowsReleaseCheckerError) as exc:
         print(f"Policy generation failed: {exc}", file=sys.stderr)
         return 1
 

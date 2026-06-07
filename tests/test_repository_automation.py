@@ -8,6 +8,7 @@ DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 WORKFLOWS = ROOT / ".github" / "workflows"
 README = ROOT / "README.md"
 RELEASE_WORKFLOW = WORKFLOWS / "release.yml"
+ISSUE_SYNC_WORKFLOW = WORKFLOWS / "sync-source-diagnostics-issues.yml"
 
 
 BAD_TOKEN_PATTERNS = (
@@ -165,12 +166,43 @@ def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> Non
             lowered = lowered.replace("gh_token: ${{ github.token }}", "")
         else:
             assert "contents: write" not in text
+        if workflow.name in {"sync-source-diagnostics-issues.yml", "publish-policy.yml"}:
+            assert "issues: write" in text
+            lowered = lowered.replace("github_token: ${{ github.token }}", "")
+        else:
+            assert "issues: write" not in text
         assert "pull-requests: write" not in text
-        assert "issues: write" not in text
         insecure_node_opt_out = "ACTIONS_ALLOW_USE_" + "UNSECURE_NODE_VERSION"
         assert insecure_node_opt_out not in text
         for pattern in BAD_TOKEN_PATTERNS:
             assert pattern.lower() not in lowered
+
+
+def test_source_diagnostics_issue_sync_workflow_is_manual_and_minimal() -> None:
+    text = _read(ISSUE_SYNC_WORKFLOW)
+
+    assert ISSUE_SYNC_WORKFLOW.exists()
+    assert "name: Sync source diagnostics issues" in text
+    assert "workflow_dispatch:" in text
+    assert "schedule:" not in text
+    assert "push:" not in text
+    assert "pull_request:" not in text
+    assert "contents: read" in text
+    assert "issues: write" in text
+    assert "contents: write" not in text
+    assert "pages: write" not in text
+    assert "id-token: write" not in text
+    assert "GITHUB_TOKEN: ${{ github.token }}" in text
+    assert 'python -m pip install -e ".[test]"' in text
+    assert "python -m compileall -q win11_release_guard tools" in text
+    assert "tests/test_source_diagnostics_issue_sync.py" in text
+    assert "tests/test_source_diagnostics_issue_metadata.py" in text
+    assert "tests/test_policy_generator.py" in text
+    assert "tools/sync_source_diagnostics_issues.py" in text
+    assert "include_notices:" not in text
+    assert "--include-notices" not in text
+    assert "--create-limit" in text
+    assert "--dry-run" in text
 
 
 def test_release_workflow_exists_with_explicit_tagged_triggers() -> None:

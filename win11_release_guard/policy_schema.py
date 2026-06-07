@@ -56,6 +56,10 @@ ALLOWED_POLICY_FIELDS = frozenset(
 _RELEASE_PATTERN = re.compile(r"^\d{2}H[12]$", re.IGNORECASE)
 _BUILD_PATTERN = re.compile(r"^\d{5}\.\d+$")
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_SOURCE_DIAGNOSTIC_ID_PATTERN = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
+_SOURCE_DIAGNOSTIC_ISSUE_URL_PATTERN = re.compile(
+    r"^https://github\.com/Avnsx/win11_release_guard/issues/[1-9][0-9]*$"
+)
 PUBLISHED_URL_KEYS = (
     "landing",
     "policy",
@@ -159,6 +163,13 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
             message = event.get("message")
             if message is not None and not isinstance(message, str):
                 raise PolicyParseError(f"source_diagnostics.events[{index}].message must be a string.")
+            diagnostic_id = event.get("id")
+            if diagnostic_id is not None and (
+                not isinstance(diagnostic_id, str) or not _SOURCE_DIAGNOSTIC_ID_PATTERN.fullmatch(diagnostic_id)
+            ):
+                raise PolicyParseError(
+                    f"source_diagnostics.events[{index}].id must be a source diagnostic id."
+                )
             release = event.get("release")
             if release is not None:
                 _release(release, f"source_diagnostics.events[{index}].release")
@@ -181,6 +192,38 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
                 continue
             if not isinstance(count, int) or count < 0:
                 raise PolicyParseError(f"source_diagnostics.event_counts.{key} must be a non-negative integer.")
+    issue_status = value.get("issue_status")
+    if issue_status is not None:
+        if not isinstance(issue_status, Mapping):
+            raise PolicyParseError("source_diagnostics.issue_status must be an object.")
+        for diagnostic_id, record in issue_status.items():
+            key = str(diagnostic_id)
+            if not _SOURCE_DIAGNOSTIC_ID_PATTERN.fullmatch(key):
+                raise PolicyParseError("source_diagnostics.issue_status keys must be source diagnostic ids.")
+            if not isinstance(record, Mapping):
+                raise PolicyParseError(f"source_diagnostics.issue_status.{key} must be an object.")
+            unexpected = set(record) - {"number", "state", "url"}
+            if unexpected:
+                raise PolicyParseError(
+                    f"source_diagnostics.issue_status.{key} contains unsupported fields."
+                )
+            number = record.get("number")
+            try:
+                issue_number = int(number)
+            except (TypeError, ValueError) as exc:
+                raise PolicyParseError(f"source_diagnostics.issue_status.{key}.number must be positive.") from exc
+            if issue_number <= 0:
+                raise PolicyParseError(f"source_diagnostics.issue_status.{key}.number must be positive.")
+            state = record.get("state")
+            if state is not None and state not in {"open", "closed"}:
+                raise PolicyParseError(f"source_diagnostics.issue_status.{key}.state must be open or closed.")
+            url = record.get("url")
+            if url is not None and (
+                not isinstance(url, str) or not _SOURCE_DIAGNOSTIC_ISSUE_URL_PATTERN.fullmatch(url)
+            ):
+                raise PolicyParseError(
+                    f"source_diagnostics.issue_status.{key}.url must be a canonical GitHub issue URL."
+                )
     parser = value.get("parser")
     if parser is not None:
         if not isinstance(parser, Mapping):

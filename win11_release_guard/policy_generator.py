@@ -47,6 +47,7 @@ DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom
 GITHUB_RELEASES_BASE_URL = "https://github.com/Avnsx/win11_release_guard/releases/tag"
 GITHUB_LICENSE_URL = "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"
 GITHUB_REPOSITORY_URL = "https://github.com/Avnsx/win11_release_guard"
+GITHUB_ISSUES_BASE_URL = f"{GITHUB_REPOSITORY_URL}/issues"
 PAGES_TIMEZONE = "Europe/Berlin"
 ROBOTS_TXT = (
     "User-agent: *\n"
@@ -60,6 +61,8 @@ CURATED_EXCLUDED_RELEASE_SUMMARIES = {
     )
 }
 _RELEASE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+SOURCE_DIAGNOSTIC_ID_PREFIX = "wrg-source-diagnostic-v1"
+SOURCE_DIAGNOSTIC_ID_HASH_LENGTH = 16
 
 
 @dataclass(frozen=True)
@@ -1057,7 +1060,10 @@ def _source_diagnostics(
                 ),
             }
         )
-    events = _dedupe_source_events(events)
+    events = _source_diagnostic_events_with_ids(_dedupe_source_events(events))
+    parser_events = _source_diagnostic_events_with_ids(
+        [dict(item) for item in parser_diagnostics if isinstance(item, Mapping)]
+    )
     warnings = list(dict.fromkeys(_source_diagnostic_messages(events, minimum="warning")))
     notices = list(dict.fromkeys(_source_diagnostic_notices(events)))
 
@@ -1086,7 +1092,7 @@ def _source_diagnostics(
             "generated_after_newest_source_hours": generated_after_hours,
         },
         "parser": {
-            "events": [dict(item) for item in parser_diagnostics],
+            "events": parser_events,
         },
         "events": events,
         "event_counts": _source_event_counts(events),
@@ -1536,6 +1542,65 @@ def _source_diagnostic_event_severity(value: Any) -> str:
     return severity if severity in {"notice", "warning", "error"} else "warning"
 
 
+def _source_diagnostic_id_text(value: Any) -> str:
+    try:
+        text = str(value or "")
+    except Exception:
+        return ""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _source_diagnostic_id_component(value: Any) -> dict[str, Any]:
+    text = _source_diagnostic_id_text(value)
+    return {
+        "length": len(text),
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+
+
+def _source_diagnostic_id_tag_values(tags: Any) -> tuple[str, ...]:
+    if tags in (None, ""):
+        return ()
+    if isinstance(tags, Mapping):
+        raw_items = (
+            f"{key}: {value}"
+            for key, value in sorted(tags.items(), key=lambda item: str(item[0]))
+        )
+    elif isinstance(tags, (str, bytes)):
+        raw_items = (tags,)
+    else:
+        try:
+            raw_items = iter(tags)
+        except TypeError:
+            raw_items = (tags,)
+    normalized: list[str] = []
+    for tag in raw_items:
+        text = _source_diagnostic_id_text(tag)
+        if text:
+            normalized.append(text)
+    return tuple(normalized)
+
+
+def _source_diagnostic_id(
+    *,
+    severity: Any,
+    source: Any,
+    title: Any,
+    message: Any,
+    tags: Any,
+) -> str:
+    payload = {
+        "severity": _source_diagnostic_event_severity(severity),
+        "source": _source_diagnostic_id_component(source),
+        "title": _source_diagnostic_id_component(title),
+        "message": _source_diagnostic_id_component(message),
+        "tags": [_source_diagnostic_id_component(tag) for tag in _source_diagnostic_id_tag_values(tags)],
+    }
+    payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    digest = hashlib.sha256(payload_bytes).hexdigest()[:SOURCE_DIAGNOSTIC_ID_HASH_LENGTH]
+    return f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:{digest}"
+
+
 def _source_diagnostic_event_label(kind: Any) -> str:
     text = re.sub(r"[_-]+", " ", str(kind or "source diagnostic")).strip()
     if not text:
@@ -1576,11 +1641,7 @@ def _source_diagnostic_timestamp(event: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any]:
-    kind = event.get("kind")
-    severity = _source_diagnostic_event_severity(event.get("severity"))
-    title = _source_diagnostic_event_label(kind)
-    message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
+def _source_diagnostic_event_tags(event: Mapping[str, Any]) -> tuple[str, ...]:
     tags: list[str] = []
     for key, label in (
         ("release", "Release"),
@@ -1603,21 +1664,71 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
     timestamp = _source_diagnostic_timestamp(event)
     if timestamp:
         tags.append(timestamp)
+    return tuple(tags)
+
+
+def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
+    kind = event.get("kind")
+    severity = _source_diagnostic_event_severity(event.get("severity"))
+    title = _source_diagnostic_event_label(kind)
+    message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
+    return _source_diagnostic_id(
+        severity=severity,
+        source=_source_diagnostic_source_label(kind),
+        title=title,
+        message=message,
+        tags=_source_diagnostic_event_tags(event),
+    )
+
+
+def _source_diagnostic_event_with_id(event: Mapping[str, Any]) -> dict[str, Any]:
+    item = dict(event)
+    item["id"] = _source_diagnostic_id_for_event(item)
+    return item
+
+
+def _source_diagnostic_events_with_ids(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_source_diagnostic_event_with_id(event) for event in events]
+
+
+def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    kind = event.get("kind")
+    severity = _source_diagnostic_event_severity(event.get("severity"))
+    title = _source_diagnostic_event_label(kind)
+    message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
+    source = _source_diagnostic_source_label(kind)
+    tags = _source_diagnostic_event_tags(event)
     return {
+        "id": _source_diagnostic_id(
+            severity=severity,
+            source=source,
+            title=title,
+            message=message,
+            tags=tags,
+        ),
         "severity": severity,
         "title": title,
-        "source": _source_diagnostic_source_label(kind),
+        "source": source,
         "message": message,
-        "tags": tuple(tags),
+        "tags": tags,
     }
 
 
 def _source_diagnostic_row_from_text(severity: str, message: Any, *, source: str, title: str) -> dict[str, Any]:
+    normalized_severity = _source_diagnostic_event_severity(severity)
+    normalized_message = _short_diagnostic_text(message)
     return {
-        "severity": _source_diagnostic_event_severity(severity),
+        "id": _source_diagnostic_id(
+            severity=normalized_severity,
+            source=source,
+            title=title,
+            message=normalized_message,
+            tags=(),
+        ),
+        "severity": normalized_severity,
         "title": title,
         "source": source,
-        "message": _short_diagnostic_text(message),
+        "message": normalized_message,
         "tags": (),
     }
 
@@ -1707,17 +1818,29 @@ def _excluded_release_diagnostic_rows(policy: ReleasePolicy) -> tuple[dict[str, 
         if not version or version in seen:
             continue
         seen.add(version)
+        severity = "notice"
+        title = f"{version} excluded for existing devices"
+        source = "Release policy"
+        message = _excluded_release_summary(entry)
+        tags = (
+            f"Release {version}",
+            "Existing devices",
+            "Not broad target",
+        )
         rows.append(
             {
-                "severity": "notice",
-                "title": f"{version} excluded for existing devices",
-                "source": "Release policy",
-                "message": _excluded_release_summary(entry),
-                "tags": (
-                    f"Release {version}",
-                    "Existing devices",
-                    "Not broad target",
+                "id": _source_diagnostic_id(
+                    severity=severity,
+                    source=source,
+                    title=title,
+                    message=message,
+                    tags=tags,
                 ),
+                "severity": severity,
+                "title": title,
+                "source": source,
+                "message": message,
+                "tags": tags,
             }
         )
     return tuple(rows)
@@ -1740,6 +1863,78 @@ def _source_diagnostic_text(value: Any, *, fallback: str = "") -> str:
         return fallback
     text = re.sub(r"\s+", " ", text).strip()
     return text or fallback
+
+
+def _is_source_diagnostic_id(value: str) -> bool:
+    suffix = value.removeprefix(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
+    return (
+        value.startswith(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
+        and len(suffix) == SOURCE_DIAGNOSTIC_ID_HASH_LENGTH
+        and all(char in "0123456789abcdef" for char in suffix)
+    )
+
+
+def _source_diagnostic_issue_number(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _source_diagnostic_issue_state(value: Any) -> str:
+    text = _source_diagnostic_text(value).lower()
+    return text if text in {"open", "closed"} else "tracked"
+
+
+def _canonical_source_diagnostic_issue_url(number: int) -> str:
+    return f"{GITHUB_ISSUES_BASE_URL}/{number}"
+
+
+def _source_diagnostic_issue_record(
+    diagnostic_id: str,
+    value: Any,
+) -> tuple[str, dict[str, Any]] | None:
+    if not _is_source_diagnostic_id(diagnostic_id) or not isinstance(value, Mapping):
+        return None
+    number = _source_diagnostic_issue_number(value.get("number") or value.get("issue_number"))
+    if number is None:
+        return None
+    canonical_url = _canonical_source_diagnostic_issue_url(number)
+    supplied_url = _source_diagnostic_text(value.get("url") or value.get("html_url"))
+    if supplied_url and supplied_url != canonical_url:
+        return None
+    state = _source_diagnostic_issue_state(value.get("state") or value.get("status"))
+    return diagnostic_id, {
+        "number": number,
+        "state": state,
+        "url": canonical_url,
+    }
+
+
+def _source_diagnostic_issue_records(source_diagnostics: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = source_diagnostics.get("issue_status")
+    records: list[tuple[str, Any]] = []
+    if isinstance(raw, Mapping):
+        records.extend((str(key), value) for key, value in raw.items())
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            diagnostic_id = _source_diagnostic_text(
+                item.get("diagnostic_id") or item.get("source_diagnostic_id") or item.get("id")
+            )
+            records.append((diagnostic_id, item))
+    issue_records: dict[str, dict[str, Any]] = {}
+    for diagnostic_id, value in records:
+        record = _source_diagnostic_issue_record(diagnostic_id, value)
+        if record is None:
+            continue
+        key, metadata = record
+        issue_records[key] = metadata
+    return issue_records
 
 
 def _source_diagnostic_source_class(source: Any) -> str:
@@ -1786,6 +1981,40 @@ def _source_diagnostic_tag_items_html(tags: Any) -> str:
     return "".join(rendered)
 
 
+def _source_diagnostic_issue_link_html(issue: Mapping[str, Any] | None) -> str:
+    if not isinstance(issue, Mapping):
+        return ""
+    number = _source_diagnostic_issue_number(issue.get("number"))
+    if number is None:
+        return ""
+    url = _source_diagnostic_text(issue.get("url"))
+    canonical_url = _canonical_source_diagnostic_issue_url(number)
+    if url != canonical_url:
+        return ""
+    state = _source_diagnostic_issue_state(issue.get("state"))
+    issue_text = f"#Ticket {number}"
+    return (
+        f"<a class=\"diag-ticket-link\" href=\"{escape(canonical_url, quote=True)}\" "
+        f"aria-label=\"GitHub issue {int(number)} status {escape(state, quote=True)}\">"
+        f"{_ui_icon_html('link', class_name='ui-icon diag-ticket-link-icon')}"
+        f"<span>{escape(issue_text)}</span>{_github_icon_html()}</a>"
+    )
+
+
+def _source_diagnostic_row_id(row: Mapping[str, Any]) -> str:
+    severity = _source_diagnostic_event_severity(row.get("severity"))
+    title = _source_diagnostic_text(row.get("title"), fallback="Source diagnostic")
+    source = _source_diagnostic_text(row.get("source"), fallback="Source")
+    message = _source_diagnostic_text(row.get("message"))
+    return _source_diagnostic_id(
+        severity=severity,
+        source=source,
+        title=title,
+        message=message,
+        tags=row.get("tags"),
+    )
+
+
 def _placeholder_rows_for_unexplained_counts(
     counts: Mapping[str, int],
     rows: tuple[dict[str, Any], ...],
@@ -1813,7 +2042,11 @@ def _placeholder_rows_for_unexplained_counts(
     return tuple(placeholders)
 
 
-def _render_source_diagnostic_row(row: Mapping[str, Any]) -> str:
+def _render_source_diagnostic_row(
+    row: Mapping[str, Any],
+    *,
+    issue_metadata: Mapping[str, Any] | None = None,
+) -> str:
     if not isinstance(row, Mapping):
         row = {}
     severity = _source_diagnostic_event_severity(row.get("severity"))
@@ -1822,10 +2055,14 @@ def _render_source_diagnostic_row(row: Mapping[str, Any]) -> str:
     source_class = _source_diagnostic_source_class(source)
     message = _source_diagnostic_text(row.get("message"))
     tag_items = _source_diagnostic_tag_items_html(row.get("tags"))
+    diagnostic_id = _source_diagnostic_row_id(row)
+    issue_link = _source_diagnostic_issue_link_html(issue_metadata)
     return (
-        f"<article class=\"diag-row {severity}\">"
+        f"<article class=\"diag-row {severity}\" data-diagnostic-severity=\"{severity}\" "
+        f"data-diagnostic-id=\"{escape(diagnostic_id, quote=True)}\">"
         "<span class=\"diag-stripe\" aria-hidden=\"true\"></span>"
         f"{_source_diagnostic_icon_html(row)}"
+        f"{issue_link}"
         "<div>"
         "<div class=\"diag-row-head\">"
         f"<span class=\"severity-badge {severity}\">{escape(severity.capitalize())}</span>"
@@ -1836,6 +2073,20 @@ def _render_source_diagnostic_row(row: Mapping[str, Any]) -> str:
         f"<div class=\"diag-tags\">{tag_items}</div>"
         "</div>"
         "</article>"
+    )
+
+
+def _diagnostic_filter_button_html(severity: str, count: int, label: str, icon_name: str) -> str:
+    escaped_severity = escape(severity, quote=True)
+    escaped_label = escape(label, quote=True)
+    return (
+        f"<button type=\"button\" class=\"diag-tile {escaped_severity}\" "
+        f"data-diagnostic-filter=\"{escaped_severity}\" "
+        f"data-diagnostic-severity=\"{escaped_severity}\" "
+        "aria-pressed=\"false\" aria-controls=\"source-diagnostics-feed\" "
+        f"aria-label=\"Show {escaped_severity} source diagnostics ({int(count)})\">"
+        f"<strong>{int(count)}</strong><span>{escaped_label}</span>"
+        f"{_ui_icon_html(icon_name, class_name='ui-icon diag-tile-icon')}</button>"
     )
 
 
@@ -1861,12 +2112,24 @@ def _source_diagnostic_icon_html(row: Mapping[str, Any]) -> str:
 
 
 def _clear_source_diagnostic_row() -> dict[str, Any]:
+    severity = "notice"
+    title = "No source issues reported"
+    source = "Source diagnostics"
+    message = "Release Health, Atom feed, parser, and freshness checks have no warning or error events."
+    tags = ("No warnings", "No errors")
     return {
-        "severity": "notice",
-        "title": "No source issues reported",
-        "source": "Source diagnostics",
-        "message": "Release Health, Atom feed, parser, and freshness checks have no warning or error events.",
-        "tags": ("No warnings", "No errors"),
+        "id": _source_diagnostic_id(
+            severity=severity,
+            source=source,
+            title=title,
+            message=message,
+            tags=tags,
+        ),
+        "severity": severity,
+        "title": title,
+        "source": source,
+        "message": message,
+        "tags": tags,
     }
 
 
@@ -1877,6 +2140,10 @@ def _render_source_diagnostics_panel(
     generated_age_days: float,
     generated_at_utc: str,
 ) -> str:
+    issue_records = _source_diagnostic_issue_records(_source_diagnostics_for_policy(policy))
+    def render_row(row: Mapping[str, Any]) -> str:
+        return _render_source_diagnostic_row(row, issue_metadata=issue_records.get(_source_diagnostic_row_id(row)))
+
     base_rows = _source_diagnostic_rows(policy, generated_age_days=generated_age_days)
     excluded_rows = _excluded_release_diagnostic_rows(policy)
     counted_rows = (*base_rows, *excluded_rows)
@@ -1885,7 +2152,7 @@ def _render_source_diagnostics_panel(
     if not rows:
         clear_row = _clear_source_diagnostic_row()
         rendered_rows = (clear_row,)
-        rendered_clear_row = _render_source_diagnostic_row(clear_row)
+        rendered_clear_row = render_row(clear_row)
         details = f"<div class=\"diag-events diag-events-empty\">{rendered_clear_row}</div>"
     else:
         has_warning_or_error = any(
@@ -1899,12 +2166,12 @@ def _render_source_diagnostics_panel(
         visible_rows = rows[:5]
         hidden_rows = rows[5:]
         rendered_visible = (
-            (_render_source_diagnostic_row(lead_row) if lead_row is not None else "")
-            + "".join(_render_source_diagnostic_row(row) for row in visible_rows)
+            (render_row(lead_row) if lead_row is not None else "")
+            + "".join(render_row(row) for row in visible_rows)
         )
         overflow = ""
         if hidden_rows:
-            rendered_hidden = "".join(_render_source_diagnostic_row(row) for row in hidden_rows)
+            rendered_hidden = "".join(render_row(row) for row in hidden_rows)
             overflow = (
                 f"<details class=\"diag-more\"><summary>+{len(hidden_rows)} more</summary>"
                 f"<div class=\"diag-events\">{rendered_hidden}</div></details>"
@@ -1913,16 +2180,24 @@ def _render_source_diagnostics_panel(
     display_counts = _display_source_event_counts(rendered_rows)
     count_tiles = (
         "<div class=\"diag-summary\" aria-label=\"Source diagnostic counts\">"
-        f"<div class=\"diag-tile notice\"><strong>{display_counts['notice']}</strong><span>Notices</span>{_ui_icon_html('megaphone', class_name='ui-icon diag-tile-icon')}</div>"
-        f"<div class=\"diag-tile warning\"><strong>{display_counts['warning']}</strong><span>Warnings</span>{_ui_icon_html('warning', class_name='ui-icon diag-tile-icon')}</div>"
-        f"<div class=\"diag-tile error\"><strong>{display_counts['error']}</strong><span>Errors</span>{_ui_icon_html('error', class_name='ui-icon diag-tile-icon')}</div>"
+        f"{_diagnostic_filter_button_html('notice', display_counts['notice'], 'Notices', 'megaphone')}"
+        f"{_diagnostic_filter_button_html('warning', display_counts['warning'], 'Warnings', 'warning')}"
+        f"{_diagnostic_filter_button_html('error', display_counts['error'], 'Errors', 'error')}"
         "</div>"
     )
+    total_rows = sum(display_counts.values())
     return (
-        "<section class=\"panel span-7 source-diagnostics\">"
+        "<section class=\"panel span-7 source-diagnostics\" data-diagnostic-filter-root>"
         "<div class=\"panel-head\"><h2>Source diagnostics</h2>"
-        "<a class=\"panel-action\" href=\"#source-health\">View all</a></div>"
-        f"{count_tiles}<div id=\"source-diagnostics-feed\" class=\"diag-feed\" role=\"region\" aria-label=\"Source diagnostic event feed\">"
+        "<div class=\"panel-actions\">"
+        "<button type=\"button\" class=\"panel-action diag-filter-reset\" "
+        "data-diagnostic-filter=\"all\" aria-controls=\"source-diagnostics-feed\" aria-pressed=\"true\">View all</button>"
+        "</div></div>"
+        f"{count_tiles}<p id=\"source-diagnostics-filter-status\" class=\"diag-filter-status\" aria-live=\"polite\">"
+        f"Showing all {total_rows} source diagnostic rows.</p>"
+        "<div id=\"source-diagnostics-feed\" class=\"diag-feed\" role=\"region\" aria-label=\"Source diagnostic event feed\">"
+        "<div id=\"source-diagnostics-empty\" class=\"diag-filter-empty\" hidden>"
+        "No diagnostic rows match the selected severity filter.</div>"
         f"{details}</div>{_render_source_tiles(policy, generated_at_utc=generated_at_utc)}</section>\n"
     )
 
@@ -2220,7 +2495,8 @@ def render_policy_index(
         "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.freshness-head h2{margin:0;color:#0f1f3d}.freshness-state{display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);padding:6px 12px;font-size:13px;font-weight:650;line-height:1;color:var(--unknown);background:var(--unknown-soft);white-space:nowrap}.freshness-state.current{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.freshness-state.refresh-due{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.freshness-state.stale{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.freshness-state.unknown{color:var(--unknown);background:var(--unknown-soft);border-color:var(--line)}.freshness-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(176px,190px);gap:14px;align-items:center}.freshness-primary{display:grid;gap:16px}.freshness-hero{display:flex;align-items:center;gap:16px}.freshness-ring{display:inline-grid;place-items:center;width:120px;height:120px;flex:0 0 auto;border:3px solid var(--ok);border-radius:999px;background:radial-gradient(circle,#f8fff9 0,#e9f8ec 72%,#def4e4 100%);color:var(--ok);box-shadow:0 18px 34px rgba(16,124,16,.18),0 0 0 14px rgba(16,124,16,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring.refresh-due{border-color:var(--warn);color:var(--warn);background:linear-gradient(180deg,var(--warn-soft),#fffaf0);box-shadow:0 18px 34px rgba(180,83,9,.14),0 0 0 14px rgba(180,83,9,.08)}.freshness-ring.stale{border-color:var(--err);color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);box-shadow:0 18px 34px rgba(180,35,24,.14),0 0 0 14px rgba(180,35,24,.08)}.freshness-ring.unknown{border-color:#b8c5d6;color:var(--unknown);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff);box-shadow:0 18px 34px rgba(100,116,139,.12),0 0 0 14px rgba(100,116,139,.06)}.freshness-ring-icon{width:64px;height:64px}.freshness-metric{font-size:46px;font-weight:720;line-height:1;color:#071632;letter-spacing:0;white-space:nowrap}.freshness-detail{color:#334155;font-size:14px}.freshness-callout{display:flex;align-items:center;gap:10px;margin:0;border:1px solid #cfe5d4;border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(247,255,249,.84));padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86)}.freshness-callout.refresh-due{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.freshness-callout.stale{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.freshness-callout.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.freshness-callout-icon{width:22px;height:22px;flex:0 0 auto;color:var(--ok)}.freshness-callout.refresh-due .freshness-callout-icon{color:var(--warn)}.freshness-callout.stale .freshness-callout-icon{color:var(--err)}.freshness-callout.unknown .freshness-callout-icon{color:var(--unknown)}.thresholds{display:grid;grid-template-columns:1fr;gap:10px}.threshold-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#f8fbff,#f2f7ff);padding:11px}.threshold-icon{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #c9e3ff;border-radius:10px;background:#fff;color:var(--blue-strong)}.threshold-icon svg{width:20px;height:20px}.thresholds strong{display:block;font-size:17px;font-weight:640}.thresholds span{display:block;color:var(--muted);font-size:12px}.freshness-meta-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);padding-top:16px}.freshness-meta-item{display:flex;align-items:center;justify-content:center;gap:10px;color:#24344f;font-size:15px;line-height:1.2;min-width:0;white-space:nowrap}.freshness-meta-item+.freshness-meta-item{border-left:1px solid var(--line)}.freshness-meta-icon{width:25px;height:25px;flex:0 0 auto;color:#005bd3}.freshness-metadata{border:0;padding-top:0}.freshness-metadata summary{cursor:pointer;color:#64748b;font-size:12px;font-weight:650;list-style:none}.freshness-metadata summary::-webkit-details-marker{display:none}.freshness-metadata summary:before{content:'+';display:inline-grid;place-items:center;width:16px;height:16px;margin-right:6px;border:1px solid var(--line);border-radius:999px;color:#075985;background:#fff}.freshness-metadata[open] summary:before{content:'-'}.freshness-metadata dl{margin:9px 0 0}.freshness-metadata dt{font-size:12px}.freshness-metadata dd{font-size:13px}\n"
         "    ul.clean{list-style:none;margin:0;padding:0;display:grid;gap:10px}ul.clean li{display:grid;gap:3px}ul.clean span{color:var(--muted);font-size:13px}a{color:#075985;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px;border-radius:6px}.version-link{display:inline-flex;align-items:center;gap:6px;color:#0067c0;font-weight:600}.version-link:after{content:'\\2197';font-family:Segoe UI,Arial,sans-serif;font-size:12px}.hash{display:inline-block;max-width:100%}\n"
         "    .trust-indicator{--trust-ring:rgba(16,124,16,.18);display:inline-flex;align-items:center;gap:8px;width:max-content;overflow:hidden;border:1px solid #a9ddb7;border-radius:999px;background:linear-gradient(180deg,var(--ok-soft),#f7fff8);color:var(--ok);padding:5px 10px;font-size:12px;font-weight:620;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.82)}.trust-indicator:before{content:'';width:9px;height:9px;border-radius:999px;background:currentColor;box-shadow:0 0 0 4px var(--trust-ring);transform-origin:center;animation:trustPulse 2.2s cubic-bezier(.4,0,.2,1) infinite;will-change:transform}@keyframes trustPulse{0%,100%{transform:scale(1)}45%{transform:scale(1.48)}72%{transform:scale(1.12)}}.trust-indicator.warning{color:var(--warn);background:linear-gradient(180deg,var(--warn-soft),#fffaf0);border-color:#f6d493;--trust-ring:rgba(180,83,9,.2)}.trust-indicator.error{color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);border-color:#f6b7ad;--trust-ring:rgba(180,35,24,.2)}.signature-panel{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:14px;padding:18px;background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(247,251,255,.94));border-color:#c9d9ec}.signature-panel:before{content:'';position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,var(--ok),rgba(0,120,212,.28));opacity:.5}.signature-panel.warning{border-color:#f6d493;background:linear-gradient(180deg,#fffaf1,#fffdf7)}.signature-panel.warning:before{background:linear-gradient(90deg,var(--warn),rgba(180,83,9,.22))}.signature-panel.error{border-color:#f6b7ad;background:linear-gradient(180deg,#fff7f5,#fffdfc)}.signature-panel.error:before{background:linear-gradient(90deg,var(--err),rgba(180,35,24,.22))}.signature-panel>*{position:relative}.signature-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.signature-head h2,.programmatic-api h2{display:flex;align-items:center;gap:7px}.signature-head h2{margin:0;color:#475569;font-weight:720}.signature-status-card{display:grid;gap:4px;border:1px solid #a9ddb7;border-radius:10px;background:linear-gradient(135deg,#f0fbf3,#fbfffc);padding:13px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}.signature-status-card.warning{border-color:#f6d493;background:linear-gradient(135deg,var(--warn-soft),#fffaf0)}.signature-status-card.error{border-color:#f6b7ad;background:linear-gradient(135deg,var(--err-soft),#fff8f6)}.signature-status-card span{color:var(--muted);font-size:12px}.signature-status-card strong{color:#0f172a;font-size:16px;font-weight:650;line-height:1.25}.signature-status-card.error strong{color:var(--err)}.signature-kv{display:grid;gap:9px;margin:0}.signature-kv div{display:grid;grid-template-columns:minmax(104px,30%) minmax(0,1fr);gap:12px;align-items:center;border:1px solid #d5e2f0;border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f5f8fc);padding:10px 12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.7);transition:transform .16s ease,border-color .16s ease,background-color .16s ease}.signature-kv div:hover{border-color:#b8c9dd;background:#fff;box-shadow:0 7px 16px rgba(31,79,143,.07);transform:translateY(-1px)}.signature-kv dt{color:var(--muted);font-size:12px}.signature-kv dd{margin:0;color:#172033;font-weight:600;line-height:1.25;overflow-wrap:anywhere}.signature-kv .mono{font-size:13px;font-weight:600}.source-health{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px}.source-health h3{margin:0;color:var(--muted);font-size:11px;font-weight:720;text-transform:uppercase;letter-spacing:0}.source-health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.source-tile{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0;background:var(--soft)}.source-tile.ok{border-color:#b9e6c4;background:linear-gradient(180deg,var(--ok-soft),#f8fff9)}.source-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.source-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.source-tile.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.source-tile-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}.source-name{display:inline-flex;align-items:center;gap:7px;min-width:0}.source-name strong{font-weight:700}.source-icon{width:17px;height:17px;color:var(--blue-strong)}.source-status{border:1px solid var(--line);border-radius:999px;background:#fff;color:#475569;padding:2px 7px;font-size:11px;font-weight:600}.source-status.ok{color:var(--ok);border-color:#b9e6c4;background:#fff}.source-status.warning{color:var(--warn);border-color:#f6d493;background:#fff}.source-status.error{color:var(--err);border-color:#f6b7ad;background:#fff}.source-status.unknown{color:var(--unknown);background:#fff}.source-tile a{display:block;margin:8px 0 10px;font-size:13px}.source-tile>span{display:block;margin-top:4px;color:var(--muted);font-size:13px}.mini-kv{display:grid;grid-template-columns:80px minmax(0,1fr);gap:5px 10px;margin:0;font-size:12px}.mini-kv dt{color:var(--muted)}.mini-kv dd{margin:0;font-weight:600;overflow-wrap:anywhere}\n"
-        "    .source-diagnostics{display:flex;flex-direction:column;gap:10px;min-height:0;align-self:start}.diag-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:0 0 auto}.diag-tile{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f2f7ff);padding:8px 10px}.diag-tile strong{display:block;font-size:22px;font-weight:650;line-height:1}.diag-tile span{color:var(--muted);font-size:12px}.diag-tile-icon{width:19px;height:19px;justify-self:end}.diag-tile.notice{border-color:#bfdbfe;background:linear-gradient(180deg,var(--blue-soft),#f8fbff)}.diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}.diag-tile.notice span{color:var(--blue-strong);font-weight:600}.diag-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.diag-tile.warning strong,.diag-tile.warning .diag-tile-icon{color:var(--warn)}.diag-tile.warning span{color:var(--warn);font-weight:600}.diag-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.diag-tile.error strong,.diag-tile.error .diag-tile-icon{color:var(--err)}.diag-tile.error span{color:var(--err);font-weight:600}.diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #d8dee8;border-radius:8px;background:linear-gradient(180deg,#f6f7f9,#eef1f5);padding:14px 11px 24px 14px;box-shadow:inset 0 1px 2px rgba(15,23,42,.06);scrollbar-width:thin;scrollbar-color:#a8b0bc #eef1f5}.diag-feed::-webkit-scrollbar{width:10px}.diag-feed::-webkit-scrollbar-track{background:#eef1f5;border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#a8b0bc;border-radius:999px;border:2px solid #eef1f5}.diag-events{display:grid;gap:10px;padding:2px 2px 24px}.diag-events-empty .diag-row{background:linear-gradient(90deg,#ffffff,#f8fafc)}.diag-row{display:grid;grid-template-columns:4px 34px minmax(0,1fr);gap:8px;align-items:start;border:1px solid var(--line);border-radius:8px;background:#fbfdff;padding:8px}.diag-row.warning{border-color:#f6d493;background:linear-gradient(90deg,#fffaf0,#ffffff)}.diag-row.error{border-color:#f6b7ad;background:linear-gradient(90deg,#fff8f6,#ffffff)}.diag-row p{margin:3px 0 0;color:#475569;font-size:13px;line-height:1.35}.diag-stripe{display:block;align-self:stretch;border-radius:999px;background:var(--blue)}.diag-row-icon{width:20px;height:20px;margin-top:2px;justify-self:center;color:var(--blue-strong)}.diag-row-icon.warning{color:var(--warn)}.diag-row-icon.error{color:var(--err)}.diag-row.warning .diag-stripe{background:var(--warn)}.diag-row.error .diag-stripe{background:var(--err)}.diag-row-head{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.diag-row-head strong{font-size:13px;font-weight:640}.severity-badge,.source-chip,.diag-tags span{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600;background:#fff;color:#475569}.severity-badge.notice{color:var(--blue-strong);background:var(--blue-soft);border-color:#bfdbfe}.severity-badge.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.severity-badge.error{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.source-chip{font-weight:600}.diag-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.diag-tags:empty{display:none}.diag-more{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:8px}.diag-more summary{cursor:pointer;color:#075985;font-size:13px;font-weight:600}.diag-more .diag-events{margin-top:8px}\n"
+        "    .source-diagnostics{display:flex;flex-direction:column;gap:10px;min-height:0;align-self:start}.diag-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:0 0 auto}.diag-tile{appearance:none;width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f2f7ff);padding:8px 10px;color:inherit;font:inherit;text-align:left;cursor:pointer}.diag-tile:hover{border-color:#9cccf6;background:#fff}.diag-tile:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.diag-tile[aria-pressed=\"true\"]{box-shadow:inset 0 0 0 2px rgba(0,120,212,.18)}.diag-tile strong{display:block;font-size:22px;font-weight:650;line-height:1}.diag-tile span{color:var(--muted);font-size:12px}.diag-tile-icon{width:19px;height:19px;justify-self:end}.diag-tile.notice{border-color:#bfdbfe;background:linear-gradient(180deg,var(--blue-soft),#f8fbff)}.diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}.diag-tile.notice span{color:var(--blue-strong);font-weight:600}.diag-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.diag-tile.warning strong,.diag-tile.warning .diag-tile-icon{color:var(--warn)}.diag-tile.warning span{color:var(--warn);font-weight:600}.diag-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.diag-tile.error strong,.diag-tile.error .diag-tile-icon{color:var(--err)}.diag-tile.error span{color:var(--err);font-weight:600}.diag-filter-status{margin:-2px 0 0;color:var(--muted);font-size:12px;line-height:1.3}.diag-filter-empty{border:1px dashed var(--line);border-radius:12px;background:#fff;padding:14px;color:#475569;font-size:13px}.diag-filter-empty[hidden],.diag-row[hidden],.diag-more[hidden]{display:none!important}.diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #d8dee8;border-radius:8px;background:linear-gradient(180deg,#f6f7f9,#eef1f5);padding:14px 11px 24px 14px;box-shadow:inset 0 1px 2px rgba(15,23,42,.06);scrollbar-width:thin;scrollbar-color:#a8b0bc #eef1f5}.diag-feed::-webkit-scrollbar{width:10px}.diag-feed::-webkit-scrollbar-track{background:#eef1f5;border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#a8b0bc;border-radius:999px;border:2px solid #eef1f5}.diag-events{display:grid;gap:10px;padding:2px 2px 24px}.diag-events-empty .diag-row{background:linear-gradient(90deg,#ffffff,#f8fafc)}.diag-row{display:grid;grid-template-columns:4px 34px minmax(0,1fr);gap:8px;align-items:start;border:1px solid var(--line);border-radius:8px;background:#fbfdff;padding:8px}.diag-row.warning{border-color:#f6d493;background:linear-gradient(90deg,#fffaf0,#ffffff)}.diag-row.error{border-color:#f6b7ad;background:linear-gradient(90deg,#fff8f6,#ffffff)}.diag-row p{margin:3px 0 0;color:#475569;font-size:13px;line-height:1.35}.diag-stripe{display:block;align-self:stretch;border-radius:999px;background:var(--blue)}.diag-row-icon{width:20px;height:20px;margin-top:2px;justify-self:center;color:var(--blue-strong)}.diag-row-icon.warning{color:var(--warn)}.diag-row-icon.error{color:var(--err)}.diag-row.warning .diag-stripe{background:var(--warn)}.diag-row.error .diag-stripe{background:var(--err)}.diag-row-head{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.diag-row-head strong{font-size:13px;font-weight:640}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600;background:#fff;color:#475569}.severity-badge.notice{color:var(--blue-strong);background:var(--blue-soft);border-color:#bfdbfe}.severity-badge.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.severity-badge.error{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.source-chip{font-weight:600}.diag-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.diag-tags:empty{display:none}.diag-more{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:8px}.diag-more summary{cursor:pointer;color:#075985;font-size:13px;font-weight:600}.diag-more .diag-events{margin-top:8px}\n"
+        "    .diag-row{position:relative}.diag-ticket-link{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:5px;max-width:calc(100% - 20px);border:1px solid rgba(197,216,236,.95);border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.12),inset 0 1px 0 rgba(255,255,255,.9);padding:4px 8px;color:#075985;font-size:11px;font-weight:700;line-height:1;text-decoration:none;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}.diag-ticket-link:hover{text-decoration:none}.diag-row:hover .diag-ticket-link,.diag-row:focus-within .diag-ticket-link{opacity:1;pointer-events:auto;transform:translateY(0)}.diag-ticket-link-icon{width:12px;height:12px}.diag-ticket-link .github-icon{width:12px;height:12px}\n"
         "    .programmatic-api{display:flex;flex-direction:column;justify-content:flex-start}.api-endpoints{display:grid;gap:9px}.api-endpoint-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;color:inherit;text-decoration:none}.api-row-icon{width:18px;height:18px;color:var(--blue-strong)}.api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}.api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px}.api-endpoint-row strong{display:block;color:#172033;font-size:13px;font-weight:640;line-height:1.25}.api-endpoint-row em{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-style:italic;font-weight:500;line-height:1.35}.api-endpoint-row code{font-family:Consolas,Menlo,monospace;font-size:12px;color:var(--code);white-space:normal;text-align:right;overflow-wrap:anywhere}.api-note{margin-bottom:12px}.warnings{margin:0;padding-left:18px;color:var(--warn)}footer{position:relative;display:grid;gap:8px;justify-items:center;margin-top:34px;padding:20px 12px 4px;color:var(--muted);font-size:12px;line-height:1.45;text-align:center;background:linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.42));border-radius:14px 14px 0 0}footer:before{content:'';width:min(640px,100%);height:1px;margin-bottom:8px;background:linear-gradient(90deg,rgba(194,213,235,0),rgba(148,163,184,.55),rgba(194,213,235,0));box-shadow:0 -12px 28px rgba(31,79,143,.08)}.footer-note{max-width:900px;margin:0}.footer-disclaimer,.footer-owner{color:#64748b}.footer-source{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 6px;margin-top:2px}.footer-github{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.82);padding:2px 8px;color:#075985;font-weight:600;white-space:nowrap;box-shadow:0 3px 10px rgba(31,79,143,.06)}.footer-license-basic{color:#075985;font-weight:600;text-decoration:none}.footer-license-basic:hover,.footer-license-basic:focus-visible{text-decoration:underline}.github-icon{width:13px;height:13px;display:block;flex:0 0 auto}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}.signature-kv div:hover{transform:none!important}}\n"
         "    @media(max-width:1400px){main{margin:28px auto;padding:28px;border-radius:28px}.brand{gap:24px}.winmark{width:104px;height:104px;gap:7px}.title-line h1{font-size:48px}.subtitle{font-size:19px}.eyebrow{font-size:16px}.title-version-link{padding:11px 16px;font-size:14px}.kpi-card .metric{font-size:40px}.freshness-layout{grid-template-columns:1fr}.freshness-ring{width:104px;height:104px}.freshness-ring-icon{width:56px;height:56px}.freshness-metric{font-size:40px}.thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
         "    @media(min-width:901px){#live-freshness-panel{grid-column:1/span 5;grid-row:1/span 2}.source-diagnostics{grid-column:6/span 7;grid-row:1/span 2}.signature-panel{grid-column:1/span 5;grid-row:3}.programmatic-api{grid-column:6/span 7;grid-row:3}}\n"
@@ -2234,8 +2510,8 @@ def render_policy_index(
         "    @media(max-width:360px){.freshness-panel .panel-head{align-items:flex-start;flex-direction:column}.freshness-state{align-self:flex-start}.freshness-hero{grid-template-columns:1fr}.freshness-ring{justify-self:start;width:76px}.freshness-metric{font-size:28px}.freshness-metric.age-wide,.freshness-metric.age-compact{font-size:26px}}\n"
         "    .signature-panel,.programmatic-api{border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.signature-panel{gap:16px;padding:22px}.signature-panel:after{content:'';position:absolute;right:-58px;top:-62px;width:166px;height:166px;border-radius:999px;background:radial-gradient(circle,rgba(0,120,212,.14),rgba(0,120,212,.06) 44%,rgba(0,120,212,0) 70%);box-shadow:inset 0 0 0 1px rgba(0,120,212,.1);pointer-events:none}.signature-panel.warning:after{background:radial-gradient(circle,rgba(180,83,9,.14),rgba(180,83,9,.05) 46%,rgba(180,83,9,0) 70%)}.signature-panel.error:after{background:radial-gradient(circle,rgba(180,35,24,.14),rgba(180,35,24,.05) 46%,rgba(180,35,24,0) 70%)}.signature-head{align-items:center}.signature-head h2,.programmatic-api h2{margin:0;color:#334155;font-weight:740;gap:9px}.signature-head .panel-heading-icon,.programmatic-api .panel-heading-icon{box-sizing:content-box;width:18px;height:18px;padding:7px;border:1px solid #c9e3ff;border-radius:12px;background:linear-gradient(180deg,#fff,#eaf5ff);color:#005bd3;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.signature-status-card{gap:5px;border-radius:14px;padding:15px 16px;background:linear-gradient(135deg,rgba(240,251,243,.98),rgba(255,255,255,.86));box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 18px rgba(16,124,16,.06)}.signature-status-card strong{font-size:17px}.signature-kv{gap:10px}.signature-kv div{grid-template-columns:minmax(116px,32%) minmax(0,1fr);gap:14px;border-color:rgba(197,216,236,.88);border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(246,250,255,.82));padding:13px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86);transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}.signature-kv div:hover{border-color:#aecded;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.08),inset 0 1px 0 rgba(255,255,255,.92);transform:none}.signature-kv dt{font-size:12px;font-weight:650;text-transform:uppercase;color:#65758e}.signature-kv dd{font-size:14px;color:#102033}.programmatic-api{gap:14px;padding:22px}.programmatic-api .api-note{margin:0;color:#334967;font-size:20px;line-height:1.3}.api-endpoints{gap:10px}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr) max-content;gap:12px;border-color:rgba(197,216,236,.9);border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(245,249,255,.84));padding:12px 13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86);transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}.api-row-icon{box-sizing:content-box;width:18px;height:18px;padding:6px;border:1px solid #c9e3ff;border-radius:10px;background:linear-gradient(180deg,#fff,#eaf5ff);color:#005bd3}.api-endpoint-row:hover{border-color:#aecded;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.08);text-decoration:none}.api-endpoint-row strong{font-size:13px;font-weight:700}.api-endpoint-row em{font-size:12px;color:#65758e}.api-endpoint-row code{justify-self:end;display:inline-flex;align-items:center;max-width:100%;border:1px solid #c9e3ff;border-radius:999px;background:linear-gradient(180deg,#fff,#edf6ff);padding:5px 9px;color:#064b7a;font-size:12px;line-height:1.2;white-space:nowrap;overflow-wrap:normal}.source-health{margin-top:2px;padding-top:14px;gap:10px;border-top-color:rgba(174,203,235,.78)}.source-health h3{color:#5b6d86;font-size:12px}.source-health-grid{gap:12px}.source-tile{position:relative;overflow:hidden;border-color:rgba(185,230,196,.95);border-radius:14px;background:linear-gradient(180deg,rgba(241,253,244,.96),rgba(250,255,251,.88));padding:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 20px rgba(16,124,16,.06)}.source-tile:before{content:'';position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,var(--ok),rgba(0,120,212,.24));opacity:.45}.source-tile.warning:before{background:linear-gradient(90deg,var(--warn),rgba(180,83,9,.2))}.source-tile.error:before{background:linear-gradient(90deg,var(--err),rgba(180,35,24,.2))}.source-tile.unknown:before{background:linear-gradient(90deg,var(--unknown),rgba(100,116,139,.18))}.source-tile-head,.source-tile>a,.source-tile>.mini-kv{position:relative}.source-name{gap:9px}.source-name strong{color:#172033;font-size:16px}.source-icon{box-sizing:content-box;width:16px;height:16px;padding:5px;border:1px solid #b9e6c4;border-radius:10px;background:linear-gradient(180deg,#fff,#ecfff0);color:var(--ok)}.source-tile.warning .source-icon{border-color:#f6d493;background:linear-gradient(180deg,#fff,#fff4df);color:var(--warn)}.source-tile.error .source-icon{border-color:#f6b7ad;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.source-tile.unknown .source-icon{border-color:#cbd5e1;background:linear-gradient(180deg,#fff,#f1f5f9);color:var(--unknown)}.source-status{padding:3px 8px;background:rgba(255,255,255,.88);box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}.source-tile a{margin:10px 0 12px;color:#075985;font-size:13px}.mini-kv{grid-template-columns:82px minmax(0,1fr);gap:7px 11px}.mini-kv dt{font-weight:650;color:#65758e}.mini-kv dd{color:#1f2f49}.mini-kv .time-copy{gap:7px}.mini-kv .epoch-copy{background:#fff}.warnings{border-radius:14px;background:rgba(255,250,240,.7);padding:12px 12px 12px 30px}footer{margin-top:36px;padding:18px 12px 2px;background:transparent;border-radius:0;color:#6b7a90;box-shadow:none}footer:before{width:min(760px,100%);margin-bottom:6px;background:linear-gradient(90deg,rgba(194,213,235,0),rgba(148,163,184,.44),rgba(194,213,235,0));box-shadow:none}.footer-note{max-width:920px}.footer-source{margin-top:4px;gap:5px 7px}.footer-github{border-color:rgba(197,216,236,.8);background:rgba(255,255,255,.54);box-shadow:none;color:#1d5f8f}.footer-license-basic{color:#1d5f8f}@media(max-width:1199px) and (min-width:901px){main{width:calc(100% - 44px);padding:28px}.kpi-card{padding:20px}.source-health-grid{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr)}.api-endpoint-row code{grid-column:2;justify-self:start;white-space:normal}.programmatic-api .api-note{font-size:18px}}@media(max-width:900px){.dashboard-grid{align-items:start}.span-5,.span-6,.span-7,.span-8,.span-12,#live-freshness-panel,.source-diagnostics,.signature-panel,.programmatic-api{grid-column:1/-1;grid-row:auto}.signature-panel,.programmatic-api{padding:20px}.source-health-grid{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr)}.api-endpoint-row code{grid-column:2;justify-self:start;white-space:normal}.signature-kv div{grid-template-columns:minmax(110px,30%) minmax(0,1fr)}}@media(max-width:640px){body:before{width:150vw;left:-42vw}body:after{width:130vw;right:-62vw}.brand{grid-template-columns:52px minmax(0,1fr)}.winmark{width:52px;height:52px}.title-line h1{font-size:30px;line-height:1.08}.subtitle{font-size:14px;max-width:100%}.signature-panel,.programmatic-api{padding:18px 14px;border-radius:16px}.signature-head{align-items:flex-start;display:grid}.trust-indicator{justify-self:start}.signature-kv div{grid-template-columns:1fr;gap:5px;padding:12px}.programmatic-api .api-note{font-size:16px}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.api-row-icon{margin-top:1px}.api-endpoint-row code{grid-column:1/-1;justify-self:start;white-space:normal}.source-tile{padding:13px}.source-tile-head{align-items:flex-start}.source-name strong{font-size:15px}.mini-kv{grid-template-columns:1fr;gap:4px}footer{margin-top:26px;padding:16px 4px 0}.footer-source{display:grid;justify-items:center}.footer-github{white-space:normal}}@media(max-width:360px){.title-line h1{font-size:27px}.api-endpoint-row{padding:11px}.source-name{align-items:flex-start}.footer-note{font-size:11px}}\n"
         "    @media(max-width:1500px){.freshness-panel .freshness-layout{grid-template-columns:1fr;gap:22px}.freshness-panel .thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
-        "    @media(max-width:640px){main{width:calc(100% - 20px);padding:14px 10px}.kpi-head{flex-wrap:wrap;align-items:flex-start}.kpi-head .status-pill{margin-left:0}.subtitle{max-width:250px;overflow-wrap:break-word;word-break:normal}.freshness-panel .panel-head{align-items:flex-start;flex-direction:column}.freshness-state{align-self:flex-start}.diag-feed{overflow-x:hidden}.diag-row{grid-template-columns:4px 28px minmax(0,1fr);gap:7px}.diag-row-icon{width:18px;height:18px}.diag-row-head,.diag-row p,.diag-tags{min-width:0}.severity-badge,.source-chip,.diag-tags span{max-width:100%}.source-tile a{overflow-wrap:anywhere}.time-copy{flex-wrap:wrap}.freshness-panel .thresholds{grid-template-columns:1fr}}\n"
-        "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{margin:0;color:#172033}.panel-action{display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(197,216,236,.9);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:7px 13px;color:#0b4fb3;font-size:13px;font-weight:650;line-height:1;text-decoration:none;white-space:nowrap}.panel-action:hover{border-color:#9cccf6;background:#fff;text-decoration:none}.source-diagnostics{gap:14px;padding:22px;border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.source-diagnostics>.panel-head{flex:0 0 auto}.diag-summary{gap:10px}.diag-tile{grid-template-columns:auto minmax(0,1fr) auto;min-height:64px;border-radius:13px;padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.diag-tile strong{font-size:25px;font-weight:720}.diag-tile span{font-size:13px}.diag-tile-icon{box-sizing:content-box;width:23px;height:23px;padding:8px;border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-tile.notice .diag-tile-icon{border:1px solid #bfdbfe;background:linear-gradient(180deg,#fff,#eaf5ff)}.diag-tile.warning .diag-tile-icon{border:1px solid #fed7aa;background:linear-gradient(180deg,#fff,#fff3e4)}.diag-tile.error .diag-tile-icon{border:1px solid #fecaca;background:linear-gradient(180deg,#fff,#fff0ed)}.diag-feed{height:340px;min-height:340px;max-height:340px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68));padding:14px;box-shadow:inset 0 1px 2px rgba(31,79,143,.05);scrollbar-color:#8eb7df rgba(232,243,255,.68)}.diag-feed::-webkit-scrollbar{width:8px}.diag-feed::-webkit-scrollbar-track{background:rgba(232,243,255,.64);border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#8eb7df;border:2px solid rgba(232,243,255,.84);border-radius:999px}.diag-events{gap:10px;padding:2px 4px 12px 2px}.diag-row{grid-template-columns:5px 50px minmax(0,1fr);gap:12px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(250,253,255,.88));padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row.warning{background:linear-gradient(90deg,#fffaf0,#fff)}.diag-row.error{background:linear-gradient(90deg,#fff8f6,#fff)}.diag-row>div{min-width:0}.diag-stripe{width:5px}.diag-row-icon{display:grid;place-items:center;justify-self:center;align-self:start;width:42px;height:46px;margin-top:0;border:1px solid #bfdbfe;border-radius:14px;background:linear-gradient(180deg,#fff,#eaf5ff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row-icon.warning{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:var(--warn)}.diag-row-icon.error{border-color:#fecaca;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.diag-row-icon .ui-icon{width:25px;height:25px}.diag-row-head{gap:6px}.diag-row-head strong{font-size:14px}.diag-row p{font-size:13px;color:#40516a;overflow-wrap:anywhere}.source-chip.src-diagnostics{color:#005bd3;background:var(--blue-soft);border-color:#bfdbfe}.source-chip.src-atom-feed{color:#005bd3;background:linear-gradient(180deg,#eef7ff,#f8fbff);border-color:#bfdbfe}.source-chip.src-release-policy,.source-chip.src-policy{color:#1d4ed8;background:linear-gradient(180deg,#edf4ff,#f8fbff);border-color:#c7d2fe}.source-chip.src-release-health{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.source-chip.src-freshness{color:#075985;background:#e0f2fe;border-color:#bae6fd}.source-chip.src-parser{color:var(--warn);background:var(--warn-soft);border-color:#fed7aa}.source-chip.src-signature{color:#5b21b6;background:#f3e8ff;border-color:#d8b4fe}.source-chip.src-source{color:#475569;background:#f8fafc;border-color:#cbd5e1}.diag-tags span{overflow-wrap:anywhere}.source-diagnostics #source-health{margin-top:0;padding-top:12px;border-top-color:rgba(174,203,235,.72)}\n"
+        "    @media(max-width:640px){main{width:calc(100% - 20px);padding:14px 10px}.kpi-head{flex-wrap:wrap;align-items:flex-start}.kpi-head .status-pill{margin-left:0}.subtitle{max-width:250px;overflow-wrap:break-word;word-break:normal}.freshness-panel .panel-head{align-items:flex-start;flex-direction:column}.freshness-state{align-self:flex-start}.diag-feed{overflow-x:hidden}.diag-row{grid-template-columns:4px 28px minmax(0,1fr);gap:7px}.diag-row-icon{width:18px;height:18px}.diag-row-head,.diag-row p,.diag-tags{min-width:0}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{max-width:100%}.source-tile a{overflow-wrap:anywhere}.time-copy{flex-wrap:wrap}.freshness-panel .thresholds{grid-template-columns:1fr}}\n"
+        "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{margin:0;color:#172033}.panel-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.panel-action{appearance:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(197,216,236,.9);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:7px 13px;color:#0b4fb3;font-family:inherit;font-size:13px;font-weight:650;line-height:1;text-decoration:none;white-space:nowrap;cursor:pointer}.panel-action:hover{border-color:#9cccf6;background:#fff;text-decoration:none}.panel-action:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.panel-action[aria-pressed=\"true\"]{border-color:#9cccf6;background:#fff}.source-diagnostics{gap:14px;padding:22px;border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.source-diagnostics>.panel-head{flex:0 0 auto}.diag-summary{gap:10px}.diag-tile{grid-template-columns:auto minmax(0,1fr) auto;min-height:64px;border-radius:13px;padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.diag-tile strong{font-size:25px;font-weight:720}.diag-tile span{font-size:13px}.diag-tile-icon{box-sizing:content-box;width:23px;height:23px;padding:8px;border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-tile.notice .diag-tile-icon{border:1px solid #bfdbfe;background:linear-gradient(180deg,#fff,#eaf5ff)}.diag-tile.warning .diag-tile-icon{border:1px solid #fed7aa;background:linear-gradient(180deg,#fff,#fff3e4)}.diag-tile.error .diag-tile-icon{border:1px solid #fecaca;background:linear-gradient(180deg,#fff,#fff0ed)}.diag-feed{height:340px;min-height:340px;max-height:340px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68));padding:14px;box-shadow:inset 0 1px 2px rgba(31,79,143,.05);scrollbar-color:#8eb7df rgba(232,243,255,.68)}.diag-feed::-webkit-scrollbar{width:8px}.diag-feed::-webkit-scrollbar-track{background:rgba(232,243,255,.64);border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#8eb7df;border:2px solid rgba(232,243,255,.84);border-radius:999px}.diag-events{gap:10px;padding:2px 4px 12px 2px}.diag-row{grid-template-columns:5px 50px minmax(0,1fr);gap:12px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(250,253,255,.88));padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row.warning{background:linear-gradient(90deg,#fffaf0,#fff)}.diag-row.error{background:linear-gradient(90deg,#fff8f6,#fff)}.diag-row>div{min-width:0}.diag-stripe{width:5px}.diag-row-icon{display:grid;place-items:center;justify-self:center;align-self:start;width:42px;height:46px;margin-top:0;border:1px solid #bfdbfe;border-radius:14px;background:linear-gradient(180deg,#fff,#eaf5ff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row-icon.warning{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:var(--warn)}.diag-row-icon.error{border-color:#fecaca;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.diag-row-icon .ui-icon{width:25px;height:25px}.diag-row-head{gap:6px}.diag-row-head strong{font-size:14px}.diag-row p{font-size:13px;color:#40516a;overflow-wrap:anywhere}.source-chip.src-diagnostics{color:#005bd3;background:var(--blue-soft);border-color:#bfdbfe}.source-chip.src-atom-feed{color:#005bd3;background:linear-gradient(180deg,#eef7ff,#f8fbff);border-color:#bfdbfe}.source-chip.src-release-policy,.source-chip.src-policy{color:#1d4ed8;background:linear-gradient(180deg,#edf4ff,#f8fbff);border-color:#c7d2fe}.source-chip.src-release-health{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.source-chip.src-freshness{color:#075985;background:#e0f2fe;border-color:#bae6fd}.source-chip.src-parser{color:var(--warn);background:var(--warn-soft);border-color:#fed7aa}.source-chip.src-signature{color:#5b21b6;background:#f3e8ff;border-color:#d8b4fe}.source-chip.src-source{color:#475569;background:#f8fafc;border-color:#cbd5e1}.diag-tags span,.diag-tags a{overflow-wrap:anywhere}.source-diagnostics #source-health{margin-top:0;padding-top:12px;border-top-color:rgba(174,203,235,.72)}\n"
         "    @media(max-width:640px){.source-diagnostics{padding:18px 14px;gap:12px}.source-diagnostics>.panel-head{align-items:flex-start;flex-direction:column}.panel-action{padding:6px 11px}.diag-summary{grid-template-columns:1fr}.diag-feed{height:320px;min-height:320px;max-height:320px;padding:12px}.diag-row{grid-template-columns:5px 40px minmax(0,1fr);gap:9px;padding:10px}.diag-row-icon{width:36px;height:40px}.diag-row-icon .ui-icon{width:21px;height:21px}.diag-row-head strong{font-size:13px}}\n"
         "    .diag-row{grid-template-columns:5px 38px minmax(0,1fr)}.diag-row-icon{width:32px;height:34px;margin-top:1px;border:0;border-radius:0;background:transparent;box-shadow:none}.diag-row-icon.warning,.diag-row-icon.error{border-color:transparent;background:transparent}.diag-row-icon .ui-icon{width:28px;height:28px;stroke-width:2}.diag-row-head{align-items:center;column-gap:7px;row-gap:4px}.diag-row-head .source-chip{font-size:10px;line-height:1.05;padding:2px 7px;font-weight:650;color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc;box-shadow:inset 0 1px 0 rgba(255,255,255,.88);transform:translateY(-.5px)}.diag-row-head .source-chip.src-diagnostics,.diag-row-head .source-chip.src-atom-feed,.diag-row-head .source-chip.src-release-policy,.diag-row-head .source-chip.src-policy{color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc}\n"
         "    @media(max-width:640px){.diag-row{grid-template-columns:5px 34px minmax(0,1fr)}.diag-row-icon{width:28px;height:30px;margin-top:0}.diag-row-icon .ui-icon{width:24px;height:24px}.diag-row-head .source-chip{font-size:10px;padding:2px 6px}}\n"
@@ -2246,7 +2522,7 @@ def render_policy_index(
         "    .panel :where(p,dd,dt,strong,em,code,a,.metric,.label){max-width:100%;min-width:0;overflow-wrap:anywhere;word-break:break-word}.kpi-card{container-type:inline-size}.kpi-card .metric{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-wrap:balance;font-size:clamp(32px,3vw,50px);line-height:.98}.kpi-observed .metric,.kpi-baseline .metric{font-size:clamp(31px,2.65vw,46px)}.kpi-card .label{white-space:normal}.api-endpoint-row code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}.freshness-metric{max-width:100%;overflow-wrap:anywhere}.source-tile-head,.signature-head,.panel-head{min-width:0}.source-name,.api-endpoint-row span,.signature-kv dd{min-width:0;max-width:100%}@supports(font-size:1cqw){.kpi-card .metric{font-size:clamp(32px,13cqw,50px)}.kpi-observed .metric,.kpi-baseline .metric{font-size:clamp(31px,11.8cqw,46px)}}\n"
         "    @media(max-width:900px){.kpi-card .metric{font-size:clamp(32px,8vw,46px)}.kpi-observed .metric,.kpi-baseline .metric{font-size:clamp(31px,7vw,44px)}}\n"
         "    @media(max-width:640px){.kpi-card .metric,.kpi-observed .metric,.kpi-baseline .metric{font-size:clamp(30px,10vw,38px);line-height:1.02}.kpi-card{min-height:0}}\n"
-        "    .kpi-card,.freshness-panel,.source-diagnostics,.signature-panel,.programmatic-api{border-color:rgba(150,197,246,.78);box-shadow:0 20px 44px rgba(14,74,150,.13),inset 0 1px 0 rgba(255,255,255,.92)}.kpi-card,.panel.status-card,.source-diagnostics,.signature-panel,.programmatic-api{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(246,251,255,.86))}.panel h2,.kpi-head h2{color:#1c3156}.metric,.freshness-metric{color:#071632}.panel-action,.status-pill,.source-chip,.diag-tags span{box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}\n"
+        "    .kpi-card,.freshness-panel,.source-diagnostics,.signature-panel,.programmatic-api{border-color:rgba(150,197,246,.78);box-shadow:0 20px 44px rgba(14,74,150,.13),inset 0 1px 0 rgba(255,255,255,.92)}.kpi-card,.panel.status-card,.source-diagnostics,.signature-panel,.programmatic-api{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(246,251,255,.86))}.panel h2,.kpi-head h2{color:#1c3156}.metric,.freshness-metric{color:#071632}.panel-action,.status-pill,.source-chip,.diag-tags span,.diag-tags a{box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}\n"
         "    .freshness-panel{container-type:inline-size}.freshness-panel .freshness-layout{grid-template-columns:1fr;gap:clamp(24px,3vw,34px)}.freshness-panel .freshness-hero{grid-template-columns:minmax(104px,120px) minmax(0,1fr);gap:clamp(28px,3vw,40px);max-width:100%}.freshness-age-copy{gap:8px;padding-inline-start:2px}.freshness-metric{white-space:normal;overflow-wrap:normal;word-break:normal;text-wrap:balance}.freshness-callout{margin-top:clamp(14px,2vw,22px)}@supports(margin-top:1cqw){.freshness-callout{margin-top:clamp(14px,3cqw,24px)}}.freshness-panel .thresholds{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.freshness-panel .threshold-card{column-gap:14px}.freshness-metric.age-wide{font-size:clamp(32px,3.15vw,40px)}@media(max-width:1500px){.freshness-panel .freshness-layout{gap:28px}.freshness-panel .freshness-hero{grid-template-columns:minmax(96px,112px) minmax(0,1fr);gap:28px}}@media(max-width:640px){.freshness-panel .freshness-layout{gap:22px}.freshness-panel .freshness-hero{grid-template-columns:82px minmax(0,1fr);gap:20px}.freshness-age-copy{gap:6px;padding-inline-start:0}.freshness-panel .thresholds{grid-template-columns:1fr;gap:12px}}@media(max-width:360px){.freshness-panel .freshness-hero{grid-template-columns:1fr}.freshness-ring{justify-self:start;width:76px}.freshness-metric{font-size:28px}.freshness-metric.age-wide,.freshness-metric.age-compact{font-size:26px}}\n"
         "  </style>\n"
         "</head>\n"
@@ -2330,9 +2606,20 @@ def render_policy_index(
         "      var uiFrames=[];\n"
         "      var uiTimers=[];\n"
         "      function reportUiError(scope,error){\n"
-        "        if(document.documentElement){document.documentElement.setAttribute('data-ui-last-error',scope);}\n"
-        "        if(window.console&&console.warn){console.warn('Windows 11 Release Guard UI '+scope+' failed',error);}\n"
+        "        try{\n"
+        "          var root=document.documentElement;\n"
+        "          var label=String(scope||'unknown');\n"
+        "          if(root){\n"
+        "            if(root.dataset){root.dataset.uiLastError=label;}\n"
+        "            root.setAttribute('data-ui-last-error',label);\n"
+        "            var count=Number(root.getAttribute('data-ui-error-count')||'0');\n"
+        "            if(!Number.isFinite(count)||count<0){count=0;}\n"
+        "            root.setAttribute('data-ui-error-count',String(count+1));\n"
+        "          }\n"
+        "        }catch(_markerError){}\n"
+        "        try{if(window.console&&console.warn){console.warn('Windows 11 Release Guard UI '+scope+' failed',error);}}catch(_consoleError){}\n"
         "      }\n"
+        "      function reportMissingNode(scope,name){reportUiError(scope+' missing '+name,new Error('missing '+name));}\n"
         "      function guard(scope,fn){try{return fn();}catch(error){reportUiError(scope,error);return undefined;}}\n"
         "      function safeSetTimeout(fn,delay){\n"
         "        if(!uiActive){return 0;}\n"
@@ -2374,15 +2661,15 @@ def render_policy_index(
         "      }\n"
         "      window.addEventListener('pagehide',function(){guard('shutdown',shutdownUi);},{once:true});\n"
         "      window.addEventListener('beforeunload',function(){guard('shutdown',shutdownUi);},{once:true});\n"
-        "      function setText(node,value){if(uiActive&&node&&node.isConnected){node.textContent=value;}}\n"
+        "      function setText(node,value,scope){if(uiActive&&node&&node.isConnected){node.textContent=value;return;}if(uiActive&&scope){reportMissingNode(scope,'text target');}}\n"
         "      function setState(state,label,detail,detailLabel){\n"
         "        if(!uiActive){return;}\n"
-        "        if(panelNode&&panelNode.isConnected){panelNode.setAttribute('data-freshness-state',state);}\n"
-        "        if(ringNode&&ringNode.isConnected){ringNode.className='freshness-ring '+state;}\n"
-        "        if(detailNode&&detailNode.isConnected){detailNode.className='freshness-detail freshness-callout '+state;detailNode.setAttribute('aria-label',detailLabel||detail);}\n"
-        "        if(stateNode&&stateNode.isConnected){stateNode.className='freshness-state '+state;stateNode.textContent=label;stateNode.setAttribute('aria-label','Published policy feed currency: '+label);}\n"
+        "        if(panelNode&&panelNode.isConnected){panelNode.setAttribute('data-freshness-state',state);}else{reportMissingNode('freshness state','panel');}\n"
+        "        if(ringNode&&ringNode.isConnected){ringNode.className='freshness-ring '+state;}else{reportMissingNode('freshness state','ring');}\n"
+        "        if(detailNode&&detailNode.isConnected){detailNode.className='freshness-detail freshness-callout '+state;detailNode.setAttribute('aria-label',detailLabel||detail);}else{reportMissingNode('freshness state','detail');}\n"
+        "        if(stateNode&&stateNode.isConnected){stateNode.className='freshness-state '+state;stateNode.textContent=label;stateNode.setAttribute('aria-label','Published policy feed currency: '+label);}else{reportMissingNode('freshness state','label');}\n"
         "        var detailTarget=(detailTextNode&&detailTextNode.isConnected) ? detailTextNode : detailNode;\n"
-        "        setText(detailTarget,detail);\n"
+        "        setText(detailTarget,detail,'freshness detail');\n"
         "      }\n"
         "      function plural(value,unit){return value+' '+unit+(value===1?'':'s');}\n"
         "      function exactAge(seconds){\n"
@@ -2409,14 +2696,16 @@ def render_policy_index(
         "        return {text:plural(minutes,'minute'),size:minutes>=100?'age-wide':'',full:full};\n"
         "      }\n"
         "      function setAgeDisplay(age){\n"
-        "        if(!uiActive||!ageNode||!ageNode.isConnected){return;}\n"
+        "        if(!uiActive){return;}\n"
+        "        if(!ageNode||!ageNode.isConnected){reportMissingNode('freshness age','metric');return;}\n"
         "        ageNode.textContent=age.text;\n"
         "        ageNode.className='freshness-metric'+(age.size?' '+age.size:'');\n"
         "        ageNode.setAttribute('title',age.full);\n"
         "        ageNode.setAttribute('aria-label',age.full);\n"
         "      }\n"
         "      function fallbackCopy(text){\n"
-        "        if(!uiActive||!document.body){return Promise.reject(new Error('copy unavailable'));}\n"
+        "        if(!uiActive){return Promise.reject(new Error('ui inactive'));}\n"
+        "        if(!document.body){reportMissingNode('copy fallback','body');return Promise.reject(new Error('copy unavailable'));}\n"
         "        var area=document.createElement('textarea');\n"
         "        area.value=text;area.setAttribute('readonly','');\n"
         "        area.style.position='fixed';area.style.left='-9999px';\n"
@@ -2430,7 +2719,8 @@ def render_policy_index(
         "        return fallbackCopy(text);\n"
         "      }\n"
         "      function markCopyButton(button,state,title){\n"
-        "        if(!uiActive||!button||!button.isConnected){return;}\n"
+        "        if(!uiActive){return;}\n"
+        "        if(!button||!button.isConnected){reportMissingNode('copy button','button');return;}\n"
         "        button.setAttribute('data-copy-state',state);\n"
         "        button.setAttribute('title',title);\n"
         "        safeSetTimeout(function(){if(button&&button.isConnected){button.removeAttribute('data-copy-state');button.setAttribute('title',button.getAttribute('data-default-title')||'Copy epoch millisecond timestamp');}},1600);\n"
@@ -2444,11 +2734,79 @@ def render_policy_index(
         "          copyText(epoch).then(function(){markCopyButton(button,'copied','Copied epoch millisecond timestamp '+epoch);}).catch(function(){markCopyButton(button,'failed','Could not copy epoch millisecond timestamp');});\n"
         "        });});\n"
         "      });\n"
+        "      function initDiagnosticFilters(){\n"
+        "        var root=document.querySelector('[data-diagnostic-filter-root]');\n"
+        "        if(!root||!root.isConnected){reportMissingNode('source diagnostics filter','root');return;}\n"
+        "        var feed=document.getElementById('source-diagnostics-feed');\n"
+        "        if(!feed||!feed.isConnected){reportMissingNode('source diagnostics filter','feed');return;}\n"
+        "        var controls=root.querySelectorAll('[data-diagnostic-filter]');\n"
+        "        var rows=root.querySelectorAll('.diag-row[data-diagnostic-severity]');\n"
+        "        if(!controls.length){reportMissingNode('source diagnostics filter','controls');return;}\n"
+        "        if(!rows.length){reportMissingNode('source diagnostics filter','rows');return;}\n"
+        "        var status=document.getElementById('source-diagnostics-filter-status');\n"
+        "        var empty=document.getElementById('source-diagnostics-empty');\n"
+        "        var moreBlocks=root.querySelectorAll('.diag-more');\n"
+        "        var labels={notice:'notice',warning:'warning',error:'error'};\n"
+        "        function rowWord(count){return count===1?'row':'rows';}\n"
+        "        function normalizedFilter(value){return labels[value] ? value : '';}\n"
+        "        function setFilterStatus(severity,shown){\n"
+        "          if(!status||!status.isConnected){reportMissingNode('source diagnostics filter','status');return;}\n"
+        "          if(!severity){status.textContent='Showing all '+rows.length+' source diagnostic '+rowWord(rows.length)+'.';return;}\n"
+        "          if(shown){status.textContent='Showing '+shown+' '+labels[severity]+' diagnostic '+rowWord(shown)+'.';return;}\n"
+        "          status.textContent='No '+labels[severity]+' diagnostic rows are currently reported.';\n"
+        "        }\n"
+        "        function setEmptyState(severity,shown){\n"
+        "          if(!empty||!empty.isConnected){reportMissingNode('source diagnostics filter','empty state');return;}\n"
+        "          if(severity&&shown===0){empty.hidden=false;empty.textContent='No '+labels[severity]+' diagnostic rows are currently reported.';return;}\n"
+        "          empty.hidden=true;\n"
+        "        }\n"
+        "        function updateOverflow(severity){\n"
+        "          Array.prototype.forEach.call(moreBlocks,function(block){\n"
+        "            if(!block||!block.isConnected){return;}\n"
+        "            var hasVisible=false;\n"
+        "            Array.prototype.forEach.call(block.querySelectorAll('.diag-row[data-diagnostic-severity]'),function(row){if(!row.hidden){hasVisible=true;}});\n"
+        "            if(severity){block.hidden=!hasVisible;if(hasVisible){block.open=true;}return;}\n"
+        "            block.hidden=false;block.open=false;\n"
+        "          });\n"
+        "        }\n"
+        "        function setPressedState(severity){\n"
+        "          Array.prototype.forEach.call(controls,function(control){\n"
+        "            if(!control||!control.isConnected){return;}\n"
+        "            var value=control.getAttribute('data-diagnostic-filter')||'';\n"
+        "            control.setAttribute('aria-pressed',severity ? String(value===severity) : String(value==='all'));\n"
+        "          });\n"
+        "        }\n"
+        "        function applyFilter(value){\n"
+        "          if(!uiActive||!root.isConnected||!feed.isConnected){return;}\n"
+        "          var severity=normalizedFilter(value);\n"
+        "          var shown=0;\n"
+        "          Array.prototype.forEach.call(rows,function(row){\n"
+        "            if(!row||!row.isConnected){return;}\n"
+        "            var match=!severity||row.getAttribute('data-diagnostic-severity')===severity;\n"
+        "            row.hidden=!match;\n"
+        "            row.classList.toggle('is-filtered-out',!match);\n"
+        "            if(match){shown+=1;}\n"
+        "          });\n"
+        "          updateOverflow(severity);\n"
+        "          setEmptyState(severity,shown);\n"
+        "          setFilterStatus(severity,shown);\n"
+        "          setPressedState(severity);\n"
+        "        }\n"
+        "        Array.prototype.forEach.call(controls,function(control){\n"
+        "          control.addEventListener('click',function(event){guard('source diagnostics filter',function(){\n"
+        "            if(event&&event.preventDefault){event.preventDefault();}\n"
+        "            if(!uiActive||!control.isConnected){return;}\n"
+        "            applyFilter(control.getAttribute('data-diagnostic-filter')||'all');\n"
+        "          });});\n"
+        "        });\n"
+        "        applyFilter('all');\n"
+        "      }\n"
+        "      guard('source diagnostics filter init',initDiagnosticFilters);\n"
         "      function initHeaderNav(){\n"
         "        var nav=document.querySelector('.header-nav');\n"
-        "        if(!nav){return;}\n"
+        "        if(!nav){reportMissingNode('header nav','nav');return;}\n"
         "        var items=nav.querySelectorAll('.nav-inner a');\n"
-        "        if(!items.length){return;}\n"
+        "        if(!items.length){reportMissingNode('header nav','items');return;}\n"
         "        var frame=0;\n"
         "        var label=nav.querySelector('.nav-hover-label');\n"
         "        function setItem(item,x,y){\n"
@@ -2477,14 +2835,15 @@ def render_policy_index(
         "          item.addEventListener('pointermove',function(event){guard('header nav pointer',function(){queue(item,event);});},{passive:true});\n"
         "          item.addEventListener('focus',function(){guard('header nav focus',function(){setItem(item,0,0);});});\n"
         "        });\n"
-        "        nav.addEventListener('pointerleave',function(){if(nav.isConnected){nav.style.setProperty('--enter-nav','0');}});\n"
-        "        nav.addEventListener('focusout',function(){safeSetTimeout(function(){if(uiActive&&nav.isConnected&&!nav.contains(document.activeElement)){nav.style.setProperty('--enter-nav','0');}},0);});\n"
+        "        nav.addEventListener('pointerleave',function(){guard('header nav leave',function(){if(nav.isConnected){nav.style.setProperty('--enter-nav','0');}else{reportMissingNode('header nav','nav');}});});\n"
+        "        nav.addEventListener('focusout',function(){guard('header nav focusout',function(){safeSetTimeout(function(){if(uiActive&&nav.isConnected&&!nav.contains(document.activeElement)){nav.style.setProperty('--enter-nav','0');}},0);});});\n"
         "      }\n"
         "      guard('header nav init',initHeaderNav);\n"
         "      function update(){\n"
         "        if(!uiActive){return;}\n"
         "        var data;\n"
-        "        try{data=JSON.parse(dataNode ? dataNode.textContent : '{}');}catch(error){data={};reportUiError('freshness data parse',error);}\n"
+        "        if(!dataNode||!dataNode.isConnected){reportMissingNode('freshness update','data');data={};}\n"
+        "        else{try{data=JSON.parse(dataNode.textContent||'{}');}catch(error){data={};reportUiError('freshness data parse',error);}}\n"
         "        var generated=Number(data.generated_at_epoch_s);\n"
         "        if(!Number.isFinite(generated)||generated<=0){setAgeDisplay(formatAge(NaN));setState('unknown','Unknown','Policy feed timestamp is unavailable or invalid.');return;}\n"
         "        var now=Math.floor(Date.now()/1000);\n"

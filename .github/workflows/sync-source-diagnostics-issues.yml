@@ -1,0 +1,65 @@
+name: Sync source diagnostics issues
+
+on:
+  workflow_dispatch:
+    inputs:
+      policy_url:
+        description: "Public policy JSON URL to inspect."
+        required: true
+        default: "https://avnsx.github.io/win11_release_guard/windows-release-policy.json"
+      dry_run:
+        description: "Report intended issue changes without creating, updating, or commenting."
+        required: true
+        type: boolean
+        default: false
+      create_limit:
+        description: "Maximum new issues to create in this run."
+        required: true
+        default: "10"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Compile
+        run: python -m compileall -q win11_release_guard tools
+
+      - name: Test source diagnostics issue sync
+        run: >
+          pytest -q
+          tests/test_source_diagnostics_issue_sync.py
+          tests/test_source_diagnostics_issue_metadata.py
+          tests/test_policy_generator.py
+
+      - name: Sync source diagnostics issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --policy-url "${{ inputs.policy_url }}"
+            --repository "${{ github.repository }}"
+            --create-limit "${{ inputs.create_limit }}"
+          )
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python tools/sync_source_diagnostics_issues.py "${args[@]}"

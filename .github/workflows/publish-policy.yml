@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/publish-policy.yml"
       - "tools/generate_policy.py"
+      - "tools/sync_source_diagnostics_issues.py"
       - "tools/check_project_identity.py"
       - "tools/check_version_consistency.py"
       - "tools/scan_for_secret_material.py"
@@ -21,16 +22,66 @@ env:
 
 permissions:
   contents: read
-  id-token: write
-  pages: write
 
 concurrency:
   group: github-pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  sync-source-diagnostics-issues:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Compile
+        run: python -m compileall -q win11_release_guard tools
+
+      - name: Test source diagnostics issue sync
+        run: >
+          pytest -q
+          tests/test_source_diagnostics_issue_sync.py
+          tests/test_source_diagnostics_issue_metadata.py
+          tests/test_policy_generator.py
+
+      - name: Generate unsigned policy preview
+        run: |
+          python tools/generate_policy.py \
+            --output-dir .tmp/source-diagnostics-policy
+
+      - name: Sync source diagnostics issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python tools/sync_source_diagnostics_issues.py \
+            --policy-file .tmp/source-diagnostics-policy/windows-release-policy.json \
+            --repository "${{ github.repository }}" \
+            --create-limit 10 \
+            --request-delay-seconds 1 \
+            --issue-status-output .tmp/source-diagnostics-issue-status/issue-status.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-diagnostics-issue-status
+          path: .tmp/source-diagnostics-issue-status/issue-status.json
+          if-no-files-found: error
+
+  build:
+    needs: sync-source-diagnostics-issues
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 
@@ -49,6 +100,11 @@ jobs:
       - name: Test
         run: pytest -q
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-diagnostics-issue-status
+          path: .tmp/source-diagnostics-issue-status
+
       - name: Generate signed policy
         env:
           WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64: ${{ secrets.WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 }}
@@ -58,12 +114,18 @@ jobs:
             echo "::error::WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64 is required for production policy publishing."
             exit 1
           fi
+          mkdir -p .tmp/source-diagnostics-issue-status
+          if [ ! -s ".tmp/source-diagnostics-issue-status/issue-status.json" ]; then
+            echo "::error::source diagnostics issue status artifact is missing."
+            exit 1
+          fi
           python tools/generate_policy.py \
             --output-dir site \
             --write-index \
             --write-robots \
             --write-sitemap \
             --write-manifest \
+            --source-diagnostic-issue-status-file .tmp/source-diagnostics-issue-status/issue-status.json \
             --signing-key-env WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64
           touch site/.nojekyll
 
@@ -116,10 +178,6 @@ jobs:
           pyproject.toml
           .github
 
-      - uses: actions/configure-pages@v6
-        with:
-          enablement: true
-
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
@@ -127,10 +185,17 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
       - id: deployment
         uses: actions/deploy-pages@v5
 

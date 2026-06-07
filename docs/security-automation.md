@@ -20,6 +20,7 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | --- | --- | --- |
 | `ci.yml` | push / pull request | Compile, audit actions, check identity, run tests, generate fixture policy, scan, export archive. |
 | `publish-policy.yml` | schedule / `workflow_dispatch` / selected pushes | Generate signed Pages feed and deploy static Pages artifact. |
+| `sync-source-diagnostics-issues.yml` | `workflow_dispatch` | Sync source-diagnostic notice/warning/error events to GitHub Issues using only the built-in Actions token. |
 | `release.yml` | tags / `workflow_dispatch` | Validate version/tag parity and publish clean source archive as GitHub Release asset. |
 | `pypi-publish.yml` | `workflow_dispatch` / published GitHub Release | Build wheel/sdist on manual runs; publish to PyPI through Trusted Publishing / GitHub OIDC only from an existing tag or published release. |
 | `codeql.yml` | schedule / push / PR | CodeQL scan. |
@@ -33,6 +34,7 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | --- | --- |
 | CI / checks | Read-only repository access. |
 | Pages publish | `contents: read`, `pages: write`, `id-token: write`. |
+| Source diagnostics issue sync | `contents: read`, `issues: write`; uses `GITHUB_TOKEN` / `${{ github.token }}` only. |
 | Tagged releases | `contents: write` only in `release.yml`. |
 | PyPI publish | `id-token: write` only in the `publish-to-pypi` job; no PyPI API token. |
 
@@ -67,6 +69,21 @@ No TestPyPI lane is currently implemented. If one is added later, use a separate
 
 `publish-policy.yml` blocks deployment when generated `source_diagnostics.events` contains `severity: error`. These are source-diagnostics `error` events; notice and warning events remain visible diagnostic output.
 
+`sync-source-diagnostics-issues.yml` and the `publish-policy.yml`
+`sync-source-diagnostics-issues` job use `issues: write` only for workflow-side
+GitHub Issues synchronization. The deployment job does not receive issue-write
+permission. The sync reads source diagnostics, deduplicates by the deterministic
+source diagnostic ID, stores the ID in the issue body as
+`<!-- wrg-source-diagnostic-id: ... -->`, and caps new issues per run. Notices,
+warnings, and errors are synced by default. Matching open issues are updated and
+commented instead of duplicated. Matching closed issues are reopened while the
+diagnostic is still present, and open managed issues are closed when their
+diagnostic ID disappears from the current policy.
+
+The dashboard renders issue links only from static generated
+`source_diagnostics.issue_status` metadata. Browser JavaScript must not query the
+GitHub Issues API, expose workflow logs, or embed tokens.
+
 README badges show latest workflow status only. The schedule is not the only control: workflow dispatch, source diagnostics, signature checks, public Pages checks, and live verification gates are the operational controls.
 
 ## Do / Do Not
@@ -74,6 +91,7 @@ README badges show latest workflow status only. The schedule is not the only con
 | Do | Do not |
 | --- | --- |
 | Keep workflow permissions minimal. | Add `contents: write` outside the tagged release workflow. |
+| Keep GitHub Issues sync in Actions with the built-in token. | Add issue creation calls, tokens, or GitHub API writes to client-side Pages JavaScript. |
 | Keep signed feed generation public-source only. | Add token-authenticated Microsoft API requirements to production generator. |
 | Keep PyPI publishing on Trusted Publishing / OIDC. | Add PyPI API tokens, Twine passwords, usernames, or credentialed repository URLs. |
 | Scan generated Pages output before upload. | Publish stale or unsigned artifacts silently. |
