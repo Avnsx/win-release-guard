@@ -42,4 +42,4 @@ python tools/generate_policy.py --release-health-html tests/fixtures/windows11-r
 
 ## Related Pages
 
-[[Home]] | [[Policy Feed and Trust Model|Policy-Feed-and-Trust-Model]] | [[GitHub Pages Dashboard|GitHub-Pages-Dashboard]]
+[Home](Home) | [Policy Feed and Trust Model](Policy-Feed-and-Trust-Model) | [GitHub Pages Dashboard](GitHub-Pages-Dashboard)

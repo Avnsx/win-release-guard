@@ -2,6 +2,8 @@
 
 Use this when changing policy source loading, signature verification, manifest checks, key rotation, or public API aliases.
 
+![Windows 11 Release Guard trust model showing signed policy feed verification before client trust](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-trust-model.png)
+
 ---
 
 ## Public Artifacts
@@ -82,4 +84,4 @@ pytest -q tests/test_signing.py tests/test_json_hardening.py tests/test_policy_s
 
 ## Related Pages
 
-[[Home]] | [[Source Diagnostics|Source-Diagnostics]] | [[Anti-Static Freshness|Anti-Static-Freshness]]
+[Home](Home) | [Source Diagnostics](Source-Diagnostics) | [Anti-Static Freshness](Anti-Static-Freshness)

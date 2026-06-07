@@ -2,6 +2,8 @@
 
 Use this when publishing a GitHub Release with a validated clean source archive.
 
+![Windows 11 Release Guard secure release pipeline from source repository to PyPI Trusted Publishing](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-secure-release-pipeline.png)
+
 ---
 
 ## Release Contract
@@ -64,4 +66,4 @@ python -m twine check dist/*
 
 ## Related Pages
 
-[[Home]] | [[Build, Test and Release|Build-Test-and-Release]] | [[Safe Exports and Clean Archives|Safe-Exports-and-Clean-Archives]]
+[Home](Home) | [Build, Test and Release](Build-Test-and-Release) | [Safe Exports and Clean Archives](Safe-Exports-and-Clean-Archives)

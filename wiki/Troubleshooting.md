@@ -77,4 +77,4 @@ pytest -q tests/test_remote_policy.py tests/test_policy_generator.py
 
 ## Related Pages
 
-[[Home]] | [[Source Diagnostics|Source-Diagnostics]] | [[Agent Chokepoints|Agent-Chokepoints]]
+[Home](Home) | [Source Diagnostics](Source-Diagnostics) | [Agent Chokepoints](Agent-Chokepoints)

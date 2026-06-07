@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/win11_release_guard?logo=pypi&label=PyPI)](https://pypi.org/project/win11_release_guard/)
 [![Python](https://img.shields.io/pypi/pyversions/win11_release_guard?logo=python&label=Python)](https://pypi.org/project/win11_release_guard/)
-[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)](https://pypi.org/project/win11_release_guard/)
+[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)](https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt)
 [![PyPI downloads](https://img.shields.io/pypi/dm/win11_release_guard?label=PyPI%20downloads)](https://pypi.org/project/win11_release_guard/)
 [![GitHub Release](https://img.shields.io/github/v/release/Avnsx/win11_release_guard?label=release)](https://github.com/Avnsx/win11_release_guard/releases)
 
@@ -15,6 +15,8 @@
 [![Dependency freshness](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml)
 
 Windows release policy guard for broad-fleet Windows 11 version checks.
+
+![Windows 11 Release Guard signed public policy feed overview](assets/images/windows-11-release-guard-social-preview.png)
 
 Windows 11 Release Guard tells administrators whether an existing Windows 11 device is on the current fleet release and quality baseline, using a signed JSON feed, build-first local evidence, a static GitHub Pages dashboard/API, and a PyPI package for sysadmin/RMM automation. The repository, distribution package, installed console command, and Python import package use the same `win11_release_guard` name.
 

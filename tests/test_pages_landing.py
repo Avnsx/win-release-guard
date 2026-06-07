@@ -44,6 +44,50 @@ def _freshness_data(index: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _assert_no_external_page_dependencies(index: str) -> None:
+    lower = index.lower()
+    assert "script src" not in lower
+    assert "<link" not in lower
+    assert "fonts.googleapis" not in lower
+    assert "fonts.gstatic" not in lower
+    assert "cdnjs" not in lower
+    assert "cdn.jsdelivr" not in lower
+    assert "unpkg.com" not in lower
+    assert "fontawesome" not in lower
+    assert "lucide" not in lower
+
+
+def _assert_glass_dashboard_ui_contract(index: str) -> None:
+    assert "main{position:relative;z-index:1;width:calc(100% - 80px);max-width:1580px" in index
+    assert "backdrop-filter:blur(28px)" in index
+    assert "body:before" in index
+    assert "body:after" in index
+    assert 'class="winmark"' in index
+    assert "winmark{width:132px;height:132px" in index
+    assert "kpi-card" in index
+    assert "icon-bubble" in index
+    assert 'class="ui-icon' in index
+    assert "<svg" in index
+    assert "freshness-ring" in index
+    assert "panel-action" in index
+    assert "diag-row-icon" in index
+    assert "container-type:inline-size" in index
+    assert "text-wrap:balance" in index
+    assert "@media(max-width:1400px)" in index
+    assert "@media(max-width:900px)" in index
+    assert "@media(max-width:640px)" in index
+    assert "@media(max-width:360px)" in index
+    _assert_no_external_page_dependencies(index)
+
+
+def _assert_diag_count_tile(index: str, severity: str, count: int, label: str) -> None:
+    assert (
+        f'<div class="diag-tile {severity}"><strong>{count}</strong><span>{label}</span>'
+        '<svg class="ui-icon diag-tile-icon"'
+        in index
+    )
+
+
 def test_excluded_release_summary_uses_curated_26h1_copy(tmp_path: Path) -> None:
     index = _render_landing(tmp_path)
 
@@ -122,7 +166,8 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert 'aria-label="Header navigation"' in index
     assert 'id="policy-summary"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/"' in index
-    assert "--item-size:38px" in index
+    _assert_glass_dashboard_ui_contract(index)
+    assert "--item-size:42px" in index
     assert "@media(max-width:900px)" in index
     assert ".nav-hover-label{display:none}" in index
     assert 'data-nav-label="Dashboard"' in index
@@ -159,23 +204,29 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Notices" in index
     assert "Warnings" in index
     assert "Errors" in index
-    assert '<div class="diag-tile notice"><strong>3</strong><span>Notices</span></div>' in index
+    _assert_diag_count_tile(index, "notice", 3, "Notices")
     assert index.count('<article class="diag-row notice">') == 3
+    assert 'id="source-diagnostics-feed"' in index
+    assert 'href="#source-health">View all</a>' in index
     assert ".diag-tile.notice{border-color:#bfdbfe" in index
-    assert ".diag-tile.notice strong{color:var(--blue)}" in index
+    assert ".diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}" in index
     assert ".severity-badge.notice{color:var(--blue-strong)" in index
     assert ".diag-tile.warning{border-color:#f6d493" in index
-    assert ".diag-tile.warning span{color:var(--warn);font-weight:600}" in index
+    assert ".diag-tile.warning strong,.diag-tile.warning .diag-tile-icon{color:var(--warn)}" in index
     assert ".diag-tile.error{border-color:#f6b7ad" in index
-    assert ".diag-tile.error span{color:var(--err);font-weight:600}" in index
+    assert ".diag-tile.error strong,.diag-tile.error .diag-tile-icon{color:var(--err)}" in index
     assert ".diag-row.warning{border-color:#f6d493" in index
     assert ".diag-row.error{border-color:#f6b7ad" in index
-    assert ".diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll" in index
+    assert ".diag-feed{height:340px;min-height:340px;max-height:340px" in index
     assert "scrollbar-gutter:stable" in index
-    assert "background:linear-gradient(180deg,#f6f7f9,#eef1f5)" in index
-    assert "scrollbar-color:#a8b0bc #eef1f5" in index
+    assert "background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68))" in index
+    assert "scrollbar-color:#8eb7df rgba(232,243,255,.68)" in index
     assert ".diag-feed::-webkit-scrollbar-thumb" in index
-    assert ".diag-events{display:grid;gap:10px;padding:2px 2px 24px}" in index
+    assert ".diag-events{gap:10px;padding:2px 4px 12px 2px}" in index
+    assert "diag-row-icon" in index
+    assert "source-chip src-diagnostics" in index
+    assert "source-chip src-atom-feed" in index
+    assert "source-chip src-release-policy" in index
     assert "Signature" in index
     assert "Signature metadata" in index
     assert "Signature status" in index
@@ -229,10 +280,10 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert '<section class="panel span-7 programmatic-api">' in index
     assert ".programmatic-api{grid-column:6/span 7;grid-row:3}" in index
     assert ".signature-panel{grid-column:1/span 5;grid-row:3}" in index
-    assert ".api-endpoint-row{grid-template-columns:1fr}" in index
+    assert ".api-endpoint-row{grid-template-columns:auto minmax(0,1fr)" in index
     assert ".signature-panel,.programmatic-api{grid-column:1/-1}" in index
     assert "Programmatic API" in index
-    assert "script src" not in index.lower()
+    _assert_no_external_page_dependencies(index)
     freshness = _freshness_data(index)
     assert freshness["generated_at_utc"] == "2026-05-31T14:11:50+00:00"
     assert freshness["generated_at_epoch_s"] == 1780236710
@@ -242,6 +293,36 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert freshness["warning_age_seconds"] == 14 * 24 * 60 * 60
     assert freshness["strict_stale_age_seconds"] == 45 * 24 * 60 * 60
     assert freshness["freshness_policy"]["client_recomputes_age"] is True
+
+
+def test_pages_index_renders_day_hour_freshness_visual_state(monkeypatch) -> None:
+    monkeypatch.setattr(policy_generator_module, "_utc_now", lambda: "2026-06-07T15:00:00+00:00")
+    policy = ReleasePolicy(generated_at_utc="2026-06-01T00:00:00+00:00")
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert (
+        'id="live-generated-age" class="freshness-metric age-wide" aria-live="polite" '
+        'title="Published feed age 6 days, 15 hours, 0 minutes" '
+        'aria-label="Published feed age 6 days, 15 hours, 0 minutes">6d 15h</div>'
+        in index
+    )
+    assert ".freshness-panel{container-type:inline-size}" in index
+    assert ".freshness-panel .freshness-layout{grid-template-columns:1fr;gap:clamp(24px,3vw,34px)}" in index
+    assert (
+        ".freshness-panel .freshness-hero{grid-template-columns:minmax(104px,120px) "
+        "minmax(0,1fr);gap:clamp(28px,3vw,40px);max-width:100%}"
+        in index
+    )
+    assert ".freshness-metric{white-space:normal;overflow-wrap:normal;word-break:normal;text-wrap:balance}" in index
+    assert ".freshness-callout{margin-top:clamp(14px,2vw,22px)}" in index
+    assert "@supports(margin-top:1cqw){.freshness-callout{margin-top:clamp(14px,3cqw,24px)}}" in index
+    assert ".freshness-panel .thresholds{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}" in index
+    assert ".freshness-panel .thresholds{grid-template-columns:1fr;gap:12px}" in index
+    assert ".freshness-age-copy{gap:8px;padding-inline-start:2px}" in index
+    assert "days+'d '+hours+'h" in index
+    _assert_no_external_page_dependencies(index)
 
 
 def test_pages_index_signature_trust_pulse_is_lightweight_and_can_render_red() -> None:
@@ -300,18 +381,17 @@ def test_pages_index_signature_boxes_hover_without_double_animating_api_rows() -
         in index
     )
     assert (
-        ".api-endpoint-row{display:grid;grid-template-columns:minmax(0,1fr) auto;"
+        ".api-endpoint-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;"
         "gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;"
         "background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;"
         "color:inherit;text-decoration:none}"
         in index
     )
-    assert ".api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}" in index
-    api_base_rule = index.split(".api-endpoint-row{", 1)[1].split("}", 1)[0]
-    api_hover_rule = index.split(".api-endpoint-row:hover{", 1)[1].split("}", 1)[0]
-    assert "transition:" not in api_base_rule
-    assert "transform:" not in api_hover_rule
-    assert "box-shadow:" not in api_hover_rule
+    assert "api-row-icon" in index
+    assert ".api-endpoint-row:hover{border-color:#aecded" in index
+    api_hover_rules = re.findall(r"\.api-endpoint-row:hover\{([^}]*)\}", index)
+    assert api_hover_rules
+    assert all("transform:" not in rule for rule in api_hover_rules)
     assert ".api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28)" in index
     assert ".signature-kv div:hover{transform:none!important}" in index
 
@@ -328,16 +408,18 @@ def test_pages_index_uses_balanced_ui_font_weights() -> None:
     assert "font-weight:620" in trust_rule
     assert "font-weight:7" not in trust_rule
 
-    assert ".title-line h1{font-size:34px;line-height:1.08;margin:0 0 6px;font-weight:760" in index
-    assert ".title-version-link{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:13px;font-weight:700" in index
-    assert ".eyebrow{display:block;margin-bottom:5px;color:#2563a7;font-size:12px;font-weight:720" in index
+    assert ".title-line h1{font-size:clamp(34px,4rem,64px);line-height:1.04;margin:0 0 10px;font-weight:760" in index
+    assert ".title-version-link{display:inline-flex;align-items:center;gap:8px;margin-left:auto" in index
+    assert "font-size:16px;font-weight:700" in index
+    assert ".eyebrow{display:inline-flex;align-items:center;gap:8px;margin-bottom:8px;color:#004de6;font-size:20px;font-weight:740" in index
     assert "h2{font-size:12px;font-weight:720;text-transform:uppercase" in index
     assert ".signature-head h2{margin:0;color:#475569;font-weight:720}" in index
     assert ".source-health h3{margin:0;color:var(--muted);font-size:11px;font-weight:720" in index
-    assert ".source-tile-head strong{font-weight:700}" in index
+    assert ".source-name strong{font-weight:700}" in index
 
     assert ".metric{font-size:31px;font-weight:680" in index
-    assert ".freshness-metric{font-size:26px;font-weight:680" in index
+    assert ".kpi-card .metric{font-size:54px;font-weight:720" in index
+    assert ".freshness-metric{font-size:46px;font-weight:720" in index
     assert ".kv dd{margin:0;font-weight:600;overflow-wrap:anywhere}" in index
     assert ".thresholds strong{display:block;font-size:17px;font-weight:640}" in index
     assert ".diag-tile strong{display:block;font-size:22px;font-weight:650" in index
@@ -438,8 +520,8 @@ def test_pages_index_source_diagnostics_render_structured_warning_event() -> Non
     assert "KB5089600" in index
     assert "Required baseline" in index
     assert "Atom feed reports a newer baseline build." in index
-    assert '<div class="diag-tile warning"><strong>1</strong><span>Warnings</span></div>' in index
-    assert '<div class="diag-tile notice"><strong>0</strong><span>Notices</span></div>' in index
+    _assert_diag_count_tile(index, "warning", 1, "Warnings")
+    _assert_diag_count_tile(index, "notice", 0, "Notices")
     assert '<span class="severity-badge warning">Warning</span>' in index
     assert "No source issues reported" not in index
 
@@ -470,9 +552,9 @@ def test_pages_index_source_diagnostics_render_warning_and_error_color_states() 
     index = render_policy_index(policy, policy_bytes=None, signature=None)
     HTMLParser().feed(index)
 
-    assert '<div class="diag-tile warning"><strong>1</strong><span>Warnings</span></div>' in index
-    assert '<div class="diag-tile error"><strong>1</strong><span>Errors</span></div>' in index
-    assert '<div class="diag-tile notice"><strong>0</strong><span>Notices</span></div>' in index
+    _assert_diag_count_tile(index, "warning", 1, "Warnings")
+    _assert_diag_count_tile(index, "error", 1, "Errors")
+    _assert_diag_count_tile(index, "notice", 0, "Notices")
     assert '<article class="diag-row warning">' in index
     assert '<article class="diag-row error">' in index
     assert '<span class="severity-badge warning">Warning</span>' in index
@@ -493,9 +575,9 @@ def test_pages_index_source_diagnostics_warning_error_counts_suppress_clear_plac
     HTMLParser().feed(index)
 
     assert "No source issues reported" not in index
-    assert '<div class="diag-tile notice"><strong>0</strong><span>Notices</span></div>' in index
-    assert '<div class="diag-tile warning"><strong>1</strong><span>Warnings</span></div>' in index
-    assert '<div class="diag-tile error"><strong>1</strong><span>Errors</span></div>' in index
+    _assert_diag_count_tile(index, "notice", 0, "Notices")
+    _assert_diag_count_tile(index, "warning", 1, "Warnings")
+    _assert_diag_count_tile(index, "error", 1, "Errors")
     assert index.count('<article class="diag-row warning">') == 1
     assert index.count('<article class="diag-row error">') == 1
     assert "2 warning diagnostic entries reported without structured row details." in index

@@ -51,4 +51,4 @@ pytest -q
 
 ## Related Pages
 
-[[Home]] | [[CLI and RMM Usage|CLI-and-RMM-Usage]] | [[Troubleshooting]]
+[Home](Home) | [CLI and RMM Usage](CLI-and-RMM-Usage) | [Troubleshooting](Troubleshooting)

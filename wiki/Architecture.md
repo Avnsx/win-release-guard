@@ -2,6 +2,8 @@
 
 Use this to understand the current codebase shape before changing runtime behavior, policy generation, signing, or Pages output.
 
+![Windows 11 Release Guard architecture flow from Microsoft public sources to fleet verdict](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-architecture-flow.png)
+
 ---
 
 ## Flow
@@ -46,4 +48,4 @@ python tools/check_project_identity.py
 
 ## Related Pages
 
-[[Home]] | [[Policy Feed and Trust Model|Policy-Feed-and-Trust-Model]] | [[Local Windows Detection|Local-Windows-Detection]]
+[Home](Home) | [Policy Feed and Trust Model](Policy-Feed-and-Trust-Model) | [Local Windows Detection](Local-Windows-Detection)

@@ -43,4 +43,4 @@ python -m win11_release_guard --check-public-pages
 
 ## Related Pages
 
-[[Home]] | [[GitHub Pages Dashboard|GitHub-Pages-Dashboard]] | [[Troubleshooting]]
+[Home](Home) | [GitHub Pages Dashboard](GitHub-Pages-Dashboard) | [Troubleshooting](Troubleshooting)

@@ -92,4 +92,4 @@ The repository `wiki/` folder is GitHub Wiki source/staging only. It does not au
 
 ## Related Pages
 
-[[Home]] | [[Tagged Release Lane|Tagged-Release-Lane]] | [[Safe Exports and Clean Archives|Safe-Exports-and-Clean-Archives]]
+[Home](Home) | [Tagged Release Lane](Tagged-Release-Lane) | [Safe Exports and Clean Archives](Safe-Exports-and-Clean-Archives)

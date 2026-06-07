@@ -671,7 +671,18 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert 'class="header-nav"' in index
     assert 'class="nav-hover-label"' in index
     assert "nav-binoculars" not in index
-    assert "--item-size:38px" in index
+    assert "main{position:relative;z-index:1;width:calc(100% - 80px);max-width:1580px" in index
+    assert "backdrop-filter:blur(28px)" in index
+    assert "body:before" in index
+    assert "body:after" in index
+    assert 'class="winmark"' in index
+    assert "kpi-card" in index
+    assert "icon-bubble" in index
+    assert 'class="ui-icon' in index
+    assert "freshness-ring" in index
+    assert "panel-action" in index
+    assert "diag-row-icon" in index
+    assert "--item-size:42px" in index
     assert ".nav-hover-label{display:none}" in index
     assert 'id="policy-summary"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/"' in index

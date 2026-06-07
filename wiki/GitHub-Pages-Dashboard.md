@@ -51,4 +51,4 @@ python -m win11_release_guard --check-public-pages
 
 ## Related Pages
 
-[[Home]] | [[Anti-Static Freshness|Anti-Static-Freshness]] | [[Source Diagnostics|Source-Diagnostics]]
+[Home](Home) | [Anti-Static Freshness](Anti-Static-Freshness) | [Source Diagnostics](Source-Diagnostics)

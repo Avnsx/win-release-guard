@@ -2,6 +2,8 @@
 
 Use this when documenting or changing installed-state detection. The evaluator must derive installed Windows state from build evidence before display labels.
 
+![Windows 11 Release Guard local detection model showing build evidence as authoritative and labels as diagnostic](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-local-detection-model.png)
+
 ---
 
 ## Signal Map
@@ -52,4 +54,4 @@ pytest -q tests/test_wua_probe.py tests/test_wua_diagnostics.py
 
 ## Related Pages
 
-[[Home]] | [[CLI and RMM Usage|CLI-and-RMM-Usage]] | [[Troubleshooting]]
+[Home](Home) | [CLI and RMM Usage](CLI-and-RMM-Usage) | [Troubleshooting](Troubleshooting)

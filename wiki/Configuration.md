@@ -60,4 +60,4 @@ pytest -q tests/test_cache.py tests/test_cli.py
 
 ## Related Pages
 
-[[Home]] | [[CLI and RMM Usage|CLI-and-RMM-Usage]] | [[Policy Feed and Trust Model|Policy-Feed-and-Trust-Model]]
+[Home](Home) | [CLI and RMM Usage](CLI-and-RMM-Usage) | [Policy Feed and Trust Model](Policy-Feed-and-Trust-Model)

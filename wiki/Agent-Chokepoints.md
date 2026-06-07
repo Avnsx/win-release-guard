@@ -87,4 +87,4 @@ python -m win11_release_guard --self-test
 
 ## Related Pages
 
-[[Home]] | [[Troubleshooting]] | [[Build, Test and Release|Build-Test-and-Release]]
+[Home](Home) | [Troubleshooting](Troubleshooting) | [Build, Test and Release](Build-Test-and-Release)

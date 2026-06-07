@@ -50,4 +50,4 @@ python tools/scan_for_secret_material.py site win11_release_guard tests tools do
 
 ## Related Pages
 
-[[Home]] | [[Tagged Release Lane|Tagged-Release-Lane]] | [[Agent Chokepoints|Agent-Chokepoints]]
+[Home](Home) | [Tagged Release Lane](Tagged-Release-Lane) | [Agent Chokepoints](Agent-Chokepoints)

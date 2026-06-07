@@ -1,20 +1,20 @@
 # Windows 11 Release Guard
 
-[[Home]]
+[[Home|Home]]
 
 **Start**
 
 - [[Quick Start|Quick-Start]]
-- [[FAQ]]
+- [[FAQ|FAQ]]
 
 **Usage**
 
 - [[CLI and RMM Usage|CLI-and-RMM-Usage]]
-- [[Configuration]]
+- [[Configuration|Configuration]]
 
 **Architecture**
 
-- [[Architecture]]
+- [[Architecture|Architecture]]
 - [[Local Windows Detection|Local-Windows-Detection]]
 
 **Policy & Trust**
@@ -39,7 +39,7 @@
 
 **Troubleshooting**
 
-- [[Troubleshooting]]
+- [[Troubleshooting|Troubleshooting]]
 
 **Agent Chokepoints**
 

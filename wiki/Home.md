@@ -4,6 +4,8 @@ Windows 11 Release Guard helps administrators decide whether an existing Windows
 
 README is the quick entry. This wiki is the deep dive. Code, tests, workflows, and `AGENTS.md` remain source of truth.
 
+![Windows 11 Release Guard GitHub Pages dashboard overview](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-hero-dashboard.png)
+
 ---
 
 ## Pick Your Path

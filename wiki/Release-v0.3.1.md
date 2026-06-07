@@ -109,4 +109,4 @@ python -m twine check dist/*
 
 ## Related Pages
 
-[[Home]] | [[Architecture]] | [[Policy Feed and Trust Model|Policy-Feed-and-Trust-Model]] | [[Anti-Static Freshness|Anti-Static-Freshness]] | [[Tagged Release Lane|Tagged-Release-Lane]] | [[Build, Test and Release|Build-Test-and-Release]]
+[Home](Home) | [Architecture](Architecture) | [Policy Feed and Trust Model](Policy-Feed-and-Trust-Model) | [Anti-Static Freshness](Anti-Static-Freshness) | [Tagged Release Lane](Tagged-Release-Lane) | [Build, Test and Release](Build-Test-and-Release)

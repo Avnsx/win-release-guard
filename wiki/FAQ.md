@@ -58,4 +58,4 @@ Static Pages output can become old without re-rendering. The page embeds generat
 
 ## Related Pages
 
-[[Home]] | [[Quick Start|Quick-Start]] | [[Troubleshooting]]
+[Home](Home) | [Quick Start](Quick-Start) | [Troubleshooting](Troubleshooting)

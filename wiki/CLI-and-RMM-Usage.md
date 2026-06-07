@@ -69,4 +69,4 @@ pytest -q tests/test_cli.py tests/test_output_encoding.py
 
 ## Related Pages
 
-[[Home]] | [[Configuration]] | [[Troubleshooting]]
+[Home](Home) | [Configuration](Configuration) | [Troubleshooting](Troubleshooting)
