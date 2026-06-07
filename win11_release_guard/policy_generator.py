@@ -63,6 +63,11 @@ CURATED_EXCLUDED_RELEASE_SUMMARIES = {
 _RELEASE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 SOURCE_DIAGNOSTIC_ID_PREFIX = "wrg-source-diagnostic-v1"
 SOURCE_DIAGNOSTIC_ID_HASH_LENGTH = 16
+_SOURCE_DIAGNOSTIC_KB_TAG_RE = re.compile(r"^KB\s*(\d+)$", re.IGNORECASE)
+_SOURCE_DIAGNOSTIC_TIMESTAMP_TAG_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -1581,6 +1586,92 @@ def _source_diagnostic_id_tag_values(tags: Any) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _source_diagnostic_id_field(value: Any) -> str | None:
+    text = _source_diagnostic_id_text(value)
+    return text or None
+
+
+def _source_diagnostic_id_kb(value: Any) -> str | None:
+    text = _source_diagnostic_id_text(value)
+    if not text:
+        return None
+    compact = re.sub(r"\s+", "", text).upper()
+    match = _SOURCE_DIAGNOSTIC_KB_TAG_RE.fullmatch(compact)
+    return f"KB{match.group(1)}" if match else compact
+
+
+def _source_diagnostic_id_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    text = _source_diagnostic_id_text(value).lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _source_diagnostic_id_url_host_path(value: Any) -> str | None:
+    text = _source_diagnostic_id_text(value)
+    if not text:
+        return None
+    parsed = urlparse(text)
+    if not parsed.netloc:
+        return None
+    path = re.sub(r"/+", "/", parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/")
+    return f"{parsed.netloc.lower()}{path}"
+
+
+def _source_diagnostic_id_tag_fields(tags: Any) -> dict[str, Any]:
+    candidates: dict[str, list[Any]] = {}
+
+    def add_candidate(key: str, value: Any) -> None:
+        candidates.setdefault(key, []).append(value)
+
+    for tag in _source_diagnostic_id_tag_values(tags):
+        if _SOURCE_DIAGNOSTIC_TIMESTAMP_TAG_RE.fullmatch(tag):
+            continue
+        lower = tag.lower()
+        for prefix, field_name in (
+            ("release ", "release"),
+            ("build ", "build"),
+            ("family ", "build_family"),
+        ):
+            if lower.startswith(prefix):
+                value = _source_diagnostic_id_field(tag[len(prefix) :])
+                if value is not None:
+                    add_candidate(field_name, value)
+                break
+        else:
+            kb_article = _source_diagnostic_id_kb(tag)
+            if kb_article and _SOURCE_DIAGNOSTIC_KB_TAG_RE.fullmatch(kb_article):
+                add_candidate("kb_article", kb_article)
+            elif lower == "required baseline":
+                add_candidate("affects_broad_target", True)
+                add_candidate("affects_required_baseline", True)
+            elif lower == "broad target":
+                add_candidate("affects_broad_target", True)
+            elif lower == "not broad target":
+                add_candidate("affects_broad_target", False)
+    return {
+        key: sorted(set(values), key=lambda value: json.dumps(value, sort_keys=True))[0]
+        for key, values in sorted(candidates.items())
+        if values
+    }
+
+
+def _source_diagnostic_has_id_value(value: Any) -> bool:
+    return value not in (None, "")
+
+
+def _source_diagnostic_id_payload_field(value: Any) -> dict[str, Any]:
+    return _source_diagnostic_id_component(_source_diagnostic_id_field(value) or "")
+
+
 def _source_diagnostic_id(
     *,
     severity: Any,
@@ -1588,13 +1679,66 @@ def _source_diagnostic_id(
     title: Any,
     message: Any,
     tags: Any,
+    kind: Any = None,
+    release: Any = None,
+    build_family: Any = None,
+    build: Any = None,
+    kb_article: Any = None,
+    affects_broad_target: Any = None,
+    affects_required_baseline: Any = None,
+    source_url: Any = None,
+    allow_message_fallback: bool = False,
 ) -> str:
+    tag_fields = _source_diagnostic_id_tag_fields(tags)
+    category = kind if _source_diagnostic_has_id_value(kind) else title
+    fields: dict[str, Any] = {
+        "category": _source_diagnostic_id_payload_field(category),
+        "source": _source_diagnostic_id_payload_field(source),
+    }
+    for key, value in (
+        ("release", release),
+        ("build_family", build_family),
+        ("build", build),
+        ("kb_article", kb_article),
+    ):
+        selected = value if _source_diagnostic_has_id_value(value) else tag_fields.get(key)
+        if key == "kb_article":
+            normalized = _source_diagnostic_id_kb(selected)
+        else:
+            normalized = _source_diagnostic_id_field(selected)
+        if normalized:
+            fields[key] = _source_diagnostic_id_payload_field(normalized)
+
+    for key, value in (
+        ("affects_broad_target", affects_broad_target),
+        ("affects_required_baseline", affects_required_baseline),
+    ):
+        selected = value if _source_diagnostic_has_id_value(value) else tag_fields.get(key)
+        normalized_bool = _source_diagnostic_id_bool(selected)
+        if normalized_bool is not None:
+            fields[key] = normalized_bool
+
+    normalized_source_url = _source_diagnostic_id_url_host_path(source_url)
+    if normalized_source_url:
+        fields["source_url"] = _source_diagnostic_id_payload_field(normalized_source_url)
+
+    if allow_message_fallback and not any(
+        key in fields
+        for key in (
+            "release",
+            "build_family",
+            "build",
+            "kb_article",
+            "affects_broad_target",
+            "affects_required_baseline",
+            "source_url",
+        )
+    ):
+        fields["message_fallback"] = _source_diagnostic_id_payload_field(message)
+
     payload = {
         "severity": _source_diagnostic_event_severity(severity),
-        "source": _source_diagnostic_id_component(source),
-        "title": _source_diagnostic_id_component(title),
-        "message": _source_diagnostic_id_component(message),
-        "tags": [_source_diagnostic_id_component(tag) for tag in _source_diagnostic_id_tag_values(tags)],
+        "fields": fields,
     }
     payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     digest = hashlib.sha256(payload_bytes).hexdigest()[:SOURCE_DIAGNOSTIC_ID_HASH_LENGTH]
@@ -1678,6 +1822,14 @@ def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
         title=title,
         message=message,
         tags=_source_diagnostic_event_tags(event),
+        kind=kind,
+        release=event.get("release"),
+        build_family=event.get("build_family"),
+        build=event.get("build"),
+        kb_article=event.get("kb_article"),
+        affects_broad_target=event.get("affects_broad_target"),
+        affects_required_baseline=event.get("affects_required_baseline"),
+        source_url=event.get("source_url") or event.get("url") or event.get("atom_feed_url"),
     )
 
 
@@ -1698,19 +1850,31 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
     message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
     source = _source_diagnostic_source_label(kind)
     tags = _source_diagnostic_event_tags(event)
-    return {
-        "id": _source_diagnostic_id(
+    diagnostic_id = _source_diagnostic_id_text(event.get("id"))
+    if not _is_source_diagnostic_id(diagnostic_id):
+        diagnostic_id = _source_diagnostic_id(
             severity=severity,
             source=source,
             title=title,
             message=message,
             tags=tags,
-        ),
+            kind=kind,
+            release=event.get("release"),
+            build_family=event.get("build_family"),
+            build=event.get("build"),
+            kb_article=event.get("kb_article"),
+            affects_broad_target=event.get("affects_broad_target"),
+            affects_required_baseline=event.get("affects_required_baseline"),
+            source_url=event.get("source_url") or event.get("url") or event.get("atom_feed_url"),
+        )
+    return {
+        "id": diagnostic_id,
         "severity": severity,
         "title": title,
         "source": source,
         "message": message,
         "tags": tags,
+        "issue_sync_event": True,
     }
 
 
@@ -1724,6 +1888,7 @@ def _source_diagnostic_row_from_text(severity: str, message: Any, *, source: str
             title=title,
             message=normalized_message,
             tags=(),
+            allow_message_fallback=True,
         ),
         "severity": normalized_severity,
         "title": title,
@@ -1835,6 +2000,8 @@ def _excluded_release_diagnostic_rows(policy: ReleasePolicy) -> tuple[dict[str, 
                     title=title,
                     message=message,
                     tags=tags,
+                    release=version,
+                    affects_broad_target=False,
                 ),
                 "severity": severity,
                 "title": title,
@@ -2002,6 +2169,9 @@ def _source_diagnostic_issue_link_html(issue: Mapping[str, Any] | None) -> str:
 
 
 def _source_diagnostic_row_id(row: Mapping[str, Any]) -> str:
+    existing_id = _source_diagnostic_text(row.get("id"))
+    if _is_source_diagnostic_id(existing_id):
+        return existing_id
     severity = _source_diagnostic_event_severity(row.get("severity"))
     title = _source_diagnostic_text(row.get("title"), fallback="Source diagnostic")
     source = _source_diagnostic_text(row.get("source"), fallback="Source")
@@ -2012,6 +2182,14 @@ def _source_diagnostic_row_id(row: Mapping[str, Any]) -> str:
         title=title,
         message=message,
         tags=row.get("tags"),
+        kind=row.get("kind"),
+        release=row.get("release"),
+        build_family=row.get("build_family"),
+        build=row.get("build"),
+        kb_article=row.get("kb_article"),
+        affects_broad_target=row.get("affects_broad_target"),
+        affects_required_baseline=row.get("affects_required_baseline"),
+        source_url=row.get("source_url") or row.get("url") or row.get("atom_feed_url"),
     )
 
 
@@ -2133,6 +2311,28 @@ def _clear_source_diagnostic_row() -> dict[str, Any]:
     }
 
 
+def _source_diagnostic_issue_sync_notice_html(source_diagnostics: Mapping[str, Any]) -> str:
+    raw = source_diagnostics.get("issue_sync")
+    if not isinstance(raw, Mapping):
+        return ""
+    status = _source_diagnostic_text(raw.get("status")).lower()
+    if status not in {"degraded", "unavailable"}:
+        return ""
+    label = "Issue sync unavailable" if status == "unavailable" else "Issue sync degraded"
+    message = _source_diagnostic_text(
+        raw.get("message"),
+        fallback="GitHub Issues status metadata is currently unavailable; diagnostic ticket links may be missing.",
+    )
+    reason = _source_diagnostic_text(raw.get("reason"))
+    reason_html = f"<span>{escape(reason)}</span>" if reason else ""
+    return (
+        f"<p class=\"diag-issue-sync-status {escape(status, quote=True)}\" "
+        f"data-issue-sync-status=\"{escape(status, quote=True)}\" role=\"status\">"
+        f"{_ui_icon_html('warning', class_name='ui-icon diag-issue-sync-icon')}"
+        f"<strong>{escape(label)}</strong><span>{escape(message)}</span>{reason_html}</p>"
+    )
+
+
 def _render_source_diagnostics_panel(
     policy: ReleasePolicy,
     counts: Mapping[str, int],
@@ -2140,9 +2340,14 @@ def _render_source_diagnostics_panel(
     generated_age_days: float,
     generated_at_utc: str,
 ) -> str:
-    issue_records = _source_diagnostic_issue_records(_source_diagnostics_for_policy(policy))
+    source_diagnostics = _source_diagnostics_for_policy(policy)
+    issue_records = _source_diagnostic_issue_records(source_diagnostics)
+    issue_sync_notice = _source_diagnostic_issue_sync_notice_html(source_diagnostics)
     def render_row(row: Mapping[str, Any]) -> str:
-        return _render_source_diagnostic_row(row, issue_metadata=issue_records.get(_source_diagnostic_row_id(row)))
+        issue_metadata = None
+        if row.get("issue_sync_event") is True:
+            issue_metadata = issue_records.get(_source_diagnostic_row_id(row))
+        return _render_source_diagnostic_row(row, issue_metadata=issue_metadata)
 
     base_rows = _source_diagnostic_rows(policy, generated_age_days=generated_age_days)
     excluded_rows = _excluded_release_diagnostic_rows(policy)
@@ -2193,7 +2398,8 @@ def _render_source_diagnostics_panel(
         "<button type=\"button\" class=\"panel-action diag-filter-reset\" "
         "data-diagnostic-filter=\"all\" aria-controls=\"source-diagnostics-feed\" aria-pressed=\"true\">View all</button>"
         "</div></div>"
-        f"{count_tiles}<p id=\"source-diagnostics-filter-status\" class=\"diag-filter-status\" aria-live=\"polite\">"
+        f"{count_tiles}{issue_sync_notice}"
+        "<p id=\"source-diagnostics-filter-status\" class=\"diag-filter-status\" aria-live=\"polite\">"
         f"Showing all {total_rows} source diagnostic rows.</p>"
         "<div id=\"source-diagnostics-feed\" class=\"diag-feed\" role=\"region\" aria-label=\"Source diagnostic event feed\">"
         "<div id=\"source-diagnostics-empty\" class=\"diag-filter-empty\" hidden>"
@@ -2495,7 +2701,7 @@ def render_policy_index(
         "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.freshness-head h2{margin:0;color:#0f1f3d}.freshness-state{display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);padding:6px 12px;font-size:13px;font-weight:650;line-height:1;color:var(--unknown);background:var(--unknown-soft);white-space:nowrap}.freshness-state.current{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.freshness-state.refresh-due{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.freshness-state.stale{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.freshness-state.unknown{color:var(--unknown);background:var(--unknown-soft);border-color:var(--line)}.freshness-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(176px,190px);gap:14px;align-items:center}.freshness-primary{display:grid;gap:16px}.freshness-hero{display:flex;align-items:center;gap:16px}.freshness-ring{display:inline-grid;place-items:center;width:120px;height:120px;flex:0 0 auto;border:3px solid var(--ok);border-radius:999px;background:radial-gradient(circle,#f8fff9 0,#e9f8ec 72%,#def4e4 100%);color:var(--ok);box-shadow:0 18px 34px rgba(16,124,16,.18),0 0 0 14px rgba(16,124,16,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring.refresh-due{border-color:var(--warn);color:var(--warn);background:linear-gradient(180deg,var(--warn-soft),#fffaf0);box-shadow:0 18px 34px rgba(180,83,9,.14),0 0 0 14px rgba(180,83,9,.08)}.freshness-ring.stale{border-color:var(--err);color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);box-shadow:0 18px 34px rgba(180,35,24,.14),0 0 0 14px rgba(180,35,24,.08)}.freshness-ring.unknown{border-color:#b8c5d6;color:var(--unknown);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff);box-shadow:0 18px 34px rgba(100,116,139,.12),0 0 0 14px rgba(100,116,139,.06)}.freshness-ring-icon{width:64px;height:64px}.freshness-metric{font-size:46px;font-weight:720;line-height:1;color:#071632;letter-spacing:0;white-space:nowrap}.freshness-detail{color:#334155;font-size:14px}.freshness-callout{display:flex;align-items:center;gap:10px;margin:0;border:1px solid #cfe5d4;border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(247,255,249,.84));padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86)}.freshness-callout.refresh-due{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.freshness-callout.stale{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.freshness-callout.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.freshness-callout-icon{width:22px;height:22px;flex:0 0 auto;color:var(--ok)}.freshness-callout.refresh-due .freshness-callout-icon{color:var(--warn)}.freshness-callout.stale .freshness-callout-icon{color:var(--err)}.freshness-callout.unknown .freshness-callout-icon{color:var(--unknown)}.thresholds{display:grid;grid-template-columns:1fr;gap:10px}.threshold-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#f8fbff,#f2f7ff);padding:11px}.threshold-icon{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #c9e3ff;border-radius:10px;background:#fff;color:var(--blue-strong)}.threshold-icon svg{width:20px;height:20px}.thresholds strong{display:block;font-size:17px;font-weight:640}.thresholds span{display:block;color:var(--muted);font-size:12px}.freshness-meta-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);padding-top:16px}.freshness-meta-item{display:flex;align-items:center;justify-content:center;gap:10px;color:#24344f;font-size:15px;line-height:1.2;min-width:0;white-space:nowrap}.freshness-meta-item+.freshness-meta-item{border-left:1px solid var(--line)}.freshness-meta-icon{width:25px;height:25px;flex:0 0 auto;color:#005bd3}.freshness-metadata{border:0;padding-top:0}.freshness-metadata summary{cursor:pointer;color:#64748b;font-size:12px;font-weight:650;list-style:none}.freshness-metadata summary::-webkit-details-marker{display:none}.freshness-metadata summary:before{content:'+';display:inline-grid;place-items:center;width:16px;height:16px;margin-right:6px;border:1px solid var(--line);border-radius:999px;color:#075985;background:#fff}.freshness-metadata[open] summary:before{content:'-'}.freshness-metadata dl{margin:9px 0 0}.freshness-metadata dt{font-size:12px}.freshness-metadata dd{font-size:13px}\n"
         "    ul.clean{list-style:none;margin:0;padding:0;display:grid;gap:10px}ul.clean li{display:grid;gap:3px}ul.clean span{color:var(--muted);font-size:13px}a{color:#075985;text-decoration:none;overflow-wrap:anywhere;word-break:break-word}a:hover{text-decoration:underline}a:focus-visible,summary:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px;border-radius:6px}.version-link{display:inline-flex;align-items:center;gap:6px;color:#0067c0;font-weight:600}.version-link:after{content:'\\2197';font-family:Segoe UI,Arial,sans-serif;font-size:12px}.hash{display:inline-block;max-width:100%}\n"
         "    .trust-indicator{--trust-ring:rgba(16,124,16,.18);display:inline-flex;align-items:center;gap:8px;width:max-content;overflow:hidden;border:1px solid #a9ddb7;border-radius:999px;background:linear-gradient(180deg,var(--ok-soft),#f7fff8);color:var(--ok);padding:5px 10px;font-size:12px;font-weight:620;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.82)}.trust-indicator:before{content:'';width:9px;height:9px;border-radius:999px;background:currentColor;box-shadow:0 0 0 4px var(--trust-ring);transform-origin:center;animation:trustPulse 2.2s cubic-bezier(.4,0,.2,1) infinite;will-change:transform}@keyframes trustPulse{0%,100%{transform:scale(1)}45%{transform:scale(1.48)}72%{transform:scale(1.12)}}.trust-indicator.warning{color:var(--warn);background:linear-gradient(180deg,var(--warn-soft),#fffaf0);border-color:#f6d493;--trust-ring:rgba(180,83,9,.2)}.trust-indicator.error{color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);border-color:#f6b7ad;--trust-ring:rgba(180,35,24,.2)}.signature-panel{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:14px;padding:18px;background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(247,251,255,.94));border-color:#c9d9ec}.signature-panel:before{content:'';position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,var(--ok),rgba(0,120,212,.28));opacity:.5}.signature-panel.warning{border-color:#f6d493;background:linear-gradient(180deg,#fffaf1,#fffdf7)}.signature-panel.warning:before{background:linear-gradient(90deg,var(--warn),rgba(180,83,9,.22))}.signature-panel.error{border-color:#f6b7ad;background:linear-gradient(180deg,#fff7f5,#fffdfc)}.signature-panel.error:before{background:linear-gradient(90deg,var(--err),rgba(180,35,24,.22))}.signature-panel>*{position:relative}.signature-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.signature-head h2,.programmatic-api h2{display:flex;align-items:center;gap:7px}.signature-head h2{margin:0;color:#475569;font-weight:720}.signature-status-card{display:grid;gap:4px;border:1px solid #a9ddb7;border-radius:10px;background:linear-gradient(135deg,#f0fbf3,#fbfffc);padding:13px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}.signature-status-card.warning{border-color:#f6d493;background:linear-gradient(135deg,var(--warn-soft),#fffaf0)}.signature-status-card.error{border-color:#f6b7ad;background:linear-gradient(135deg,var(--err-soft),#fff8f6)}.signature-status-card span{color:var(--muted);font-size:12px}.signature-status-card strong{color:#0f172a;font-size:16px;font-weight:650;line-height:1.25}.signature-status-card.error strong{color:var(--err)}.signature-kv{display:grid;gap:9px;margin:0}.signature-kv div{display:grid;grid-template-columns:minmax(104px,30%) minmax(0,1fr);gap:12px;align-items:center;border:1px solid #d5e2f0;border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f5f8fc);padding:10px 12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.7);transition:transform .16s ease,border-color .16s ease,background-color .16s ease}.signature-kv div:hover{border-color:#b8c9dd;background:#fff;box-shadow:0 7px 16px rgba(31,79,143,.07);transform:translateY(-1px)}.signature-kv dt{color:var(--muted);font-size:12px}.signature-kv dd{margin:0;color:#172033;font-weight:600;line-height:1.25;overflow-wrap:anywhere}.signature-kv .mono{font-size:13px;font-weight:600}.source-health{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px}.source-health h3{margin:0;color:var(--muted);font-size:11px;font-weight:720;text-transform:uppercase;letter-spacing:0}.source-health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.source-tile{border:1px solid var(--line);border-radius:8px;padding:10px;min-width:0;background:var(--soft)}.source-tile.ok{border-color:#b9e6c4;background:linear-gradient(180deg,var(--ok-soft),#f8fff9)}.source-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.source-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.source-tile.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.source-tile-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}.source-name{display:inline-flex;align-items:center;gap:7px;min-width:0}.source-name strong{font-weight:700}.source-icon{width:17px;height:17px;color:var(--blue-strong)}.source-status{border:1px solid var(--line);border-radius:999px;background:#fff;color:#475569;padding:2px 7px;font-size:11px;font-weight:600}.source-status.ok{color:var(--ok);border-color:#b9e6c4;background:#fff}.source-status.warning{color:var(--warn);border-color:#f6d493;background:#fff}.source-status.error{color:var(--err);border-color:#f6b7ad;background:#fff}.source-status.unknown{color:var(--unknown);background:#fff}.source-tile a{display:block;margin:8px 0 10px;font-size:13px}.source-tile>span{display:block;margin-top:4px;color:var(--muted);font-size:13px}.mini-kv{display:grid;grid-template-columns:80px minmax(0,1fr);gap:5px 10px;margin:0;font-size:12px}.mini-kv dt{color:var(--muted)}.mini-kv dd{margin:0;font-weight:600;overflow-wrap:anywhere}\n"
-        "    .source-diagnostics{display:flex;flex-direction:column;gap:10px;min-height:0;align-self:start}.diag-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:0 0 auto}.diag-tile{appearance:none;width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f2f7ff);padding:8px 10px;color:inherit;font:inherit;text-align:left;cursor:pointer}.diag-tile:hover{border-color:#9cccf6;background:#fff}.diag-tile:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.diag-tile[aria-pressed=\"true\"]{box-shadow:inset 0 0 0 2px rgba(0,120,212,.18)}.diag-tile strong{display:block;font-size:22px;font-weight:650;line-height:1}.diag-tile span{color:var(--muted);font-size:12px}.diag-tile-icon{width:19px;height:19px;justify-self:end}.diag-tile.notice{border-color:#bfdbfe;background:linear-gradient(180deg,var(--blue-soft),#f8fbff)}.diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}.diag-tile.notice span{color:var(--blue-strong);font-weight:600}.diag-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.diag-tile.warning strong,.diag-tile.warning .diag-tile-icon{color:var(--warn)}.diag-tile.warning span{color:var(--warn);font-weight:600}.diag-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.diag-tile.error strong,.diag-tile.error .diag-tile-icon{color:var(--err)}.diag-tile.error span{color:var(--err);font-weight:600}.diag-filter-status{margin:-2px 0 0;color:var(--muted);font-size:12px;line-height:1.3}.diag-filter-empty{border:1px dashed var(--line);border-radius:12px;background:#fff;padding:14px;color:#475569;font-size:13px}.diag-filter-empty[hidden],.diag-row[hidden],.diag-more[hidden]{display:none!important}.diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #d8dee8;border-radius:8px;background:linear-gradient(180deg,#f6f7f9,#eef1f5);padding:14px 11px 24px 14px;box-shadow:inset 0 1px 2px rgba(15,23,42,.06);scrollbar-width:thin;scrollbar-color:#a8b0bc #eef1f5}.diag-feed::-webkit-scrollbar{width:10px}.diag-feed::-webkit-scrollbar-track{background:#eef1f5;border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#a8b0bc;border-radius:999px;border:2px solid #eef1f5}.diag-events{display:grid;gap:10px;padding:2px 2px 24px}.diag-events-empty .diag-row{background:linear-gradient(90deg,#ffffff,#f8fafc)}.diag-row{display:grid;grid-template-columns:4px 34px minmax(0,1fr);gap:8px;align-items:start;border:1px solid var(--line);border-radius:8px;background:#fbfdff;padding:8px}.diag-row.warning{border-color:#f6d493;background:linear-gradient(90deg,#fffaf0,#ffffff)}.diag-row.error{border-color:#f6b7ad;background:linear-gradient(90deg,#fff8f6,#ffffff)}.diag-row p{margin:3px 0 0;color:#475569;font-size:13px;line-height:1.35}.diag-stripe{display:block;align-self:stretch;border-radius:999px;background:var(--blue)}.diag-row-icon{width:20px;height:20px;margin-top:2px;justify-self:center;color:var(--blue-strong)}.diag-row-icon.warning{color:var(--warn)}.diag-row-icon.error{color:var(--err)}.diag-row.warning .diag-stripe{background:var(--warn)}.diag-row.error .diag-stripe{background:var(--err)}.diag-row-head{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.diag-row-head strong{font-size:13px;font-weight:640}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600;background:#fff;color:#475569}.severity-badge.notice{color:var(--blue-strong);background:var(--blue-soft);border-color:#bfdbfe}.severity-badge.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.severity-badge.error{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.source-chip{font-weight:600}.diag-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.diag-tags:empty{display:none}.diag-more{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:8px}.diag-more summary{cursor:pointer;color:#075985;font-size:13px;font-weight:600}.diag-more .diag-events{margin-top:8px}\n"
+        "    .source-diagnostics{display:flex;flex-direction:column;gap:10px;min-height:0;align-self:start}.diag-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:0 0 auto}.diag-tile{appearance:none;width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:8px;min-height:48px;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#fbfdff,#f2f7ff);padding:8px 10px;color:inherit;font:inherit;text-align:left;cursor:pointer}.diag-tile:hover{border-color:#9cccf6;background:#fff}.diag-tile:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.diag-tile[aria-pressed=\"true\"]{box-shadow:inset 0 0 0 2px rgba(0,120,212,.18)}.diag-tile strong{display:block;font-size:22px;font-weight:650;line-height:1}.diag-tile span{color:var(--muted);font-size:12px}.diag-tile-icon{width:19px;height:19px;justify-self:end}.diag-tile.notice{border-color:#bfdbfe;background:linear-gradient(180deg,var(--blue-soft),#f8fbff)}.diag-tile.notice strong,.diag-tile.notice .diag-tile-icon{color:var(--blue)}.diag-tile.notice span{color:var(--blue-strong);font-weight:600}.diag-tile.warning{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.diag-tile.warning strong,.diag-tile.warning .diag-tile-icon{color:var(--warn)}.diag-tile.warning span{color:var(--warn);font-weight:600}.diag-tile.error{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.diag-tile.error strong,.diag-tile.error .diag-tile-icon{color:var(--err)}.diag-tile.error span{color:var(--err);font-weight:600}.diag-filter-status{margin:-2px 0 0;color:var(--muted);font-size:12px;line-height:1.3}.diag-issue-sync-status{display:flex;align-items:flex-start;gap:7px;margin:0;border:1px solid #f6d493;border-radius:10px;background:linear-gradient(180deg,var(--warn-soft),#fffaf0);padding:8px 10px;color:var(--warn);font-size:12px;line-height:1.3}.diag-issue-sync-status strong{flex:0 0 auto}.diag-issue-sync-status span{color:#7c4a03}.diag-issue-sync-icon{flex:0 0 auto;width:16px;height:16px}.diag-filter-empty{border:1px dashed var(--line);border-radius:12px;background:#fff;padding:14px;color:#475569;font-size:13px}.diag-filter-empty[hidden],.diag-row[hidden],.diag-more[hidden]{display:none!important}.diag-feed{margin-top:2px;height:340px;min-height:340px;max-height:340px;overflow-y:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #d8dee8;border-radius:8px;background:linear-gradient(180deg,#f6f7f9,#eef1f5);padding:14px 11px 24px 14px;box-shadow:inset 0 1px 2px rgba(15,23,42,.06);scrollbar-width:thin;scrollbar-color:#a8b0bc #eef1f5}.diag-feed::-webkit-scrollbar{width:10px}.diag-feed::-webkit-scrollbar-track{background:#eef1f5;border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#a8b0bc;border-radius:999px;border:2px solid #eef1f5}.diag-events{display:grid;gap:10px;padding:2px 2px 24px}.diag-events-empty .diag-row{background:linear-gradient(90deg,#ffffff,#f8fafc)}.diag-row{display:grid;grid-template-columns:4px 34px minmax(0,1fr);gap:8px;align-items:start;border:1px solid var(--line);border-radius:8px;background:#fbfdff;padding:8px}.diag-row.warning{border-color:#f6d493;background:linear-gradient(90deg,#fffaf0,#ffffff)}.diag-row.error{border-color:#f6b7ad;background:linear-gradient(90deg,#fff8f6,#ffffff)}.diag-row p{margin:3px 0 0;color:#475569;font-size:13px;line-height:1.35}.diag-stripe{display:block;align-self:stretch;border-radius:999px;background:var(--blue)}.diag-row-icon{width:20px;height:20px;margin-top:2px;justify-self:center;color:var(--blue-strong)}.diag-row-icon.warning{color:var(--warn)}.diag-row-icon.error{color:var(--err)}.diag-row.warning .diag-stripe{background:var(--warn)}.diag-row.error .diag-stripe{background:var(--err)}.diag-row-head{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.diag-row-head strong{font-size:13px;font-weight:640}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600;background:#fff;color:#475569}.severity-badge.notice{color:var(--blue-strong);background:var(--blue-soft);border-color:#bfdbfe}.severity-badge.warning{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.severity-badge.error{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.source-chip{font-weight:600}.diag-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.diag-tags:empty{display:none}.diag-more{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:8px}.diag-more summary{cursor:pointer;color:#075985;font-size:13px;font-weight:600}.diag-more .diag-events{margin-top:8px}\n"
         "    .diag-row{position:relative}.diag-ticket-link{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:5px;max-width:calc(100% - 20px);border:1px solid rgba(197,216,236,.95);border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.12),inset 0 1px 0 rgba(255,255,255,.9);padding:4px 8px;color:#075985;font-size:11px;font-weight:700;line-height:1;text-decoration:none;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}.diag-ticket-link:hover{text-decoration:none}.diag-row:hover .diag-ticket-link,.diag-row:focus-within .diag-ticket-link{opacity:1;pointer-events:auto;transform:translateY(0)}.diag-ticket-link-icon{width:12px;height:12px}.diag-ticket-link .github-icon{width:12px;height:12px}\n"
         "    .programmatic-api{display:flex;flex-direction:column;justify-content:flex-start}.api-endpoints{display:grid;gap:9px}.api-endpoint-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;color:inherit;text-decoration:none}.api-row-icon{width:18px;height:18px;color:var(--blue-strong)}.api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}.api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px}.api-endpoint-row strong{display:block;color:#172033;font-size:13px;font-weight:640;line-height:1.25}.api-endpoint-row em{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-style:italic;font-weight:500;line-height:1.35}.api-endpoint-row code{font-family:Consolas,Menlo,monospace;font-size:12px;color:var(--code);white-space:normal;text-align:right;overflow-wrap:anywhere}.api-note{margin-bottom:12px}.warnings{margin:0;padding-left:18px;color:var(--warn)}footer{position:relative;display:grid;gap:8px;justify-items:center;margin-top:34px;padding:20px 12px 4px;color:var(--muted);font-size:12px;line-height:1.45;text-align:center;background:linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.42));border-radius:14px 14px 0 0}footer:before{content:'';width:min(640px,100%);height:1px;margin-bottom:8px;background:linear-gradient(90deg,rgba(194,213,235,0),rgba(148,163,184,.55),rgba(194,213,235,0));box-shadow:0 -12px 28px rgba(31,79,143,.08)}.footer-note{max-width:900px;margin:0}.footer-disclaimer,.footer-owner{color:#64748b}.footer-source{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 6px;margin-top:2px}.footer-github{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.82);padding:2px 8px;color:#075985;font-weight:600;white-space:nowrap;box-shadow:0 3px 10px rgba(31,79,143,.06)}.footer-license-basic{color:#075985;font-weight:600;text-decoration:none}.footer-license-basic:hover,.footer-license-basic:focus-visible{text-decoration:underline}.github-icon{width:13px;height:13px;display:block;flex:0 0 auto}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}.signature-kv div:hover{transform:none!important}}\n"
         "    @media(max-width:1400px){main{margin:28px auto;padding:28px;border-radius:28px}.brand{gap:24px}.winmark{width:104px;height:104px;gap:7px}.title-line h1{font-size:48px}.subtitle{font-size:19px}.eyebrow{font-size:16px}.title-version-link{padding:11px 16px;font-size:14px}.kpi-card .metric{font-size:40px}.freshness-layout{grid-template-columns:1fr}.freshness-ring{width:104px;height:104px}.freshness-ring-icon{width:56px;height:56px}.freshness-metric{font-size:40px}.thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
@@ -2617,7 +2823,7 @@ def render_policy_index(
         "            root.setAttribute('data-ui-error-count',String(count+1));\n"
         "          }\n"
         "        }catch(_markerError){}\n"
-        "        try{if(window.console&&console.warn){console.warn('Windows 11 Release Guard UI '+scope+' failed',error);}}catch(_consoleError){}\n"
+        "        try{if(window.console&&console.warn){console.warn('Windows 11 Release Guard UI '+label+' failed');}}catch(_consoleError){}\n"
         "      }\n"
         "      function reportMissingNode(scope,name){reportUiError(scope+' missing '+name,new Error('missing '+name));}\n"
         "      function guard(scope,fn){try{return fn();}catch(error){reportUiError(scope,error);return undefined;}}\n"

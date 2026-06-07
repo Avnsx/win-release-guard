@@ -22,7 +22,7 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 
 * Program/package version is `0.3.1` in `pyproject.toml`; runtime user-agent, generator identity, and WUA client application ID derive from the shared version helper.
 * `ReleasePolicyEntry` rendering keeps `latest_observed_build` separate from `required_baseline_build`, so preview/current-table observations do not become mandatory B-release compliance floors.
-* The static Pages dashboard now exposes program version, release link, public endpoint links, source tiles, Source Diagnostics rows, feed currency, target build details, and signature/hash state.
+* The static Pages dashboard now exposes program version, release link, public endpoint links, source tiles, Source Diagnostics severity filters, feed currency, target build details, optional static issue links, and signature/hash state.
 * `render_policy_manifest()` carries manifest/API metadata, freshness epochs, source diagnostics, hashes, published URLs, and broad-target build fields used by public checks.
 * `publish-policy.yml` path filters include `pyproject.toml`, version/identity tools, secret scanning, generator inputs, and `win11_release_guard/**` because generated Pages output includes program metadata and runtime policy artifacts.
 
@@ -41,7 +41,7 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 * The live Panther JSON harness treats missing readable Panther/setup sources as a normal clean-machine pass condition and reports `no_panther_source_present` instead of requiring an affected machine.
 * Panther/setup logs remain administrator troubleshooting evidence only; they do not decide compliance or override signed public policy.
 * Ed25519 verification and key-rotation windows remain enforced in `win11_release_guard/signing.py`; retired or retiring keys need bounded `verify_not_after_utc`.
-* Source Diagnostics validation is structured across generator, schema, dashboard, CLI checks, and the publish workflow; `severity: error` blocks Pages publishing.
+* Source Diagnostics validation is structured across generator, schema, dashboard, CLI checks, GitHub Actions issue sync, and the publish workflow; `severity: error` blocks Pages publishing while issue state remains diagnostic.
 * Panther/setup collection uses bounded, encoding-aware tail reads across current, UnattendGC, NewOS, `$Windows.~BT`, and rollback locations, with per-path read-error isolation and a deliberately generous global collection cap.
 * Panther privacy diagnostics report category, finding type, marker, path, line number, line length, safe hint, count, truncation, and notice metadata only; matched password/token/key/secret values are not copied into privacy findings.
 

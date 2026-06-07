@@ -61,5 +61,14 @@ jobs:
           )
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             args+=(--dry-run)
+            args+=(--dry-run-report-output ".tmp/source-diagnostics-issue-sync-dry-run.md")
+            args+=(--dry-run-report-format markdown)
           fi
           python tools/sync_source_diagnostics_issues.py "${args[@]}"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.dry_run }}
+        with:
+          name: source-diagnostics-issue-sync-dry-run
+          path: .tmp/source-diagnostics-issue-sync-dry-run.md
+          if-no-files-found: error

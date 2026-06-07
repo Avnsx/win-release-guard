@@ -4,7 +4,7 @@ from html.parser import HTMLParser
 
 from win11_release_guard.models import ReleasePolicy
 import win11_release_guard.policy_generator as policy_generator_module
-from win11_release_guard.policy_generator import _source_diagnostic_id, render_policy_index
+from win11_release_guard.policy_generator import render_policy_index
 
 
 def _assert_no_external_or_client_auth(index: str) -> None:
@@ -37,20 +37,7 @@ def _diagnostic_event() -> dict[str, object]:
 
 
 def _diagnostic_id() -> str:
-    return _source_diagnostic_id(
-        severity="warning",
-        source="Atom feed",
-        title="Atom Newer Than Release History",
-        message="Atom feed reports a newer baseline build.",
-        tags=(
-            "Release 25H2",
-            "Build 26200.8461",
-            "KB5089600",
-            "Family 26200",
-            "Required baseline",
-            "2026-06-09T18:00:00Z",
-        ),
-    )
+    return policy_generator_module._source_diagnostic_id_for_event(_diagnostic_event())
 
 
 def _policy_with_issue_status(issue_status: object | None = None) -> ReleasePolicy:

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import site
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +90,45 @@ def _policy(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {"source_diagnostics": {"events": events}}
 
 
+def _marker(diagnostic_id: str) -> str:
+    return f"<!-- {sync_tool.DIAGNOSTIC_ID_COMMENT_PREFIX}: {diagnostic_id} -->"
+
+
+def _managed_issue(diagnostic: sync_tool.DiagnosticIssue, *, number: int = 42, state: str = "open") -> dict[str, Any]:
+    return {
+        "number": number,
+        "state": state,
+        "title": sync_tool.issue_title(diagnostic),
+        "body": sync_tool.issue_body(diagnostic),
+        "labels": [{"name": diagnostic.label}],
+    }
+
+
+def test_script_help_runs_from_source_checkout_without_editable_install() -> None:
+    script = Path(__file__).resolve().parents[1] / "tools" / "sync_source_diagnostics_issues.py"
+    dependency_paths = [Path(path) for path in site.getsitepackages()]
+    dependency_paths.append(Path(site.getusersitepackages()))
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        str(path) for path in dependency_paths if path.exists()
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-S", str(script), "--help"],
+        cwd=script.parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Sync source diagnostics to GitHub Issues." in result.stdout
+    assert "--policy-file" in result.stdout
+    assert "--dry-run-report-output" in result.stdout
+    assert "--dry-run-report-format" in result.stdout
+
+
 def test_issue_sync_deduplicates_by_diagnostic_id_before_creating() -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:1111111111111111"
     diagnostics = sync_tool.diagnostics_from_policy(
@@ -107,6 +150,52 @@ def test_issue_sync_deduplicates_by_diagnostic_id_before_creating() -> None:
     assert payload["labels"] == ["internals: warning"]
     assert f"<!-- wrg-source-diagnostic-id: {diagnostic_id} -->" in payload["body"]
     assert f"Source diagnostic ID: `{diagnostic_id}`" in payload["body"]
+
+
+def test_issue_sync_reads_only_source_diagnostics_events_not_display_rows() -> None:
+    event_id = "wrg-source-diagnostic-v1:1111111111111111"
+    derived_id = "wrg-source-diagnostic-v1:2222222222222222"
+    policy = {
+        "source_diagnostics": {
+            "event_counts": {"notice": 2, "warning": 1, "error": 0},
+            "events": [_event(event_id)],
+            "notices": [
+                "No source issues reported",
+                "26H1 excluded for existing devices",
+            ],
+            "display_rows": [
+                {
+                    "id": derived_id,
+                    "severity": "notice",
+                    "title": "No source issues reported",
+                    "message": "Derived dashboard-only row.",
+                }
+            ],
+            "issue_status": {
+                derived_id: {
+                    "number": 70,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/70",
+                }
+            },
+        }
+    }
+
+    diagnostics = sync_tool.diagnostics_from_policy(policy)
+    client = FakeGitHubClient()
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert [diagnostic.diagnostic_id for diagnostic in diagnostics] == [event_id]
+    assert summary.considered == 1
+    assert client.searches == [("Avnsx/win11_release_guard", event_id)]
+    assert len(client.created) == 1
+    assert client.created[0][1]["labels"] == ["internals: warning"]
+    assert derived_id not in client.created[0][1]["body"]
 
 
 def test_issue_sync_maps_exact_labels_for_all_enabled_severities() -> None:
@@ -134,10 +223,170 @@ def test_issue_sync_maps_exact_labels_for_all_enabled_severities() -> None:
     ]
 
 
-def test_issue_sync_updates_and_comments_when_open_issue_matches() -> None:
+def test_repeated_issue_sync_leaves_current_open_issue_unchanged_without_comment() -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:4444444444444444"
-    client = FakeGitHubClient({diagnostic_id: [{"number": 42, "state": "open"}]})
     diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient({diagnostic_id: [_managed_issue(diagnostics[0])]})
+
+    for _ in range(2):
+        summary = sync_tool.sync_diagnostics(
+            diagnostics,
+            repository="Avnsx/win11_release_guard",
+            client=client,
+            request_delay_seconds=0,
+        )
+
+        assert summary.created == 0
+        assert summary.updated == 0
+        assert summary.commented == 0
+        assert summary.issue_status[diagnostic_id] == {
+            "number": 42,
+            "state": "open",
+            "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+        }
+    assert client.created == []
+    assert client.updated == []
+    assert client.comments == []
+
+
+def test_issue_sync_search_finding_managed_issue_prevents_duplicate() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:1010101010101010"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient({diagnostic_id: [_managed_issue(diagnostics[0], number=101)]})
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 0
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert summary.issue_status[diagnostic_id] == {
+        "number": 101,
+        "state": "open",
+        "url": "https://github.com/Avnsx/win11_release_guard/issues/101",
+    }
+    assert client.searches == [("Avnsx/win11_release_guard", diagnostic_id)]
+    assert client.created == []
+    assert client.updated == []
+    assert client.comments == []
+
+
+def test_issue_sync_label_list_fallback_prevents_duplicate_when_search_misses() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:2020202020202020"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient(open_managed_issues=[_managed_issue(diagnostics[0], number=202)])
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 0
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert summary.issue_status[diagnostic_id] == {
+        "number": 202,
+        "state": "open",
+        "url": "https://github.com/Avnsx/win11_release_guard/issues/202",
+    }
+    assert client.searches == [("Avnsx/win11_release_guard", diagnostic_id)]
+    assert client.listed == [("Avnsx/win11_release_guard", tuple(sync_tool.MANAGED_LABELS))]
+    assert client.created == []
+    assert client.updated == []
+    assert client.comments == []
+
+
+def test_issue_sync_creates_when_search_and_label_list_find_no_managed_issue() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:3030303030303030"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient()
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.searches == [("Avnsx/win11_release_guard", diagnostic_id)]
+    assert client.listed == [("Avnsx/win11_release_guard", tuple(sync_tool.MANAGED_LABELS))]
+    assert len(client.created) == 1
+    assert _marker(diagnostic_id) in client.created[0][1]["body"]
+
+
+def test_issue_sync_label_list_issue_without_exact_marker_does_not_block_create() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4040404040404040"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient(
+        open_managed_issues=[
+            {
+                "number": 204,
+                "state": "open",
+                "title": f"Manual tracking for {diagnostic_id}",
+                "body": f"Manual note mentions {diagnostic_id} without the managed marker.",
+                "labels": [{"name": "internals: warning"}],
+            }
+        ]
+    )
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+    assert _marker(diagnostic_id) in client.created[0][1]["body"]
+
+
+def test_repeated_issue_sync_with_label_list_fallback_stays_idempotent() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:5050505050505050"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+    client = FakeGitHubClient(open_managed_issues=[_managed_issue(diagnostics[0], number=205)])
+
+    for _ in range(2):
+        summary = sync_tool.sync_diagnostics(
+            diagnostics,
+            repository="Avnsx/win11_release_guard",
+            client=client,
+            request_delay_seconds=0,
+        )
+
+        assert summary.created == 0
+        assert summary.updated == 0
+        assert summary.commented == 0
+        assert summary.issue_status[diagnostic_id] == {
+            "number": 205,
+            "state": "open",
+            "url": "https://github.com/Avnsx/win11_release_guard/issues/205",
+        }
+    assert client.created == []
+    assert client.updated == []
+    assert client.comments == []
+
+
+def test_issue_sync_updates_changed_open_issue_without_still_present_comment() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4444444444444444"
+    previous_diagnostic = sync_tool.diagnostics_from_policy(
+        _policy([_event(diagnostic_id, severity="warning")])
+    )[0]
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id, severity="error")]))
+    client = FakeGitHubClient({diagnostic_id: [_managed_issue(previous_diagnostic)]})
 
     summary = sync_tool.sync_diagnostics(
         diagnostics,
@@ -148,17 +397,176 @@ def test_issue_sync_updates_and_comments_when_open_issue_matches() -> None:
 
     assert summary.created == 0
     assert summary.updated == 1
-    assert summary.commented == 1
+    assert summary.commented == 0
     assert client.created == []
+    assert client.comments == []
     assert client.updated[0][1] == 42
-    assert client.updated[0][2]["labels"] == ["internals: warning"]
+    assert client.updated[0][2]["labels"] == ["internals: error"]
+    assert "[Source diagnostics][error]" in client.updated[0][2]["title"]
+    assert "Severity: `error`" in client.updated[0][2]["body"]
     assert diagnostic_id in client.updated[0][2]["body"]
-    assert diagnostic_id in client.comments[0][2]
+
+
+def test_issue_sync_ignores_open_issue_with_label_but_no_marker() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4a4a4a4a4a4a4a4a"
+    client = FakeGitHubClient(
+        {
+            diagnostic_id: [
+                {
+                    "number": 43,
+                    "state": "open",
+                    "body": "Manual tracking issue without the managed marker.",
+                    "labels": [{"name": "internals: warning"}],
+                }
+            ]
+        }
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+    assert client.created[0][1]["labels"] == ["internals: warning"]
+
+
+def test_issue_sync_ignores_open_issue_with_plaintext_diagnostic_id_but_no_marker() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4b4b4b4b4b4b4b4b"
+    client = FakeGitHubClient(
+        {
+            diagnostic_id: [
+                {
+                    "number": 44,
+                    "state": "open",
+                    "body": f"Manual note mentions {diagnostic_id} without an HTML marker.",
+                }
+            ]
+        }
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+
+
+def test_issue_sync_ignores_open_issue_with_title_diagnostic_id_but_no_marker() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4c4c4c4c4c4c4c4c"
+    client = FakeGitHubClient(
+        {
+            diagnostic_id: [
+                {
+                    "number": 45,
+                    "state": "open",
+                    "title": f"Manual investigation for {diagnostic_id}",
+                    "body": "No managed marker here.",
+                }
+            ]
+        }
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+
+
+def test_issue_sync_ignores_open_issue_with_multiple_managed_markers() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4d4d4d4d4d4d4d4d"
+    other_id = "wrg-source-diagnostic-v1:4e4e4e4e4e4e4e4e"
+    client = FakeGitHubClient(
+        {
+            diagnostic_id: [
+                {
+                    "number": 46,
+                    "state": "open",
+                    "body": f"{_marker(diagnostic_id)}\n{_marker(other_id)}",
+                }
+            ]
+        }
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+
+
+def test_issue_sync_does_not_reopen_closed_issue_without_marker() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:4f4f4f4f4f4f4f4f"
+    client = FakeGitHubClient(
+        {
+            diagnostic_id: [
+                {
+                    "number": 47,
+                    "state": "closed",
+                    "body": f"Closed manual issue mentions {diagnostic_id} without marker.",
+                    "labels": [{"name": "internals: warning"}],
+                }
+            ]
+        }
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        create_limit=0,
+        request_delay_seconds=0,
+    )
+
+    assert summary.reopened == 0
+    assert summary.commented == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
 
 
 def test_issue_sync_reopens_matching_closed_issue_by_default() -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:5555555555555555"
-    client = FakeGitHubClient({diagnostic_id: [{"number": 51, "state": "closed"}]})
+    client = FakeGitHubClient(
+        {diagnostic_id: [{"number": 51, "state": "closed", "body": _marker(diagnostic_id)}]}
+    )
     diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
 
     summary = sync_tool.sync_diagnostics(
@@ -183,7 +591,9 @@ def test_issue_sync_reopens_matching_closed_issue_by_default() -> None:
 
 def test_issue_sync_can_skip_matching_closed_issue_when_reopen_disabled() -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:5555555555555555"
-    client = FakeGitHubClient({diagnostic_id: [{"number": 51, "state": "closed"}]})
+    client = FakeGitHubClient(
+        {diagnostic_id: [{"number": 51, "state": "closed", "body": _marker(diagnostic_id)}]}
+    )
     diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))
 
     summary = sync_tool.sync_diagnostics(
@@ -234,6 +644,30 @@ def test_notice_diagnostics_sync_by_default_with_explicit_opt_out() -> None:
     assert sync_tool.diagnostics_from_policy(_policy([notice]), include_notices=False) == []
 
 
+def test_notice_managed_issue_stays_open_while_notice_exists() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:9090909090909090"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id, severity="notice")]))
+    client = FakeGitHubClient(
+        {diagnostic_id: [_managed_issue(diagnostics[0], number=90)]},
+        open_managed_issues=[_managed_issue(diagnostics[0], number=90)],
+    )
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        create_limit=0,
+        request_delay_seconds=0,
+    )
+
+    assert summary.updated == 0
+    assert summary.commented == 0
+    assert summary.closed == 0
+    assert client.updated == []
+    assert client.comments == []
+    assert client.closed == []
+
+
 def test_issue_sync_closes_stale_open_managed_issue() -> None:
     active_id = "wrg-source-diagnostic-v1:1212121212121212"
     stale_id = "wrg-source-diagnostic-v1:3434343434343434"
@@ -242,13 +676,13 @@ def test_issue_sync_closes_stale_open_managed_issue() -> None:
             {
                 "number": 77,
                 "state": "open",
-                "body": f"<!-- wrg-source-diagnostic-id: {stale_id} -->",
+                "body": _marker(stale_id),
                 "labels": [{"name": "internals: notices"}],
             },
             {
                 "number": 78,
                 "state": "open",
-                "body": f"<!-- wrg-source-diagnostic-id: {active_id} -->",
+                "body": _marker(active_id),
                 "labels": [{"name": "internals: warning"}],
             },
         ]
@@ -269,9 +703,47 @@ def test_issue_sync_closes_stale_open_managed_issue() -> None:
     assert client.listed == [("Avnsx/win11_release_guard", tuple(sync_tool.MANAGED_LABELS))]
 
 
+def test_issue_sync_does_not_close_labeled_stale_issue_without_marker() -> None:
+    active_id = "wrg-source-diagnostic-v1:5656565656565656"
+    stale_id = "wrg-source-diagnostic-v1:7878787878787878"
+    client = FakeGitHubClient(
+        open_managed_issues=[
+            {
+                "number": 79,
+                "state": "open",
+                "body": f"Manual note mentions {stale_id} without the managed marker.",
+                "labels": [{"name": "internals: notices"}],
+            },
+            {
+                "number": 80,
+                "state": "open",
+                "title": f"Manual title mentions {stale_id}",
+                "body": "No managed marker here.",
+                "labels": [{"name": "internals: warning"}],
+            },
+        ]
+    )
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(active_id)]))
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        create_limit=0,
+        request_delay_seconds=0,
+    )
+
+    assert summary.closed == 0
+    assert summary.commented == 0
+    assert client.closed == []
+    assert client.comments == []
+
+
 def test_issue_sync_writes_static_issue_status_output(tmp_path: Path) -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:abababababababab"
-    client = FakeGitHubClient({diagnostic_id: [{"number": 42, "state": "open"}]})
+    client = FakeGitHubClient(
+        {diagnostic_id: [{"number": 42, "state": "open", "body": _marker(diagnostic_id)}]}
+    )
     policy_path = tmp_path / "policy.json"
     status_path = tmp_path / "issue-status.json"
     policy_path.write_text(json.dumps(_policy([_event(diagnostic_id)])) + "\n", encoding="utf-8")
@@ -342,3 +814,180 @@ def test_dry_run_does_not_mutate_or_print_token(tmp_path: Path) -> None:
     assert "Would create issue for wrg-source-diagnostic-v1:aaaaaaaaaaaaaaaa." in output
     assert secret_token not in output
     assert "GITHUB_TOKEN" not in output
+
+
+def test_end_to_end_dry_run_writes_json_and_markdown_without_mutation_or_token(tmp_path: Path) -> None:
+    notice_id = "wrg-source-diagnostic-v1:1111111111111111"
+    warning_id = "wrg-source-diagnostic-v1:2222222222222222"
+    error_id = "wrg-source-diagnostic-v1:3333333333333333"
+    stale_id = "wrg-source-diagnostic-v1:4444444444444444"
+    manual_id = "wrg-source-diagnostic-v1:5555555555555555"
+    policy_path = tmp_path / "policy.json"
+    json_report = tmp_path / "dry-run.json"
+    markdown_report = tmp_path / "dry-run.md"
+    events = [
+        _event(notice_id, severity="notice", kind="notice_probe", message="Notice diagnostic still exists."),
+        _event(warning_id, severity="warning", kind="warning_probe", message="Warning diagnostic reappeared."),
+        _event(error_id, severity="error", kind="error_probe", message="Error diagnostic requires tracking."),
+        _event(error_id, severity="error", kind="error_probe", message="Duplicate event should dedupe."),
+    ]
+    policy_path.write_text(json.dumps(_policy(events)) + "\n", encoding="utf-8")
+    diagnostics = sync_tool.diagnostics_from_policy(_policy(events))
+    notice_issue = _managed_issue(diagnostics[0], number=90)
+    closed_warning_issue = {
+        "number": 91,
+        "state": "closed",
+        "body": _marker(warning_id),
+        "labels": [{"name": "internals: warning"}],
+    }
+    manual_error_issue = {
+        "number": 92,
+        "state": "open",
+        "body": f"Manual issue mentions {error_id} without the managed marker.",
+        "labels": [{"name": "internals: error"}],
+    }
+    stale_issue = {
+        "number": 93,
+        "state": "open",
+        "body": _marker(stale_id),
+        "labels": [{"name": "internals: notices"}],
+    }
+    manual_stale_issue = {
+        "number": 94,
+        "state": "open",
+        "body": f"Manual issue mentions {manual_id} without the managed marker.",
+        "labels": [{"name": "internals: warning"}],
+    }
+    secret_token = "safe-test-token-value-that-must-not-print"
+
+    def run_report(path: Path, report_format: str) -> FakeGitHubClient:
+        client = FakeGitHubClient(
+            {
+                notice_id: [notice_issue],
+                warning_id: [closed_warning_issue],
+                error_id: [manual_error_issue],
+            },
+            open_managed_issues=[notice_issue, stale_issue, manual_stale_issue],
+        )
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        code = sync_tool.main(
+            [
+                "--policy-file",
+                str(policy_path),
+                "--repository",
+                "Avnsx/win11_release_guard",
+                "--dry-run",
+                "--dry-run-report-output",
+                str(path),
+                "--dry-run-report-format",
+                report_format,
+                "--request-delay-seconds",
+                "0",
+            ],
+            client=client,
+            environ={"GITHUB_TOKEN": secret_token, "GITHUB_REPOSITORY": "Avnsx/win11_release_guard"},
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+        assert code == 0
+        assert client.created == []
+        assert client.updated == []
+        assert client.comments == []
+        assert client.closed == []
+        combined_output = stdout.getvalue() + stderr.getvalue() + path.read_text(encoding="utf-8")
+        assert secret_token not in combined_output
+        assert "GITHUB_TOKEN" not in combined_output
+        return client
+
+    json_client = run_report(json_report, "json")
+    run_report(markdown_report, "markdown")
+
+    payload = json.loads(json_report.read_text(encoding="utf-8"))
+    assert payload["dry_run"] is True
+    assert payload["repository"] == "Avnsx/win11_release_guard"
+    assert payload["summary"]["considered"] == 3
+    assert payload["summary"]["dry_run_creates"] == 1
+    assert payload["summary"]["dry_run_reopens"] == 1
+    assert payload["summary"]["dry_run_closes"] == 1
+    assert payload["diagnostics"] == [
+        {
+            "diagnostic_id": notice_id,
+            "severity": "notice",
+            "label": "internals: notices",
+            "kind": "notice_probe",
+            "title": "Notice Probe",
+        },
+        {
+            "diagnostic_id": warning_id,
+            "severity": "warning",
+            "label": "internals: warning",
+            "kind": "warning_probe",
+            "title": "Warning Probe",
+        },
+        {
+            "diagnostic_id": error_id,
+            "severity": "error",
+            "label": "internals: error",
+            "kind": "error_probe",
+            "title": "Error Probe",
+        },
+    ]
+    assert [
+        (action["action"], action["diagnostic_id"], action.get("label"), action.get("issue_number"))
+        for action in payload["actions"]
+    ] == [
+        ("current", notice_id, "internals: notices", 90),
+        ("reopen", warning_id, "internals: warning", 91),
+        ("create", error_id, "internals: error", None),
+        ("close", stale_id, None, 93),
+    ]
+    assert payload["issue_status"] == {
+        notice_id: {
+            "number": 90,
+            "state": "open",
+            "url": "https://github.com/Avnsx/win11_release_guard/issues/90",
+        }
+    }
+    assert json_client.searches == [
+        ("Avnsx/win11_release_guard", notice_id),
+        ("Avnsx/win11_release_guard", warning_id),
+        ("Avnsx/win11_release_guard", error_id),
+    ]
+    assert json_client.listed == [("Avnsx/win11_release_guard", tuple(sync_tool.MANAGED_LABELS))]
+
+    markdown = markdown_report.read_text(encoding="utf-8")
+    assert "# Source Diagnostics Issue Sync Dry Run" in markdown
+    assert "| create | wrg-source-diagnostic-v1:3333333333333333 | error | internals: error | - | - |" in markdown
+    assert "| close | wrg-source-diagnostic-v1:4444444444444444 | - | - | #93 | stale |" in markdown
+    assert manual_id not in markdown
+
+
+def test_dry_run_report_requires_dry_run(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.json"
+    report_path = tmp_path / "dry-run.json"
+    policy_path.write_text(
+        json.dumps(_policy([_event("wrg-source-diagnostic-v1:bbbbbbbbbbbbbbbb")])) + "\n",
+        encoding="utf-8",
+    )
+    stderr = io.StringIO()
+
+    code = sync_tool.main(
+        [
+            "--policy-file",
+            str(policy_path),
+            "--repository",
+            "Avnsx/win11_release_guard",
+            "--dry-run-report-output",
+            str(report_path),
+        ],
+        client=FakeGitHubClient(),
+        environ={},
+        stderr=stderr,
+    )
+
+    assert code == 1
+    assert "--dry-run-report-output requires --dry-run" in stderr.getvalue()
+    assert not report_path.exists()

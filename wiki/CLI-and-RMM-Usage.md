@@ -14,7 +14,7 @@ Use this when integrating Windows 11 Release Guard into scripts, RMM tools, dash
 | UTF-8 console JSON | `python -m win11_release_guard --json --unicode` |
 | Write output file | `python -m win11_release_guard --json --output release-check.json` |
 | Include full bounded WUA history | `python -m win11_release_guard --json --include-raw-wua-history --wua` |
-| Include raw local Panther/setup log tails | `python -m win11_release_guard --json --include-raw-local-diagnostics --wua` |
+| Include raw local Panther/setup log tails | `python -m win11_release_guard --json-pretty --include-raw-local-diagnostics` |
 | Diagnose config | `python -m win11_release_guard --diagnose-config` |
 | Check source only | `python -m win11_release_guard --check-policy-source` |
 

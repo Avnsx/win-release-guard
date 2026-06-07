@@ -24,6 +24,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert ".github/dependabot.yml" in names
     assert ".github/workflows/ci.yml" in names
     assert ".github/workflows/publish-policy.yml" in names
+    assert ".github/workflows/sync-source-diagnostics-issues.yml" in names
     assert ".github/workflows/pypi-publish.yml" in names
     assert ".github/workflows/codeql.yml" in names
     assert ".github/workflows/pylint.yml" in names

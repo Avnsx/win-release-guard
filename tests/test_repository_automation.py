@@ -203,6 +203,10 @@ def test_source_diagnostics_issue_sync_workflow_is_manual_and_minimal() -> None:
     assert "--include-notices" not in text
     assert "--create-limit" in text
     assert "--dry-run" in text
+    assert "--dry-run-report-output" in text
+    assert "--dry-run-report-format markdown" in text
+    assert "actions/upload-artifact@v7" in text
+    assert "source-diagnostics-issue-sync-dry-run" in text
 
 
 def test_release_workflow_exists_with_explicit_tagged_triggers() -> None:

@@ -29,13 +29,28 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki dashboard](../wik
 | Source diagnostics | Keyboard-accessible severity filters, deterministic diagnostic IDs, counts, events, source health tiles, drift warnings. |
 | Programmatic API | Canonical and `/api/v1` endpoint links. |
 
+The Source Diagnostics count tiles for Notices, Warnings, and Errors are native
+buttons. Selecting one filters the event feed to that severity, updates
+`aria-pressed`, and reports the visible row count through the live status text.
+The `View all` button resets the filter and shows every diagnostic row again.
+The feed may include derived dashboard-only rows such as `No source issues
+reported`, existing-device exclusion notes, or freshness notices. Those rows are
+filterable and may carry deterministic DOM IDs, but they are not GitHub
+Issue-sync inputs.
+
 Optional source-diagnostic issue status must be static generated metadata, not
 browser-fetched data. When `source_diagnostics.issue_status` maps a deterministic
-diagnostic ID to a GitHub issue number/state, the dashboard may render a
-hover/focus-only `#Ticket <number>` link only to
-`https://github.com/Avnsx/win11_release_guard/issues/<number>`. Invalid IDs,
-non-positive issue numbers, and non-canonical issue URLs are ignored. Browser
-JavaScript must not fetch GitHub issue state.
+ID for a real `source_diagnostics.events` entry to a GitHub issue number/state,
+the dashboard may render a hover/focus-only `#Ticket <number>` link only to
+`https://github.com/Avnsx/win11_release_guard/issues/<number>`. Derived
+dashboard-only rows do not show ticket links without workflow-generated metadata
+for a real synced event. Invalid IDs, non-positive issue numbers, and
+non-canonical issue URLs are ignored. Browser JavaScript must not fetch GitHub
+issue state.
+
+When the publish workflow cannot sync GitHub Issues, `source_diagnostics.issue_sync`
+may report `status: unavailable`. The dashboard must render that degraded state
+as static HTML so missing ticket links are visible without client-side API calls.
 
 ## Rules
 

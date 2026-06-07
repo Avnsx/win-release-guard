@@ -61,6 +61,8 @@ jobs:
             --output-dir .tmp/source-diagnostics-policy
 
       - name: Sync source diagnostics issues
+        id: issue_sync
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -70,6 +72,31 @@ jobs:
             --create-limit 10 \
             --request-delay-seconds 1 \
             --issue-status-output .tmp/source-diagnostics-issue-status/issue-status.json
+
+      - name: Write degraded issue status when sync fails
+        if: ${{ steps.issue_sync.outcome != 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp/source-diagnostics-issue-status
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = {
+              "issue_status": {},
+              "issue_sync": {
+                  "status": "unavailable",
+                  "reason": "github_issues_sync_failed",
+                  "message": (
+                      "GitHub Issues sync failed during publish-policy; "
+                      "signed policy was generated without source-diagnostic ticket links."
+                  ),
+              },
+          }
+          path = Path(".tmp/source-diagnostics-issue-status/issue-status.json")
+          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          echo "::warning::Source diagnostics GitHub Issues sync failed; publishing degraded issue metadata."
 
       - uses: actions/upload-artifact@v7
         with:

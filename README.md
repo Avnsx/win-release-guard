@@ -38,6 +38,8 @@ Windows 11 Release Guard tells administrators whether an existing Windows 11 dev
 - Compacts local Panther/setup log tails in JSON by default while keeping raw bounded local diagnostics available through an explicit CLI opt-in.
 - Keeps Panther reads narrow and fast with fixed known paths, per-file tail reads, and a generous global collection guard.
 - Treats Panther/setup logs as administrator troubleshooting evidence only; they never decide compliance or override signed public policy.
+- Shows Source Diagnostics as Notice, Warning, and Error categories on the static dashboard; these are troubleshooting signals, not fleet verdict authority.
+- Shows GitHub Issue ticket links only from workflow-generated static metadata; browser JavaScript never creates or syncs issues.
 - Treats existing devices as targeting 25H2 while 26H1 remains excluded for existing-device targeting.
 - Emits human output, JSON, JSON-pretty, file output, and stable exit codes for RMM/fleet checks.
 - Publishes a static GitHub Pages dashboard plus `/api/v1` policy, signature, and manifest aliases.
@@ -50,7 +52,7 @@ Install the released package:
 python -m pip install win11_release_guard
 win11_release_guard --pretty
 win11_release_guard --json-pretty --no-wua
-win11_release_guard --json-pretty --wua --include-raw-local-diagnostics
+win11_release_guard --json-pretty --include-raw-local-diagnostics
 ```
 
 Use the source checkout for development or release-candidate validation:
@@ -82,7 +84,7 @@ Deep dive: [Quick Start](https://github.com/Avnsx/win11_release_guard/wiki/Quick
 | API v1 signature | https://avnsx.github.io/win11_release_guard/api/v1/policy.sig |
 | API v1 manifest | https://avnsx.github.io/win11_release_guard/api/v1/manifest.json |
 
-Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI.
+Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI. Source Diagnostics tiles filter Notices, Warnings, and Errors; `View all` resets the feed. Optional `#Ticket` links are hover/focus-only static links to repository issues when workflow-generated metadata exists.
 
 Deep dive: [GitHub Pages Dashboard](https://github.com/Avnsx/win11_release_guard/wiki/GitHub-Pages-Dashboard), [Anti-Static Freshness](https://github.com/Avnsx/win11_release_guard/wiki/Anti-Static-Freshness), [dashboard docs](docs/dashboard-and-pages.md).
 
@@ -106,7 +108,7 @@ Deep dive: [GitHub Pages Dashboard](https://github.com/Avnsx/win11_release_guard
 | WUA role | Optional read-only explanation for offers/history. | [Troubleshooting](https://github.com/Avnsx/win11_release_guard/wiki/Troubleshooting) |
 | Release targeting | 25H2 is the existing-device target; 26H1 is excluded for existing devices. | [Architecture Insight](docs/architecture-insight.md) |
 | Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.1 notes](docs/releases/v0.3.1.md) |
-| Source diagnostics | Parser/source drift stays visible and can block policy publishing. | [Source Diagnostics](https://github.com/Avnsx/win11_release_guard/wiki/Source-Diagnostics) |
+| Source diagnostics | Notice/warning/error troubleshooting evidence stays visible; generator `error` events can block policy publishing, but diagnostics do not override runtime compliance verdicts. | [Source Diagnostics](https://github.com/Avnsx/win11_release_guard/wiki/Source-Diagnostics) |
 
 ## Maintainer Commands
 
@@ -132,6 +134,7 @@ Deployment-affecting changes require the live Pages gate before handover. Use th
 - Runtime clients fetch public JSON plus `.sig`. Runtime clients do not authenticate to GitHub and do not need GitHub tokens, private repository access, or a paid signing certificate.
 - The private policy signing key lives only in the GitHub Actions secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`; public verification keys are committed.
 - The production generator uses public Microsoft Release Health and Atom sources only; it does not use token-authenticated Microsoft APIs.
+- Source Diagnostics issue sync runs only in GitHub Actions with the built-in `github.token` / `GITHUB_TOKEN` and minimal `issues: write`; no PAT or extra repository secret is required.
 - PyPI publishing uses Trusted Publishing / GitHub OIDC in `.github/workflows/pypi-publish.yml`; no PyPI API token is required.
 - GitHub scheduled workflows are best-effort automation, not guaranteed cron. Badge status is a useful signal, not an operational proof.
 - Dependency freshness is checked by a scheduled workflow. `Dependency freshness` is a scheduled direct-dependency check over direct dependency specifiers; it is not an always-current dependency guarantee. The Pylint badge reports the workflow for the current `--fail-under=8.0` gate, not a permanent quality certificate.

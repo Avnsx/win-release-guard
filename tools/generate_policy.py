@@ -111,18 +111,44 @@ def _issue_status_mapping(value: Any) -> dict[str, Mapping[str, Any]]:
     return records
 
 
-def _load_issue_status(path: Path | None) -> dict[str, Mapping[str, Any]]:
-    if path is None:
+def _issue_sync_metadata(value: Any) -> dict[str, str]:
+    if value in (None, ""):
         return {}
-    return _issue_status_mapping(json.loads(path.read_text(encoding="utf-8")))
+    if not isinstance(value, Mapping):
+        raise ValueError("source diagnostic issue sync metadata must be an object.")
+    status = str(value.get("status") or "").strip().lower()
+    if status not in {"available", "degraded", "unavailable"}:
+        raise ValueError("source diagnostic issue sync status must be available, degraded, or unavailable.")
+    metadata = {"status": status}
+    for key in ("reason", "message"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            metadata[key] = text
+    return metadata
 
 
-def _policy_with_issue_status(policy: object, issue_status: Mapping[str, Mapping[str, Any]]) -> object:
-    if not issue_status:
+def _load_issue_status(path: Path | None) -> tuple[dict[str, Mapping[str, Any]], dict[str, str]]:
+    if path is None:
+        return {}, {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    issue_status = _issue_status_mapping(raw)
+    issue_sync = _issue_sync_metadata(raw.get("issue_sync") if isinstance(raw, Mapping) else None)
+    return issue_status, issue_sync
+
+
+def _policy_with_issue_status(
+    policy: object,
+    issue_status: Mapping[str, Mapping[str, Any]],
+    issue_sync: Mapping[str, str],
+) -> object:
+    if not issue_status and not issue_sync:
         return policy
     data = policy.to_dict()
     source_diagnostics = dict(data.get("source_diagnostics") or {})
-    source_diagnostics["issue_status"] = dict(issue_status)
+    if issue_status:
+        source_diagnostics["issue_status"] = dict(issue_status)
+    if issue_sync:
+        source_diagnostics["issue_sync"] = dict(issue_sync)
     data["source_diagnostics"] = source_diagnostics
     return type(policy).from_dict(data)
 
@@ -141,8 +167,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=args.timeout,
             signature_status="valid" if signing_key else "unsigned",
         )
-        issue_status = _load_issue_status(args.source_diagnostic_issue_status_file)
-        policy = _policy_with_issue_status(policy, issue_status)
+        issue_status, issue_sync = _load_issue_status(args.source_diagnostic_issue_status_file)
+        policy = _policy_with_issue_status(policy, issue_status, issue_sync)
         written = write_policy_outputs(
             policy,
             output_dir=args.output_dir,

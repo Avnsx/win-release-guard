@@ -224,6 +224,21 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
                 raise PolicyParseError(
                     f"source_diagnostics.issue_status.{key}.url must be a canonical GitHub issue URL."
                 )
+    issue_sync = value.get("issue_sync")
+    if issue_sync is not None:
+        if not isinstance(issue_sync, Mapping):
+            raise PolicyParseError("source_diagnostics.issue_sync must be an object.")
+        unexpected = set(issue_sync) - {"status", "reason", "message"}
+        if unexpected:
+            raise PolicyParseError("source_diagnostics.issue_sync contains unsupported fields.")
+        status = issue_sync.get("status")
+        if status not in {"available", "degraded", "unavailable"}:
+            raise PolicyParseError(
+                "source_diagnostics.issue_sync.status must be available, degraded, or unavailable."
+            )
+        for key in ("reason", "message"):
+            if key in issue_sync and not isinstance(issue_sync.get(key), str):
+                raise PolicyParseError(f"source_diagnostics.issue_sync.{key} must be a string.")
     parser = value.get("parser")
     if parser is not None:
         if not isinstance(parser, Mapping):

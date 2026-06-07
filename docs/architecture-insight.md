@@ -26,6 +26,11 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | 5 | Local build and edition probes | Installed-state detection only. |
 | 6 | WUA, Panther, DISM packages, event logs | Explanatory context only. |
 
+Source Diagnostics and workflow-synced GitHub Issues are publish/source
+troubleshooting evidence. They can expose parser drift, source freshness, static
+ticket links, or an issue-sync outage, but they do not replace signed policy
+trust or runtime evaluator verdicts.
+
 ## Release Targeting
 
 | Rule | Reason |
@@ -42,6 +47,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | Keep runtime JSON-first and signed by default. | Re-enable Microsoft HTML parsing in normal runtime paths. |
 | Preserve raw local diagnostic values behind explicit opt-ins when default JSON compacts bulky Panther/setup log tails; keep Panther reads fixed-path, tail-bounded, and guarded by a generous total collection cap. | Treat marketing/display labels as decisive identity evidence. |
 | Keep WUA optional, bounded, and read-only. | Use WUA offers/history to replace the signed policy verdict. |
+| Keep Source Diagnostics and GitHub Issues as troubleshooting evidence. | Let issue state, labels, or dashboard diagnostics override compliance verdicts. |
 | Add fields compatibly to public `/api/v1`. | Remove or rename v1 fields/paths casually. |
 
 ## Verify

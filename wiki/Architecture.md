@@ -29,6 +29,11 @@ Use this to understand the current codebase shape before changing runtime behavi
 | 5 | Local Windows probes | Installed-state detection only. |
 | 6 | WUA / logs / packages | Explanation only. |
 
+Source Diagnostics and workflow-synced GitHub Issues are source/publish
+troubleshooting evidence only. They may explain parser drift, source freshness,
+or ticket status, but they do not override signed policy trust or runtime
+compliance verdicts.
+
 ## Rules
 
 | Do | Do not |
@@ -36,6 +41,7 @@ Use this to understand the current codebase shape before changing runtime behavi
 | Keep runtime JSON-first. | Parse Microsoft HTML in normal runtime mode. |
 | Keep generator parsing centralized. | Duplicate upstream parsing in clients. |
 | Preserve raw admin diagnostics behind explicit opt-ins when default JSON compacts bulky Panther/setup log tails; keep Panther collection fixed-path, tail-bounded, and guarded by a generous total cap. | Hide surprising local values. |
+| Keep Source Diagnostics and GitHub Issues as diagnostic context. | Treat issue labels or dashboard diagnostics as compliance authority. |
 | Add public API fields compatibly. | Break `/api/v1` paths or remove existing contract fields. |
 
 ## Verify

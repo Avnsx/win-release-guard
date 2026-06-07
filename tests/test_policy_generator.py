@@ -415,6 +415,63 @@ def test_source_diagnostic_id_is_stable_for_equivalent_input():
     assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", first)
 
 
+def test_source_diagnostic_id_ignores_volatile_timestamp_tag_order_and_message_wording():
+    first = _source_diagnostic_id(
+        severity="warning",
+        source="Atom feed",
+        title="Atom Newer Than Release History",
+        message="Atom feed reports a newer baseline build.",
+        tags=(
+            "Release 25H2",
+            "Build 26200.8461",
+            "KB5089600",
+            "Family 26200",
+            "Required baseline",
+            "2026-06-09T18:00:00Z",
+        ),
+    )
+    second = _source_diagnostic_id(
+        severity="warning",
+        source="Atom feed",
+        title="Atom Newer Than Release History",
+        message="A newer baseline build is present in the Atom feed.",
+        tags=(
+            "2026-06-10T09:30:00Z",
+            "Required baseline",
+            "Family 26200",
+            "KB 5089600",
+            "Build 26200.8461",
+            "Release 25H2",
+        ),
+    )
+
+    assert second == first
+
+
+def test_source_diagnostic_event_id_ignores_volatile_message_and_timestamp_fields():
+    event = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8461",
+        "kb_article": "KB5089600",
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "updated": "2026-06-09T18:00:00Z",
+        "message": "Atom feed reports a newer baseline build.",
+    }
+    changed = {
+        **event,
+        "updated": "2026-06-10T09:30:00Z",
+        "message": "A newer baseline build is present in the Atom feed.",
+    }
+
+    assert policy_generator_module._source_diagnostic_id_for_event(changed) == (
+        policy_generator_module._source_diagnostic_id_for_event(event)
+    )
+
+
 def test_source_diagnostic_id_changes_when_meaning_changes():
     base = {
         "severity": "warning",
@@ -429,12 +486,41 @@ def test_source_diagnostic_id_changes_when_meaning_changes():
         ("severity", "error"),
         ("source", "Release Health"),
         ("title", "Current Versions Lag Release History"),
-        ("message", "Current Versions is behind Release History."),
         ("tags", ("Release 25H2", "Build 26200.8462", "KB5089600")),
     ):
         changed = dict(base)
         changed[key] = value
         assert _source_diagnostic_id(**changed) != base_id
+
+
+def test_source_diagnostic_event_id_changes_when_stable_fields_change():
+    base = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8461",
+        "kb_article": "KB5089600",
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "updated": "2026-06-09T18:00:00Z",
+        "message": "Atom feed reports a newer baseline build.",
+    }
+    base_id = policy_generator_module._source_diagnostic_id_for_event(base)
+
+    for key, value in (
+        ("severity", "error"),
+        ("kind", "current_versions_lag_release_history"),
+        ("release", "24H2"),
+        ("build_family", 26100),
+        ("build", "26200.8462"),
+        ("kb_article", "KB5089601"),
+        ("affects_broad_target", False),
+        ("affects_required_baseline", False),
+    ):
+        changed = dict(base)
+        changed[key] = value
+        assert policy_generator_module._source_diagnostic_id_for_event(changed) != base_id
 
 
 def test_source_diagnostics_warn_when_atom_has_newer_b_release_for_broad_target():
@@ -529,6 +615,31 @@ def test_policy_schema_accepts_source_diagnostic_issue_status():
 
     warnings = validate_policy_document(data)
     assert not any("issue_status" in warning for warning in warnings)
+
+
+def test_policy_schema_accepts_source_diagnostic_issue_sync_unavailable_metadata():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    data["source_diagnostics"]["issue_sync"] = {
+        "status": "unavailable",
+        "reason": "github_issues_sync_failed",
+        "message": "GitHub Issues sync failed during publish-policy.",
+    }
+
+    warnings = validate_policy_document(data)
+    assert not any("issue_sync" in warning for warning in warnings)
+
+
+def test_policy_schema_rejects_invalid_source_diagnostic_issue_sync_metadata():
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom_with_new_b_release())
+    data = policy.to_dict()
+    data["source_diagnostics"]["issue_sync"] = {
+        "status": "unavailable",
+        "token": "must-not-be-accepted",
+    }
+
+    with pytest.raises(PolicyParseError, match="source_diagnostics.issue_sync contains unsupported fields"):
+        validate_policy_document(data)
 
 
 def test_policy_schema_rejects_invalid_source_diagnostic_issue_status_url():
@@ -792,6 +903,60 @@ def test_generator_cli_strips_extra_source_diagnostic_issue_status_fields(tmp_pa
         "state": "open",
         "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
     }
+
+
+def test_generator_cli_merges_degraded_source_diagnostic_issue_sync_metadata(tmp_path):
+    output_dir = tmp_path / "site"
+    issue_status = tmp_path / "issue-status.json"
+    forbidden = "safe-test-token-value-that-must-not-print"
+    issue_status.write_text(
+        json.dumps(
+            {
+                "issue_status": {},
+                "issue_sync": {
+                    "status": "unavailable",
+                    "reason": "github_issues_sync_failed",
+                    "message": "GitHub Issues sync failed during publish-policy.",
+                    "token": forbidden,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = generate_policy_cli.main([
+        "--release-health-html",
+        str(FIXTURES / "windows11-release-health.html"),
+        "--atom-feed",
+        str(FIXTURES / "windows11-atom.xml"),
+        "--output-dir",
+        str(output_dir),
+        "--write-index",
+        "--write-manifest",
+        "--source-diagnostic-issue-status-file",
+        str(issue_status),
+    ])
+
+    assert code == 0
+    policy = json.loads((output_dir / "windows-release-policy.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "policy-manifest.json").read_text(encoding="utf-8"))
+    validate_policy_document(policy)
+    assert policy["source_diagnostics"]["issue_sync"] == {
+        "status": "unavailable",
+        "reason": "github_issues_sync_failed",
+        "message": "GitHub Issues sync failed during publish-policy.",
+    }
+    assert manifest["source_diagnostics"]["issue_sync"] == policy["source_diagnostics"]["issue_sync"]
+    index = (output_dir / "index.html").read_text(encoding="utf-8")
+    assert 'data-issue-sync-status="unavailable"' in index
+    assert "Issue sync unavailable" in index
+    assert "GitHub Issues sync failed during publish-policy." in index
+    for path in (
+        output_dir / "windows-release-policy.json",
+        output_dir / "policy-manifest.json",
+        output_dir / "index.html",
+    ):
+        assert forbidden not in path.read_text(encoding="utf-8")
 
 
 def test_generator_cli_rejects_invalid_source_diagnostic_issue_status_key(tmp_path, capsys):

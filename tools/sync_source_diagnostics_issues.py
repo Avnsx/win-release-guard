@@ -13,12 +13,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence, TextIO
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from win11_release_guard.config import DEFAULT_POLICY_URL
 
 
 DIAGNOSTIC_ID_COMMENT_PREFIX = "wrg-source-diagnostic-id"
 DIAGNOSTIC_ID_RE = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
-DIAGNOSTIC_ID_SEARCH_RE = re.compile(r"wrg-source-diagnostic-v1:[0-9a-f]{16}")
+DIAGNOSTIC_ID_COMMENT_RE = re.compile(
+    r"<!--\s*"
+    + re.escape(DIAGNOSTIC_ID_COMMENT_PREFIX)
+    + r":\s*(wrg-source-diagnostic-v1:[0-9a-f]{16})\s*-->"
+)
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 LABEL_BY_SEVERITY = {
     "notice": "internals: notices",
@@ -91,6 +98,7 @@ class SyncSummary:
     dry_run_reopens: int = 0
     dry_run_closes: int = 0
     issue_status: dict[str, dict[str, Any]] = field(default_factory=dict)
+    actions: list[dict[str, Any]] = field(default_factory=list)
 
 
 class GitHubApiError(RuntimeError):
@@ -142,7 +150,7 @@ class RestGitHubClient:
         return value if isinstance(value, dict) else {"items": value}
 
     def search_issues(self, repository: str, diagnostic_id: str) -> list[dict[str, Any]]:
-        query = f'repo:{repository} is:issue "{diagnostic_id}"'
+        query = f'repo:{repository} is:issue in:body "{diagnostic_id}"'
         payload = self._request("GET", "/search/issues", query={"q": query, "per_page": "20"})
         items = payload.get("items")
         return [dict(item) for item in items] if isinstance(items, list) else []
@@ -343,6 +351,14 @@ def issue_body(diagnostic: DiagnosticIssue) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _issue_payload(diagnostic: DiagnosticIssue) -> dict[str, Any]:
+    return {
+        "title": issue_title(diagnostic),
+        "body": issue_body(diagnostic),
+        "labels": [diagnostic.label],
+    }
+
+
 def comment_body(diagnostic: DiagnosticIssue) -> str:
     return (
         f"Source diagnostic `{diagnostic.diagnostic_id}` is still present in the latest sync run.\n\n"
@@ -367,15 +383,45 @@ def _issue_number(issue: Mapping[str, Any]) -> int | None:
     return number if number > 0 else None
 
 
+def _issue_label_names(issue: Mapping[str, Any]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, Sequence) or isinstance(labels, (str, bytes)):
+        return set()
+    names: set[str] = set()
+    for label in labels:
+        if isinstance(label, Mapping):
+            value = label.get("name")
+        else:
+            value = label
+        text = _normalized_text(value)
+        if text:
+            names.add(text)
+    return names
+
+
+def _normalized_issue_body(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    return str(value).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _issue_matches_payload(issue: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
+    return (
+        str(issue.get("title") or "") == str(payload.get("title") or "")
+        and _normalized_issue_body(issue.get("body")) == _normalized_issue_body(payload.get("body"))
+        and _issue_label_names(issue) == set(payload.get("labels") or [])
+    )
+
+
 def _issue_diagnostic_id(issue: Mapping[str, Any]) -> str | None:
-    for field in ("body", "title"):
-        value = issue.get(field)
-        if value in (None, ""):
-            continue
-        match = DIAGNOSTIC_ID_SEARCH_RE.search(str(value))
-        if match:
-            return match.group(0)
-    return None
+    value = issue.get("body")
+    if value in (None, ""):
+        return None
+    matches = DIAGNOSTIC_ID_COMMENT_RE.findall(str(value))
+    if len(matches) != 1:
+        return None
+    diagnostic_id = matches[0]
+    return diagnostic_id if DIAGNOSTIC_ID_RE.fullmatch(diagnostic_id) else None
 
 
 def _issue_status_record(repository: str, number: int, *, state: str = "open") -> dict[str, Any]:
@@ -388,9 +434,44 @@ def _issue_status_record(repository: str, number: int, *, state: str = "open") -
     }
 
 
-def _matching_issue(items: Sequence[Mapping[str, Any]], state: str) -> Mapping[str, Any] | None:
+def _summary_action(
+    action: str,
+    diagnostic_id: str,
+    *,
+    diagnostic: DiagnosticIssue | None = None,
+    issue_number: int | None = None,
+    state: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "action": action,
+        "diagnostic_id": diagnostic_id,
+    }
+    if diagnostic is not None:
+        record.update(
+            {
+                "severity": diagnostic.severity,
+                "label": diagnostic.label,
+                "kind": diagnostic.kind,
+                "title": diagnostic.title,
+            }
+        )
+    if issue_number is not None:
+        record["issue_number"] = int(issue_number)
+    if state:
+        record["state"] = state
+    if reason:
+        record["reason"] = reason
+    return record
+
+
+def _matching_issue(
+    items: Sequence[Mapping[str, Any]],
+    state: str,
+    diagnostic_id: str,
+) -> Mapping[str, Any] | None:
     for item in items:
-        if str(item.get("state") or "").lower() == state:
+        if str(item.get("state") or "").lower() == state and _issue_diagnostic_id(item) == diagnostic_id:
             return item
     return None
 
@@ -414,16 +495,39 @@ def sync_diagnostics(
     summary = SyncSummary(considered=len(diagnostics))
     created_this_run = 0
     active_ids = {diagnostic.diagnostic_id for diagnostic in diagnostics}
+    open_label_issues: list[dict[str, Any]] | None = None
+
+    def open_managed_issues_by_label() -> list[dict[str, Any]]:
+        nonlocal open_label_issues
+        if client is None:
+            return []
+        if open_label_issues is None:
+            open_label_issues = client.list_open_managed_issues(repository, MANAGED_LABELS)
+        return open_label_issues
+
     for diagnostic in diagnostics:
         matches = client.search_issues(repository, diagnostic.diagnostic_id) if client is not None else []
-        open_issue = _matching_issue(matches, "open")
-        closed_issue = _matching_issue(matches, "closed")
+        open_issue = _matching_issue(matches, "open", diagnostic.diagnostic_id)
+        if open_issue is None:
+            open_issue = _matching_issue(open_managed_issues_by_label(), "open", diagnostic.diagnostic_id)
+        closed_issue = _matching_issue(matches, "closed", diagnostic.diagnostic_id)
         if open_issue is not None:
             number = _issue_number(open_issue)
             if number is None:
                 continue
+            payload = _issue_payload(diagnostic)
+            if _issue_matches_payload(open_issue, payload):
+                summary.issue_status[diagnostic.diagnostic_id] = _issue_status_record(repository, number)
+                summary.actions.append(
+                    _summary_action("current", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+                )
+                print(f"Open issue #{number} for {diagnostic.diagnostic_id} is already current.", file=stdout)
+                continue
             if dry_run:
                 summary.dry_run_updates += 1
+                summary.actions.append(
+                    _summary_action("update", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+                )
                 print(f"Would update open issue #{number} for {diagnostic.diagnostic_id}.", file=stdout)
                 continue
             if client is None:
@@ -431,18 +535,17 @@ def sync_diagnostics(
             client.update_issue(
                 repository,
                 number,
-                title=issue_title(diagnostic),
-                body=issue_body(diagnostic),
-                labels=[diagnostic.label],
+                title=str(payload["title"]),
+                body=str(payload["body"]),
+                labels=list(payload["labels"]),
             )
             if request_delay_seconds:
                 time.sleep(request_delay_seconds)
-            client.comment_issue(repository, number, body=comment_body(diagnostic))
-            if request_delay_seconds:
-                time.sleep(request_delay_seconds)
             summary.updated += 1
-            summary.commented += 1
             summary.issue_status[diagnostic.diagnostic_id] = _issue_status_record(repository, number)
+            summary.actions.append(
+                _summary_action("updated", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+            )
             print(f"Updated open issue #{number} for {diagnostic.diagnostic_id}.", file=stdout)
             continue
         if closed_issue is not None:
@@ -451,6 +554,15 @@ def sync_diagnostics(
                 continue
             if not reopen_closed:
                 summary.skipped_closed += 1
+                summary.actions.append(
+                    _summary_action(
+                        "skipped_closed",
+                        diagnostic.diagnostic_id,
+                        diagnostic=diagnostic,
+                        issue_number=number,
+                        reason="reopen_disabled",
+                    )
+                )
                 print(
                     f"Skipping closed issue #{number} for {diagnostic.diagnostic_id}; automatic reopen is disabled.",
                     file=stdout,
@@ -458,6 +570,9 @@ def sync_diagnostics(
                 continue
             if dry_run:
                 summary.dry_run_reopens += 1
+                summary.actions.append(
+                    _summary_action("reopen", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+                )
                 print(f"Would reopen closed issue #{number} for {diagnostic.diagnostic_id}.", file=stdout)
                 continue
             if client is None:
@@ -478,15 +593,27 @@ def sync_diagnostics(
             summary.reopened += 1
             summary.commented += 1
             summary.issue_status[diagnostic.diagnostic_id] = _issue_status_record(repository, number)
+            summary.actions.append(
+                _summary_action("reopened", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+            )
             print(f"Reopened issue #{number} for {diagnostic.diagnostic_id}.", file=stdout)
             continue
         if created_this_run >= create_limit:
             summary.skipped_cap += 1
+            summary.actions.append(
+                _summary_action(
+                    "skipped_create",
+                    diagnostic.diagnostic_id,
+                    diagnostic=diagnostic,
+                    reason="create_limit_reached",
+                )
+            )
             print(f"Skipping {diagnostic.diagnostic_id}; issue creation cap reached.", file=stdout)
             continue
         if dry_run:
             summary.dry_run_creates += 1
             created_this_run += 1
+            summary.actions.append(_summary_action("create", diagnostic.diagnostic_id, diagnostic=diagnostic))
             print(f"Would create issue for {diagnostic.diagnostic_id}.", file=stdout)
             continue
         if client is None:
@@ -503,12 +630,15 @@ def sync_diagnostics(
         suffix = f" #{number}" if number is not None else ""
         if number is not None:
             summary.issue_status[diagnostic.diagnostic_id] = _issue_status_record(repository, number)
+        summary.actions.append(
+            _summary_action("created", diagnostic.diagnostic_id, diagnostic=diagnostic, issue_number=number)
+        )
         print(f"Created issue{suffix} for {diagnostic.diagnostic_id}.", file=stdout)
         if request_delay_seconds:
             time.sleep(request_delay_seconds)
     if close_stale and client is not None:
         stale_seen: set[int] = set()
-        for issue in client.list_open_managed_issues(repository, MANAGED_LABELS):
+        for issue in open_managed_issues_by_label():
             number = _issue_number(issue)
             if number is None or number in stale_seen:
                 continue
@@ -518,6 +648,9 @@ def sync_diagnostics(
                 continue
             if dry_run:
                 summary.dry_run_closes += 1
+                summary.actions.append(
+                    _summary_action("close", diagnostic_id, issue_number=number, state="closed", reason="stale")
+                )
                 print(f"Would close stale issue #{number} for {diagnostic_id}.", file=stdout)
                 continue
             client.comment_issue(repository, number, body=stale_comment_body(diagnostic_id))
@@ -528,6 +661,9 @@ def sync_diagnostics(
                 time.sleep(request_delay_seconds)
             summary.closed += 1
             summary.commented += 1
+            summary.actions.append(
+                _summary_action("closed", diagnostic_id, issue_number=number, state="closed", reason="stale")
+            )
             print(f"Closed stale issue #{number} for {diagnostic_id}.", file=stdout)
     return summary
 
@@ -567,6 +703,125 @@ def _print_summary(summary: SyncSummary, *, stdout: TextIO) -> None:
     )
 
 
+def _summary_counts(summary: SyncSummary) -> dict[str, int]:
+    return {
+        "considered": summary.considered,
+        "created": summary.created,
+        "updated": summary.updated,
+        "reopened": summary.reopened,
+        "commented": summary.commented,
+        "closed": summary.closed,
+        "skipped_closed": summary.skipped_closed,
+        "skipped_cap": summary.skipped_cap,
+        "skipped_missing_id": summary.skipped_missing_id,
+        "skipped_notices": summary.skipped_notices,
+        "skipped_unsupported_severity": summary.skipped_unsupported_severity,
+        "dry_run_creates": summary.dry_run_creates,
+        "dry_run_updates": summary.dry_run_updates,
+        "dry_run_reopens": summary.dry_run_reopens,
+        "dry_run_closes": summary.dry_run_closes,
+    }
+
+
+def _diagnostic_report_item(diagnostic: DiagnosticIssue) -> dict[str, str]:
+    return {
+        "diagnostic_id": diagnostic.diagnostic_id,
+        "severity": diagnostic.severity,
+        "label": diagnostic.label,
+        "kind": diagnostic.kind,
+        "title": diagnostic.title,
+    }
+
+
+def _dry_run_report_payload(
+    *,
+    repository: str,
+    diagnostics: Sequence[DiagnosticIssue],
+    summary: SyncSummary,
+    include_notices: bool,
+) -> dict[str, Any]:
+    return {
+        "dry_run": True,
+        "repository": repository,
+        "include_notices": bool(include_notices),
+        "diagnostics": [_diagnostic_report_item(diagnostic) for diagnostic in diagnostics],
+        "summary": _summary_counts(summary),
+        "actions": [dict(action) for action in summary.actions],
+        "issue_status": dict(summary.issue_status),
+    }
+
+
+def _markdown_cell(value: Any) -> str:
+    text = _normalized_text(value, fallback="-")
+    return text.replace("|", "\\|")
+
+
+def _dry_run_report_markdown(payload: Mapping[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), Mapping) else {}
+    lines = [
+        "# Source Diagnostics Issue Sync Dry Run",
+        "",
+        f"- Repository: `{_markdown_cell(payload.get('repository'))}`",
+        f"- Include notices: `{str(bool(payload.get('include_notices'))).lower()}`",
+        f"- Diagnostics considered: `{_markdown_cell(summary.get('considered'))}`",
+        f"- Planned creates: `{_markdown_cell(summary.get('dry_run_creates'))}`",
+        f"- Planned updates: `{_markdown_cell(summary.get('dry_run_updates'))}`",
+        f"- Planned reopens: `{_markdown_cell(summary.get('dry_run_reopens'))}`",
+        f"- Planned stale closes: `{_markdown_cell(summary.get('dry_run_closes'))}`",
+        "",
+        "| Action | Diagnostic ID | Severity | Label | Issue | Reason |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    actions = payload.get("actions")
+    if isinstance(actions, list) and actions:
+        for action in actions:
+            if not isinstance(action, Mapping):
+                continue
+            issue = action.get("issue_number")
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        _markdown_cell(action.get("action")),
+                        _markdown_cell(action.get("diagnostic_id")),
+                        _markdown_cell(action.get("severity")),
+                        _markdown_cell(action.get("label")),
+                        _markdown_cell(f"#{issue}" if issue is not None else "-"),
+                        _markdown_cell(action.get("reason")),
+                    )
+                )
+                + " |"
+            )
+    else:
+        lines.append("| none | - | - | - | - | - |")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_dry_run_report_output(
+    path: Path,
+    *,
+    report_format: str,
+    repository: str,
+    diagnostics: Sequence[DiagnosticIssue],
+    summary: SyncSummary,
+    include_notices: bool,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _dry_run_report_payload(
+        repository=repository,
+        diagnostics=diagnostics,
+        summary=summary,
+        include_notices=include_notices,
+    )
+    if report_format == "json":
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    elif report_format == "markdown":
+        text = _dry_run_report_markdown(payload)
+    else:
+        raise ValueError("dry-run report format must be json or markdown.")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def write_issue_status_output(path: Path, issue_status: Mapping[str, Mapping[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"issue_status": dict(issue_status)}
@@ -602,6 +857,18 @@ def main(
         help="Write static issue metadata for generated Pages diagnostics links.",
     )
     parser.add_argument(
+        "--dry-run-report-output",
+        type=Path,
+        default=None,
+        help="Write a no-mutation dry-run report artifact. Requires --dry-run.",
+    )
+    parser.add_argument(
+        "--dry-run-report-format",
+        choices=("json", "markdown"),
+        default="json",
+        help="Format for --dry-run-report-output.",
+    )
+    parser.add_argument(
         "--no-reopen-closed",
         action="store_true",
         help="Do not reopen matching closed issues when a diagnostic is still present.",
@@ -621,6 +888,8 @@ def main(
 
     env = dict(os.environ if environ is None else environ)
     try:
+        if args.dry_run_report_output is not None and not args.dry_run:
+            raise ValueError("--dry-run-report-output requires --dry-run.")
         repository = args.repository or _repository_from_env(env)
         policy = load_policy(policy_file=args.policy_file, policy_url=args.policy_url)
         raw_events = _policy_events(policy)
@@ -653,6 +922,15 @@ def main(
         summary.skipped_notices = len(raw_events) - len(diagnostics) if args.exclude_notices else 0
         if args.issue_status_output is not None:
             write_issue_status_output(args.issue_status_output, summary.issue_status)
+        if args.dry_run_report_output is not None:
+            write_dry_run_report_output(
+                args.dry_run_report_output,
+                report_format=args.dry_run_report_format,
+                repository=repository,
+                diagnostics=diagnostics,
+                summary=summary,
+                include_notices=include_notices,
+            )
         _print_summary(summary, stdout=stdout)
     except Exception as exc:
         print(f"Source diagnostics issue sync failed: {exc}", file=stderr)

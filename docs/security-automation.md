@@ -72,13 +72,52 @@ No TestPyPI lane is currently implemented. If one is added later, use a separate
 `sync-source-diagnostics-issues.yml` and the `publish-policy.yml`
 `sync-source-diagnostics-issues` job use `issues: write` only for workflow-side
 GitHub Issues synchronization. The deployment job does not receive issue-write
-permission. The sync reads source diagnostics, deduplicates by the deterministic
-source diagnostic ID, stores the ID in the issue body as
+permission. The sync reads only real `source_diagnostics.events` entries,
+deduplicates by the deterministic source diagnostic ID, stores the ID in the
+issue body as
 `<!-- wrg-source-diagnostic-id: ... -->`, and caps new issues per run. Notices,
-warnings, and errors are synced by default. Matching open issues are updated and
-commented instead of duplicated. Matching closed issues are reopened while the
-diagnostic is still present, and open managed issues are closed when their
-diagnostic ID disappears from the current policy.
+warnings, and errors from that event list are synced by default. Derived
+dashboard-only rows such as `No source issues reported`, existing-device
+exclusion notes, and freshness notices are not issue-sync inputs. Matching open
+issues are left untouched when their title, body, and labels already match the
+current diagnostic. Changed open issues are patched without a recurring
+still-present comment. Matching closed issues are reopened with a comment while
+the diagnostic is still present, and open managed issues are closed with a
+comment when their diagnostic ID disappears from the current policy.
+Before creating a new issue, the sync checks both GitHub Search results for the
+diagnostic ID and open issues carrying the managed internals labels. Every
+candidate is accepted only after the exact internal body marker matches the
+current diagnostic ID, so labels alone still cannot block or trigger mutation.
+
+Severity labels are fixed as `internals: notices`, `internals: warning`, and
+`internals: error`. Labels help filtering in GitHub, but they are not sufficient
+to mark an issue as managed without the internal body marker.
+
+During `publish-policy.yml`, GitHub Issues API, label, or permission failures in
+the issue-sync mutation step are degraded rather than publish-blocking. The
+workflow writes static `source_diagnostics.issue_sync.status: unavailable`
+metadata into the issue-status artifact, and the signed policy, manifest, and
+dashboard expose that degraded state. Generator source-diagnostic `error` events
+still block publication in the build validation step.
+
+Source diagnostic IDs are based on stable event identity fields: severity,
+source, event kind/category, release, build family, build, KB article, affected
+target flags, and source URL host/path when available. Generated/fetched
+timestamps, exact message wording, tag order, and display-only prose are
+excluded from the normal ID basis to avoid duplicate issue churn.
+
+An issue is considered managed only when its body contains exactly one internal
+HTML comment marker of the form
+`<!-- wrg-source-diagnostic-id: wrg-source-diagnostic-v1:<hash> -->`. Labels,
+titles, or plain-text diagnostic ID mentions are not enough for the sync to
+update, comment, reopen, or close an issue.
+
+The standalone `sync-source-diagnostics-issues.yml` workflow supports manual
+dry-runs. In dry-run mode the tool does not create, update, comment, reopen, or
+close issues, and can write JSON or Markdown reports with deterministic IDs,
+labels, planned actions, and static issue-status metadata. The workflow uploads
+a Markdown dry-run artifact without adding any secret beyond the built-in
+`GITHUB_TOKEN`.
 
 The dashboard renders issue links only from static generated
 `source_diagnostics.issue_status` metadata. Browser JavaScript must not query the

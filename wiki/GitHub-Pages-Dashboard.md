@@ -11,7 +11,7 @@ Use this when changing the generated static dashboard or public Pages endpoint c
 | Header | Product display name, program version, dashboard/wiki/repo links. |
 | Target cards | Broad target, required baseline, latest observed build. |
 | Feed currency | Generated time, live age state, thresholds. |
-| Source diagnostics | Counts, source health tiles, drift or parser events. |
+| Source diagnostics | Notice/warning/error filters, counts, source health tiles, drift or parser events. |
 | Excluded releases | Data-driven existing-device exclusion summary. |
 | Programmatic API | Canonical and `/api/v1` links. |
 
@@ -29,6 +29,19 @@ Use this when changing the generated static dashboard or public Pages endpoint c
 | `robots.txt`, `sitemap.xml`, `.nojekyll` | Yes for Pages support |
 
 Local `site/` is generated output for testing and must not be committed. The Pages workflow regenerates `site/`, signs policy output, uploads the Pages artifact, deploys it, and then verifies live endpoints. Use workflow_dispatch to refresh Pages manually. Docs/wiki-only changes do not need a Pages rebuild unless they change dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+
+## Source Diagnostics Controls
+
+The Notices, Warnings, and Errors count tiles are keyboard-accessible filters for
+the Source Diagnostics feed. `View all` resets the filter. Rows can expose a
+small hover/focus-only `#Ticket <number>` link, but only when static
+workflow-generated issue metadata contains a canonical
+`https://github.com/Avnsx/win11_release_guard/issues/<number>` URL.
+
+The dashboard never creates GitHub Issues and never calls the GitHub Issues API
+from browser JavaScript. Issue creation, update, reopen, and close operations
+belong only to GitHub Actions issue-sync workflows using the built-in
+`GITHUB_TOKEN` with minimal `issues: write` permission.
 
 ## Rules
 

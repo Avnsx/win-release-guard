@@ -145,6 +145,8 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "data-ui-error-count" in index
     assert "reportMissingNode" in index
     assert "missing '+name" in index
+    assert "console.warn('Windows 11 Release Guard UI '+label+' failed')" in index
+    assert "console.warn('Windows 11 Release Guard UI '+scope+' failed',error)" not in index
     assert "shutdownUi" in index
     assert "pagehide" in index
     assert "beforeunload" in index
@@ -253,6 +255,8 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
         in index
     )
     assert '<a class="panel-action" href="#source-health">Source health</a>' not in index
+    assert '<button type="button" class="panel-action" data-source-health' not in index
+    assert ">Source health</button>" not in index
     assert 'id="source-diagnostics-filter-status" class="diag-filter-status" aria-live="polite"' in index
     assert "Showing all 3 source diagnostic rows." in index
     assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
@@ -271,6 +275,13 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert ".diag-row[hidden]" in index
     assert ".diag-more[hidden]" in index
     assert "row.hidden=!match" in index
+    assert "var labels={notice:'notice',warning:'warning',error:'error'}" in index
+    assert "function normalizedFilter(value){return labels[value] ? value : '';}" in index
+    assert "row.getAttribute('data-diagnostic-severity')===severity" in index
+    assert "applyFilter(control.getAttribute('data-diagnostic-filter')||'all')" in index
+    assert "status.textContent='Showing '+shown+' '+labels[severity]+' diagnostic '+rowWord(shown)+'.'" in index
+    assert "status.textContent='No '+labels[severity]+' diagnostic rows are currently reported.'" in index
+    assert "control.setAttribute('aria-pressed',severity ? String(value===severity) : String(value==='all'))" in index
     assert "aria-pressed" in index
     assert "data-diagnostic-filter" in index
     assert "data-diagnostic-severity" in index
@@ -566,24 +577,73 @@ def test_pages_index_excluded_release_notice_is_data_driven() -> None:
     assert index.find("No source issues reported") < index.find("26H1 excluded for existing devices")
 
 
+def test_pages_index_derived_source_diagnostic_rows_do_not_render_ticket_links() -> None:
+    excluded_entry = ReleasePolicyEntry(
+        version="26H1",
+        build_family=26200,
+        latest_build="26200.1000",
+        reason="new devices only",
+    )
+    preview_policy = ReleasePolicy(
+        excluded_for_existing_devices=(excluded_entry,),
+        source_diagnostics={"event_counts": {"notice": 0, "warning": 0, "error": 0}},
+    )
+    clear_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._clear_source_diagnostic_row()
+    )
+    excluded_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._excluded_release_diagnostic_rows(preview_policy)[0]
+    )
+    policy = ReleasePolicy(
+        excluded_for_existing_devices=(excluded_entry,),
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 0, "error": 0},
+            "issue_status": {
+                clear_id: {
+                    "number": 70,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/70",
+                },
+                excluded_id: {
+                    "number": 71,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/71",
+                },
+            },
+        },
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert "No source issues reported" in index
+    assert "26H1 excluded for existing devices" in index
+    assert f'data-diagnostic-id="{clear_id}"' in index
+    assert f'data-diagnostic-id="{excluded_id}"' in index
+    assert index.count(_diag_row_marker("notice")) == 2
+    _assert_diag_count_tile(index, "notice", 2, "Notices")
+    assert "#Ticket 70" not in index
+    assert "#Ticket 71" not in index
+    assert '<a class="diag-ticket-link"' not in index
+
+
 def test_pages_index_source_diagnostics_render_structured_warning_event() -> None:
+    event = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8461",
+        "kb_article": "KB5089600",
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "updated": "2026-06-09T18:00:00Z",
+        "message": "Atom feed reports a newer baseline build.",
+    }
     policy = ReleasePolicy(
         source_diagnostics={
             "event_counts": {"notice": 0, "warning": 1, "error": 0},
-            "events": [
-                {
-                    "severity": "warning",
-                    "kind": "atom_newer_than_release_history",
-                    "release": "25H2",
-                    "build_family": 26200,
-                    "build": "26200.8461",
-                    "kb_article": "KB5089600",
-                    "affects_broad_target": True,
-                    "affects_required_baseline": True,
-                    "updated": "2026-06-09T18:00:00Z",
-                    "message": "Atom feed reports a newer baseline build.",
-                }
-            ],
+            "events": [event],
         }
     )
 
@@ -599,25 +659,89 @@ def test_pages_index_source_diagnostics_render_structured_warning_event() -> Non
     assert "KB5089600" in index
     assert "Required baseline" in index
     assert "Atom feed reports a newer baseline build." in index
-    expected_id = policy_generator_module._source_diagnostic_id(
-        severity="warning",
-        source="Atom feed",
-        title="Atom Newer Than Release History",
-        message="Atom feed reports a newer baseline build.",
-        tags=(
-            "Release 25H2",
-            "Build 26200.8461",
-            "KB5089600",
-            "Family 26200",
-            "Required baseline",
-            "2026-06-09T18:00:00Z",
-        ),
-    )
+    expected_id = policy_generator_module._source_diagnostic_id_for_event(event)
     assert f'data-diagnostic-id="{expected_id}"' in index
     _assert_diag_count_tile(index, "warning", 1, "Warnings")
     _assert_diag_count_tile(index, "notice", 0, "Notices")
     assert '<span class="severity-badge warning">Warning</span>' in index
     assert "No source issues reported" not in index
+
+
+def test_pages_index_source_diagnostics_ticket_link_is_static_hover_only_metadata() -> None:
+    event = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8461",
+        "kb_article": "KB5089600",
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "message": "Atom feed reports a newer baseline build.",
+    }
+    diagnostic_id = policy_generator_module._source_diagnostic_id_for_event(event)
+    without_issue_status = render_policy_index(
+        ReleasePolicy(source_diagnostics={"event_counts": {"notice": 0, "warning": 1, "error": 0}, "events": [event]}),
+        policy_bytes=None,
+        signature=None,
+    )
+
+    assert '<a class="diag-ticket-link"' not in without_issue_status
+    assert "#Ticket 42" not in without_issue_status
+
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 1, "error": 0},
+            "events": [event],
+            "issue_status": {
+                diagnostic_id: {
+                    "number": 42,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                }
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{diagnostic_id}"' in index
+    assert (
+        '<a class="diag-ticket-link" '
+        'href="https://github.com/Avnsx/win11_release_guard/issues/42" '
+        'aria-label="GitHub issue 42 status open">'
+    ) in index
+    assert "diag-ticket-link-icon" in index
+    assert "#Ticket 42" in index
+    assert '<svg class="github-icon"' in index
+    assert ".diag-row:hover .diag-ticket-link,.diag-row:focus-within .diag-ticket-link" in index
+    assert "opacity:0;pointer-events:none" in index
+    _assert_no_external_page_dependencies(index)
+
+
+def test_pages_index_source_diagnostics_renders_issue_sync_unavailable_status() -> None:
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 0, "error": 0},
+            "events": [],
+            "issue_sync": {
+                "status": "unavailable",
+                "reason": "github_issues_sync_failed",
+                "message": "GitHub Issues sync failed during publish-policy.",
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert 'data-issue-sync-status="unavailable"' in index
+    assert "Issue sync unavailable" in index
+    assert "GitHub Issues sync failed during publish-policy." in index
+    assert "github_issues_sync_failed" in index
+    assert "#Ticket" not in index
+    _assert_no_external_page_dependencies(index)
 
 
 def test_pages_index_source_diagnostics_render_warning_and_error_color_states() -> None:

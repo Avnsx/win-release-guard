@@ -42,6 +42,9 @@ def test_publish_policy_workflow_uses_minimum_pages_permissions() -> None:
     assert "python -m compileall -q win11_release_guard tools" in issue_sync_job
     assert "tests/test_source_diagnostics_issue_sync.py" in issue_sync_job
     assert "tests/test_source_diagnostics_issue_metadata.py" in issue_sync_job
+    assert "contents: write" not in issue_sync_job
+    assert "pages: write" not in issue_sync_job
+    assert "id-token: write" not in issue_sync_job
     build_job = text.split("\n  build:", 1)[1].split("\n  deploy:", 1)[0]
     assert "issues: write" not in build_job
     assert "GITHUB_TOKEN: ${{ github.token }}" not in build_job
@@ -50,6 +53,27 @@ def test_publish_policy_workflow_uses_minimum_pages_permissions() -> None:
     assert "id-token: write" in deploy_job
     assert "GITHUB_TOKEN: ${{ github.token }}" not in deploy_job
     assert "contents: write" not in text
+
+
+def test_publish_policy_workflow_degrades_when_issue_sync_mutation_fails() -> None:
+    text = _workflow_text()
+    issue_sync_job = text.split("sync-source-diagnostics-issues:", 1)[1].split("\n  build:", 1)[0]
+    build_job = text.split("\n  build:", 1)[1].split("\n  deploy:", 1)[0]
+
+    assert "id: issue_sync" in issue_sync_job
+    assert "continue-on-error: true" in issue_sync_job
+    assert "Write degraded issue status when sync fails" in issue_sync_job
+    assert "steps.issue_sync.outcome != 'success'" in issue_sync_job
+    assert '"issue_status": {}' in issue_sync_job
+    assert '"issue_sync": {' in issue_sync_job
+    assert '"status": "unavailable"' in issue_sync_job
+    assert '"reason": "github_issues_sync_failed"' in issue_sync_job
+    assert "Source diagnostics GitHub Issues sync failed" in issue_sync_job
+    assert "actions/upload-artifact@v7" in issue_sync_job
+    assert "source-diagnostics-issue-status" in issue_sync_job
+    assert "actions/download-artifact@v8" in build_job
+    assert "--source-diagnostic-issue-status-file" in build_job
+    assert "source diagnostics error events block publish" in build_job
 
 
 def test_publish_policy_workflow_has_no_pat_or_branch_publish_mode() -> None:

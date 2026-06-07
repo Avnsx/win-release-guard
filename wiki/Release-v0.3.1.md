@@ -22,7 +22,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Packaging | `pyproject.toml` defines GPL-3.0-only metadata, `LICENSE.txt`, project URLs, console script, dependencies, test extras, and package data. |
 | Trust | Runtime uses public policy JSON plus detached Ed25519 signature; clients do not authenticate to GitHub. |
 | Freshness | Manifest/dashboard carry epoch freshness fields; browser age uses `Date.now()` and CLI checks enforce 14/45-day gates. |
-| Dashboard | Static Pages shows trust, Source Diagnostics, target builds, feed currency, and API links. |
+| Dashboard | Static Pages shows trust, Source Diagnostics filters, target builds, feed currency, optional static issue links, and API links. |
 | JSON hardening | Strict JSON rejects duplicate keys, non-finite numbers, invalid UTF-8, wrong object top-level shape, and oversized payloads. |
 | Local truth | Build evidence beats `ProductName`, WMI `Caption`, and `DisplayVersion`; those values remain raw diagnostics. |
 | Local diagnostic output | Default JSON compacts bulky Panther/setup log tails; `--include-raw-local-diagnostics` restores raw bounded local log tails; Panther reads use fixed known paths, 5 MiB per-file tails, and a generous 512 MiB total guard. |
@@ -105,6 +105,7 @@ python -m twine check dist/*
 | Commit local `site/` or `dist/`. | Regenerate those as workflow/local build output only. |
 | Publish raw worktree ZIPs. | Use `tools/export_clean_archive.py` and validate the archive. |
 | Add PyPI credentials to Actions. | Use Trusted Publishing with GitHub OIDC. |
+| Create GitHub Issues from dashboard JavaScript. | Keep issue sync workflow-side with the built-in Actions token and static dashboard links only. |
 | Assume local `wiki/` auto-publishes. | Push the live wiki repository separately when approved. |
 
 ## Related Pages
