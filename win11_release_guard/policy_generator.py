@@ -2400,7 +2400,10 @@ def _wiki_page_html(
     }}
     .wiki-sidebar ul, .wiki-sidebar ol {{ margin: 0; padding-left: 1.2rem; }}
     .wiki-sidebar li {{ margin: 0.32rem 0; }}
-    .wiki-sidebar a {{ overflow-wrap: anywhere; }}
+    .wiki-sidebar a {{
+      overflow-wrap: anywhere;
+      transition: color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+    }}
     .wiki-sidebar a.is-active-section,
     .wiki-sidebar a.is-current-page {{
       display: inline-flex;
@@ -2485,7 +2488,12 @@ def _wiki_page_html(
     .wiki-breadcrumbs [aria-current="page"] {{ color: var(--text); font-weight: 650; }}
     .wiki-content h1, .wiki-content h2, .wiki-content h3 {{ line-height: 1.2; letter-spacing: 0; scroll-margin-top: 1rem; }}
     .wiki-content h1 {{ margin-top: 0; font-size: clamp(1.8rem, 3vw, 2.55rem); }}
-    .wiki-content h2 {{ margin-top: 2rem; padding-top: 0.3rem; border-top: 1px solid var(--border); }}
+    .wiki-content h2 {{
+      margin-top: 3rem;
+      margin-bottom: 1.05rem;
+      padding-top: 0.95rem;
+      border-top: 1px solid var(--border);
+    }}
     .wiki-content h3 {{ margin-top: 1.45rem; color: #21395d; }}
     .wiki-content p, .wiki-content li {{ color: var(--text); }}
     .wiki-content p {{ max-width: 74ch; }}
@@ -2507,7 +2515,7 @@ def _wiki_page_html(
     .wiki-content table {{
       width: 100%;
       border-collapse: collapse;
-      margin: 1rem 0;
+      margin: 1.15rem 0 2rem;
       font-size: 0.95rem;
       box-shadow: 0 1px 0 rgba(15, 108, 189, 0.06);
     }}
@@ -2591,6 +2599,8 @@ def _wiki_page_html(
     @media (max-width: 520px) {{
       .wiki-layout {{ width: min(100% - 1rem, 1220px); }}
       .wiki-content, .wiki-sidebar {{ padding: 0.9rem; }}
+      .wiki-content h2 {{ margin-top: 2.35rem; margin-bottom: 0.85rem; padding-top: 0.75rem; }}
+      .wiki-content table {{ margin-bottom: 1.45rem; }}
       .wiki-topbar {{ padding: 0.85rem 0.75rem; }}
       .wiki-topbar nav a {{ padding-inline: 0.55rem; }}
     }}

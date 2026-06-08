@@ -310,6 +310,12 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     assert "prefers-reduced-motion: reduce" in home
     assert "@media (max-width: 860px)" in home
     assert "position: sticky" in home
+    assert "transition: color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;" in home
+    assert ".wiki-content h2 {" in home
+    assert "margin-top: 3rem;" in home
+    assert "padding-top: 0.95rem;" in home
+    assert "margin: 1.15rem 0 2rem;" in home
+    assert ".wiki-content h2 { margin-top: 2.35rem; margin-bottom: 0.85rem; padding-top: 0.75rem; }" in home
     sidebar_start = home.index('<aside class="wiki-sidebar"')
     changelog_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"', sidebar_start)
     quick_start_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"', sidebar_start)
