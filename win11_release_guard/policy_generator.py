@@ -1407,6 +1407,17 @@ def _write_public_artifact_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def _public_verification_metadata(record: Mapping[str, Any] | None) -> dict[str, str] | None:
+    if not record:
+        return None
+    metadata: dict[str, str] = {}
+    for field in ("algorithm", "key_id", "signed_at_utc"):
+        value = record.get(field)
+        if value is not None:
+            metadata[field] = str(value)
+    return metadata or None
+
+
 def _copy_pypi_download_image(output_dir: Path) -> Path:
     source_path = PYPI_DOWNLOAD_IMAGE_PATH
     if not source_path.is_file():
@@ -2828,8 +2839,10 @@ def write_policy_outputs(
 
     signature: dict[str, str] | None = None
     signature_bytes: bytes | None = None
+    verification_metadata: dict[str, str] | None = None
     if signing_key:
         signature = sign_policy_bytes(policy_bytes, signing_key, key_id=key_id)
+        verification_metadata = _public_verification_metadata(signature)
         signature_file = output_path / "windows-release-policy.json.sig"
         signature_bytes = (json.dumps(signature, indent=2, sort_keys=True) + "\n").encode("utf-8")
         _write_public_artifact_bytes(signature_file, signature_bytes)
@@ -2843,7 +2856,7 @@ def write_policy_outputs(
             render_policy_index(
                 policy,
                 policy_bytes=policy_bytes,
-                signature=signature,
+                verification_metadata=verification_metadata,
             ),
         )
         written["index"] = index_file
@@ -2869,7 +2882,7 @@ def write_policy_outputs(
             policy,
             policy_bytes=policy_bytes,
             signature_bytes=signature_bytes,
-            signature=signature,
+            verification_metadata=verification_metadata,
         )
         _write_public_artifact_text(manifest_file, manifest_text)
         written["manifest"] = manifest_file
@@ -4090,6 +4103,7 @@ def render_policy_index(
     *,
     policy_bytes: bytes | None = None,
     signature: Mapping[str, Any] | None = None,
+    verification_metadata: Mapping[str, Any] | None = None,
     base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     target = policy.broad_target_existing_devices
@@ -4101,11 +4115,12 @@ def render_policy_index(
     generated_age_days = _generated_age_days(generated_at_utc)
     generated_age_text, generated_age_size, generated_age_label = _dashboard_age_display(generated_at_utc)
     generated_age_class = "freshness-metric" + (f" {generated_age_size}" if generated_age_size else "")
-    signature_attached = signature is not None
+    verification = verification_metadata if verification_metadata is not None else _public_verification_metadata(signature)
+    signature_attached = verification is not None
     raw_signature_status = str(policy.metadata.get("signature_status") or "unavailable")
     if signature_attached:
-        signature_algorithm = _signature_field(signature, "algorithm") or "unavailable"
-        key_id = _signature_field(signature, "key_id") or "legacy default key"
+        signature_algorithm = _signature_field(verification, "algorithm") or "unavailable"
+        key_id = _signature_field(verification, "key_id") or "legacy default key"
         signature_status = raw_signature_status
         trust_indicator = "Signed policy trust"
     else:
@@ -4602,11 +4617,13 @@ def render_policy_manifest(
     policy_bytes: bytes,
     signature_bytes: bytes | None,
     signature: Mapping[str, Any] | None = None,
+    verification_metadata: Mapping[str, Any] | None = None,
     base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     target = policy.broad_target_existing_devices
     policy_sha256 = _sha256_hex(policy_bytes)
     signature_sha256 = _sha256_hex(signature_bytes)
+    verification = verification_metadata if verification_metadata is not None else _public_verification_metadata(signature)
     status = _status_text(policy)
     manifest = {
         "schema_version": 1,
@@ -4625,8 +4642,8 @@ def render_policy_manifest(
         "commit_sha": os.environ.get("GITHUB_SHA"),
         "policy_sha256": policy_sha256,
         "signature_sha256": signature_sha256,
-        "signature_algorithm": _signature_field(signature, "algorithm"),
-        "key_id": _signature_field(signature, "key_id"),
+        "signature_algorithm": _signature_field(verification, "algorithm"),
+        "key_id": _signature_field(verification, "key_id"),
         "source_urls": list(policy.source_urls),
         "source_diagnostics": dict(policy.source_diagnostics),
         "published_urls": dict(policy.published_urls or _published_urls_for_base_url(base_url)),
