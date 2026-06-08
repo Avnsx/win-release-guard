@@ -2032,6 +2032,7 @@ def _wiki_navigation_html(
     *,
     base_url: str = DEFAULT_PAGES_BASE_URL,
     current_url: str | None = None,
+    toc_html: str = "",
 ) -> str:
     changelog_href = _changelog_pages_base_url(base_url=base_url)
     current_normalized = current_url.rstrip("/") + "/" if current_url else ""
@@ -2039,11 +2040,15 @@ def _wiki_navigation_html(
     current_is_changelog = current_normalized.startswith(changelog_normalized)
     changelog_link_attrs = ' class="is-current-page" aria-current="page"' if current_is_changelog else ""
     current_site_navigation_html = _mark_current_wiki_navigation_html(site_navigation_html, current_url)
-    return (
+    primary_navigation_html = (
         '<section class="wiki-primary-nav" aria-label="Primary wiki navigation">'
         "<h2>Wiki</h2>"
         f'<ul><li class="wiki-nav-changelog"><a href="{escape(changelog_href, quote=True)}"{changelog_link_attrs}>'
         "Changelog</a></li></ul></section>"
+    )
+    return (
+        '<div class="wiki-sidebar-pinned">'
+        f"{primary_navigation_html}{toc_html}</div>"
         '<section class="wiki-source-nav" aria-label="Wiki source navigation">'
         f"{current_site_navigation_html}</section>"
     )
@@ -2172,6 +2177,84 @@ def _wiki_section_scrollspy_script_html() -> str:
       var sidebar = document.querySelector(".wiki-sidebar");
       var content = document.getElementById("wiki-content");
       if (!sidebar || !content) return;
+      var currentPageLink = sidebar.querySelector('a.is-current-page[aria-current="page"]');
+      var manualSidebarScrollUntil = 0;
+      var autoScrollingSidebar = false;
+      var allowSectionAutoAlign = false;
+      var prefersReducedMotion = false;
+      try {
+        prefersReducedMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      } catch (error) {
+        prefersReducedMotion = false;
+      }
+
+      function now() {
+        return Date.now ? Date.now() : new Date().getTime();
+      }
+
+      function markManualSidebarScroll() {
+        if (!autoScrollingSidebar) manualSidebarScrollUntil = now() + 1200;
+      }
+
+      sidebar.addEventListener("wheel", markManualSidebarScroll, { passive: true });
+      sidebar.addEventListener("touchstart", markManualSidebarScroll, { passive: true });
+      sidebar.addEventListener("keydown", markManualSidebarScroll);
+      sidebar.addEventListener("scroll", markManualSidebarScroll, { passive: true });
+
+      function sidebarAlignmentTargetForCurrentPage() {
+        if (!currentPageLink) return null;
+        var sourceNav = currentPageLink.closest ? currentPageLink.closest(".wiki-source-nav") : null;
+        if (!sourceNav) return currentPageLink;
+        return sourceNav.querySelector(".wiki-nav-group.is-current-group") || currentPageLink;
+      }
+
+      function sidebarTargetIsVisible(target) {
+        var sidebarBox = sidebar.getBoundingClientRect();
+        var targetBox = target.getBoundingClientRect();
+        return targetBox.top >= sidebarBox.top + 8 && targetBox.bottom <= sidebarBox.bottom - 8;
+      }
+
+      function sidebarContentOffsetTop(target) {
+        if (target.offsetParent === sidebar && typeof target.offsetTop === "number") return target.offsetTop;
+        var top = 0;
+        var node = target;
+        while (node && node !== sidebar) {
+          top += node.offsetTop || 0;
+          node = node.offsetParent;
+        }
+        if (node === sidebar) return top;
+        var sidebarBox = sidebar.getBoundingClientRect();
+        var targetBox = target.getBoundingClientRect();
+        return sidebar.scrollTop + targetBox.top - sidebarBox.top;
+      }
+
+      function sidebarPinnedOffset() {
+        var pinned = sidebar.querySelector(".wiki-sidebar-pinned");
+        if (!pinned) return 10;
+        var sidebarBox = sidebar.getBoundingClientRect();
+        var pinnedBox = pinned.getBoundingClientRect();
+        return Math.max(10, Math.round(pinnedBox.bottom - sidebarBox.top + 10));
+      }
+
+      function alignSidebarTarget(target, force) {
+        if (!target || !sidebar.contains(target)) return;
+        if (!force && (now() < manualSidebarScrollUntil || sidebarTargetIsVisible(target))) return;
+        var targetTop = sidebarContentOffsetTop(target) - sidebarPinnedOffset();
+        targetTop = Math.max(0, Math.round(targetTop));
+        autoScrollingSidebar = true;
+        try {
+          sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });
+        } catch (error) {
+          sidebar.scrollTop = targetTop;
+        }
+        window.setTimeout(function () {
+          autoScrollingSidebar = false;
+        }, prefersReducedMotion ? 80 : 360);
+      }
+
+      function alignCurrentPageLink() {
+        alignSidebarTarget(sidebarAlignmentTargetForCurrentPage(), true);
+      }
 
       function isVersionMetaLink(link) {
         var node = link;
@@ -2211,9 +2294,12 @@ def _wiki_section_scrollspy_script_html() -> str:
         if (!target || !content.contains(target)) return null;
         return { link: link, item: link.closest ? link.closest("li") : null, target: target };
       }).filter(Boolean);
-      if (!items.length) return;
+      if (!items.length) {
+        alignCurrentPageLink();
+        return;
+      }
 
-      function setActive(active) {
+      function setActive(active, alignActive) {
         items.forEach(function (entry) {
           var selected = entry === active;
           entry.link.classList.toggle("is-active-section", selected);
@@ -2224,9 +2310,10 @@ def _wiki_section_scrollspy_script_html() -> str:
             entry.link.removeAttribute("aria-current");
           }
         });
+        if (alignActive && active) alignSidebarTarget(active.item || active.link, false);
       }
 
-      function updateActiveSection() {
+      function updateActiveSection(alignActive) {
         var activationLine = Math.min(window.innerHeight * 0.28, 180);
         var active = items[0];
         items.forEach(function (entry) {
@@ -2235,7 +2322,8 @@ def _wiki_section_scrollspy_script_html() -> str:
         if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
           active = items[items.length - 1];
         }
-        setActive(active);
+        setActive(active, alignActive);
+        return active;
       }
 
       var requestFrame = window.requestAnimationFrame || function (callback) { return window.setTimeout(callback, 16); };
@@ -2245,18 +2333,29 @@ def _wiki_section_scrollspy_script_html() -> str:
         scheduled = true;
         requestFrame(function () {
           scheduled = false;
-          updateActiveSection();
+          updateActiveSection(allowSectionAutoAlign);
         });
       }
 
       window.addEventListener("scroll", scheduleUpdate, { passive: true });
       window.addEventListener("resize", scheduleUpdate);
-      window.addEventListener("hashchange", scheduleUpdate);
+      window.addEventListener("hashchange", function () {
+        allowSectionAutoAlign = true;
+        scheduleUpdate();
+      });
       if ("IntersectionObserver" in window) {
         var observer = new IntersectionObserver(scheduleUpdate, { rootMargin: "-18% 0px -70% 0px", threshold: [0, 1] });
         items.forEach(function (entry) { observer.observe(entry.target); });
       }
-      updateActiveSection();
+      var initialActive = updateActiveSection(false);
+      if (window.location.hash && initialActive) {
+        alignSidebarTarget(initialActive.item || initialActive.link, true);
+      } else {
+        alignCurrentPageLink();
+      }
+      window.setTimeout(function () {
+        allowSectionAutoAlign = true;
+      }, 300);
     })();
   </script>
 """
@@ -2280,9 +2379,14 @@ def _wiki_page_html(
     page_title = _wiki_document_title(source.title)
     title = escape(source.title)
     seo_meta = _seo_meta_html(title=page_title, description=description, canonical_url=canonical_url)
-    navigation_html = _wiki_navigation_html(site_navigation_html, base_url=base_url, current_url=canonical_url)
     breadcrumbs_html = _wiki_breadcrumbs_html(source, base_url=base_url)
     toc_html = _render_wiki_toc(headings)
+    navigation_html = _wiki_navigation_html(
+        site_navigation_html,
+        base_url=base_url,
+        current_url=canonical_url,
+        toc_html=toc_html,
+    )
     broken_html = _render_wiki_broken_links(broken_links)
     warning_html = _render_wiki_warnings(warnings)
     content_class = "wiki-content changelog-content" if source.slug.startswith("changelog") else "wiki-content"
@@ -2390,6 +2494,25 @@ def _wiki_page_html(
       box-shadow: 0 12px 30px rgba(15, 108, 189, 0.08);
       max-height: calc(100vh - 2rem);
       overflow: auto;
+    }}
+    .wiki-sidebar::after {{
+      content: "";
+      display: block;
+      min-height: min(34rem, 58vh);
+    }}
+    .wiki-sidebar-pinned {{
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: grid;
+      gap: 0.9rem;
+      margin: -1rem -1rem 0;
+      padding: 1rem 1rem 0.95rem;
+      border-bottom: 1px solid var(--border);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.94) 88%, rgba(255, 255, 255, 0));
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }}
     .wiki-sidebar h1, .wiki-sidebar h2, .wiki-sidebar h3 {{
       margin: 0.35rem 0 0.2rem;
@@ -2592,6 +2715,8 @@ def _wiki_page_html(
     @media (max-width: 860px) {{
       .wiki-layout {{ grid-template-columns: 1fr; margin-top: 1rem; }}
       .wiki-sidebar {{ position: static; max-height: none; }}
+      .wiki-sidebar::after {{ display: none; }}
+      .wiki-sidebar-pinned {{ position: static; margin: 0; padding: 0 0 0.95rem; backdrop-filter: none; -webkit-backdrop-filter: none; }}
       .wiki-topbar {{ align-items: flex-start; flex-direction: column; }}
       .wiki-nav-changelog a {{ align-items: flex-start; flex-direction: column; gap: 0.1rem; }}
       .wiki-content table {{ display: block; overflow-x: auto; }}
@@ -2620,7 +2745,6 @@ def _wiki_page_html(
   <main class="wiki-layout">
     <aside class="wiki-sidebar" aria-label="Wiki navigation" data-section-scrollspy="true">
       <nav aria-label="Wiki pages">{navigation_html}</nav>
-      {toc_html}
     </aside>
     <article id="wiki-content" class="{content_class}" tabindex="-1">
       {breadcrumbs_html}

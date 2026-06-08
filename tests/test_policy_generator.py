@@ -287,7 +287,16 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'entry.link.setAttribute("aria-current", "location")' in index
     assert 'entry.item.classList.toggle("is-active-section", selected)' in index
     assert 'if (!sidebar || !content) return;' in index
-    assert 'if (!items.length) return;' in index
+    assert 'if (!items.length) {' in index
+    assert 'alignCurrentPageLink();' in index
+    assert 'function alignSidebarTarget(target, force)' in index
+    assert "function sidebarContentOffsetTop(target)" in index
+    assert "function sidebarPinnedOffset()" in index
+    assert "manualSidebarScrollUntil = now() + 1200" in index
+    assert "var targetTop = sidebarContentOffsetTop(target) - sidebarPinnedOffset();" in index
+    assert 'sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });' in index
+    assert "window.location.hash && initialActive" in index
+    assert "allowSectionAutoAlign = true;" in index
     assert 'node.classList.contains("version-meta")' in index
     assert 'new IntersectionObserver(scheduleUpdate' in index
     assert "script src" not in index.lower()
@@ -331,7 +340,8 @@ def test_changelog_renderer_warns_for_empty_and_nonstandard_sections(tmp_path: P
     assert "CHANGELOG.md is empty" in empty_index
     assert "No changelog versions found." in empty_index
     assert 'data-section-scrollspy="true"' in empty_index
-    assert 'if (!items.length) return;' in empty_index
+    assert 'if (!items.length) {' in empty_index
+    assert 'alignCurrentPageLink();' in empty_index
     assert "script src" not in empty_index.lower()
 
     changelog = tmp_path / "CHANGELOG.md"

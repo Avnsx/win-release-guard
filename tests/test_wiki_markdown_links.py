@@ -310,6 +310,9 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     assert "prefers-reduced-motion: reduce" in home
     assert "@media (max-width: 860px)" in home
     assert "position: sticky" in home
+    assert 'class="wiki-sidebar-pinned"' in home
+    assert ".wiki-sidebar-pinned {" in home
+    assert "backdrop-filter: blur(10px);" in home
     assert "transition: color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;" in home
     assert ".wiki-content h2 {" in home
     assert "margin-top: 3rem;" in home
@@ -318,11 +321,23 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     assert ".wiki-content h2 { margin-top: 2.35rem; margin-bottom: 0.85rem; padding-top: 0.75rem; }" in home
     sidebar_start = home.index('<aside class="wiki-sidebar"')
     changelog_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"', sidebar_start)
+    toc_index = home.index('<section class="wiki-toc" aria-label="Table of contents">', sidebar_start)
+    source_nav_index = home.index('<section class="wiki-source-nav" aria-label="Wiki source navigation">', sidebar_start)
     quick_start_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"', sidebar_start)
-    assert changelog_index < quick_start_index
+    assert changelog_index < toc_index < source_nav_index < quick_start_index
     local_detection = (output_dir / "wiki/Local-Windows-Detection/index.html").read_text(encoding="utf-8")
     assert ".wiki-sidebar a.is-current-page" in local_detection
     assert ".wiki-source-nav .wiki-nav-group.is-current-group" in local_detection
+    assert ".wiki-sidebar::after" in local_detection
+    assert "min-height: min(34rem, 58vh);" in local_detection
+    assert ".wiki-sidebar::after { display: none; }" in local_detection
+    assert "function alignSidebarTarget(target, force)" in local_detection
+    assert "function sidebarContentOffsetTop(target)" in local_detection
+    assert "function sidebarPinnedOffset()" in local_detection
+    assert "sidebarAlignmentTargetForCurrentPage" in local_detection
+    assert "manualSidebarScrollUntil = now() + 1200" in local_detection
+    assert "var targetTop = sidebarContentOffsetTop(target) - sidebarPinnedOffset();" in local_detection
+    assert 'sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });' in local_detection
     assert '<p class="wiki-nav-group is-current-group"><strong>Architecture</strong></p>' in local_detection
     assert (
         'href="https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/" '
