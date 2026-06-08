@@ -9,6 +9,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 README = ROOT / "README.md"
 RELEASE_WORKFLOW = WORKFLOWS / "release.yml"
 ISSUE_SYNC_WORKFLOW = WORKFLOWS / "sync-source-diagnostics-issues.yml"
+WIKI_SYNC_WORKFLOW = WORKFLOWS / "sync-wiki.yml"
 
 
 BAD_TOKEN_PATTERNS = (
@@ -156,12 +157,29 @@ def test_readme_documents_branding_and_runtime_trust_model() -> None:
     assert "python tools/export_clean_archive.py" in text
 
 
+def test_readme_uses_pages_wiki_as_primary_public_documentation() -> None:
+    text = _read(README)
+
+    primary_pages_links = (
+        "https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/",
+        "https://avnsx.github.io/win11_release_guard/wiki/CLI-and-RMM-Usage/",
+        "https://avnsx.github.io/win11_release_guard/wiki/GitHub-Pages-Dashboard/",
+        "https://avnsx.github.io/win11_release_guard/wiki/changelog/",
+    )
+
+    for url in primary_pages_links:
+        assert url in text
+    assert "| Pages Wiki home | https://avnsx.github.io/win11_release_guard/wiki/ |" in text
+    assert "| GitHub internal Wiki (Markdown mirror) | https://github.com/Avnsx/win11_release_guard/wiki |" in text
+    assert "The generated Pages Wiki is the primary public, indexed documentation surface." in text
+
+
 def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> None:
     for workflow in WORKFLOWS.glob("*.yml"):
         text = _read(workflow)
         lowered = text.lower()
 
-        if workflow.name == "release.yml":
+        if workflow.name in {"release.yml", "sync-wiki.yml"}:
             assert "contents: write" in text
             lowered = lowered.replace("gh_token: ${{ github.token }}", "")
         else:
@@ -209,6 +227,41 @@ def test_source_diagnostics_issue_sync_workflow_is_manual_and_minimal() -> None:
     assert "source-diagnostics-issue-sync-dry-run" in text
 
 
+def test_github_wiki_sync_workflow_is_manual_tagged_and_minimal() -> None:
+    text = _read(WIKI_SYNC_WORKFLOW)
+
+    assert WIKI_SYNC_WORKFLOW.exists()
+    assert "name: Sync GitHub Wiki" in text
+    assert "workflow_dispatch:" in text
+    assert "dry_run:" in text
+    assert "default: true" in text
+    assert "push:" in text
+    assert '"v*.*.*"' in text
+    assert "pull_request:" not in text
+    assert "schedule:" not in text
+    assert "contents: read" in text
+    assert "contents: write" in text
+    assert "issues: write" not in text
+    assert "pages: write" not in text
+    assert "id-token: write" not in text
+    assert "WRG_WIKI_SYNC_TOKEN: ${{ github.token }}" in text
+    assert "persist-credentials: false" in text
+    assert "tools/sync_github_wiki.py" in text
+    assert "tests/test_github_wiki_sync.py" in text
+    assert "--dry-run" in text
+    assert "--push" in text
+    assert "--artifact-dir" in text
+    assert "actions/upload-artifact@v7" in text
+    assert "if: always()" in text
+    assert "if-no-files-found: error" in text
+    assert "continue-on-error" not in text
+    assert "github-wiki-sync-markdown" in text
+    assert ".wiki.git" not in text
+    assert "git push" not in text
+    assert ("gh" + "p_") not in text.lower()
+    assert ("github" + "_pat_") not in text.lower()
+
+
 def test_release_workflow_exists_with_explicit_tagged_triggers() -> None:
     text = _read(RELEASE_WORKFLOW)
 
@@ -236,6 +289,10 @@ def test_release_workflow_validates_tag_version_parity_before_publication() -> N
     assert "python tools/check_version_consistency.py" in text
     assert "Tag '${tag}' does not exist" in text
     assert "create_tag=true is allowed only from main" in text
+    assert "Check release changelog and wiki docs" in text
+    assert "CHANGELOG.md must contain a historical section" in text
+    assert 'docs/releases/${tag}.md' in text
+    assert 'wiki/Release-${tag}.md' in text
 
 
 def test_release_workflow_runs_required_gates_and_attaches_clean_archive() -> None:
@@ -273,7 +330,15 @@ def test_release_workflow_body_links_docs_pages_and_feed() -> None:
         "docs/releases/v${{ steps.release_ref.outputs.version }}.md"
     ) in text
     assert "Pages dashboard: https://avnsx.github.io/win11_release_guard/" in text
+    assert "Pages Wiki: https://avnsx.github.io/win11_release_guard/wiki/" in text
+    assert "Pages changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/" in text
+    assert (
+        "Pages version changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/"
+        "v${{ steps.release_ref.outputs.version }}/"
+    ) in text
     assert "Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
+    assert "Pages publishing remains separate in `.github/workflows/publish-policy.yml`" in text
+    assert "GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`" in text
     assert "pypi-publish.yml" in text
     assert "Trusted Publishing / GitHub OIDC" in text
 

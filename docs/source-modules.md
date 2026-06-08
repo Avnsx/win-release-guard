@@ -17,7 +17,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | `wua_probe.py` | Optional bounded read-only WUA probe. |
 | `audit_probes.py`, `diagnostic_tail.py`, `policy_diagnostics.py` | Read-only blocker diagnostics, bounded Panther/setup tail decoding, privacy markers, and collection-cap metadata. |
 | `remote_policy.py` | JSON loading plus generator-only Release Health parsing. |
-| `policy_generator.py` | Policy/dashboard/manifest/API generation. |
+| `policy_generator.py` | Policy/dashboard/manifest/API generation plus first-party static Pages Wiki and changelog rendering. |
 | `signing.py`, `json_utils.py`, `policy_schema.py` | Trust, strict JSON, schema validation. |
 | `cache.py`, `bundled_policy.py`, `freshness.py`, `version.py` | Cache, bundled fallback, age calculations, identity. |
 
@@ -35,6 +35,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | `check_dependency_freshness.py` | Direct dependency freshness report. |
 | `check_commit_message.py` | Commit message hygiene. |
 | `sync_source_diagnostics_issues.py` | Workflow-side Source Diagnostics to GitHub Issues sync, dry-run planning, static issue-status metadata, and no-client-token reports. |
+| `sync_github_wiki.py` | Workflow-side GitHub internal Wiki Markdown sync from `wiki/*.md`, dry-run artifact creation, and no-credentialed-URL Git push support. |
 | `debug_panther_json_leaks.py` | Developer-only JSON leak debugger for raw Panther/setup strings and compaction fix recommendations. |
 | `live_panther_json_regression.py` | Windows-only live JSON output regression for Panther/setup compaction and raw opt-in behavior. |
 
@@ -50,8 +51,9 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | --- | --- |
 | Runtime source fallback | `test_runtime_policy_sources.py`, `test_source_failures.py` |
 | Evaluator and local truth | `test_evaluator.py`, `test_edge_cases.py`, `test_local_state.py` |
-| Generator and Pages | `test_policy_generator.py`, `test_pages_landing.py`, `test_remote_policy.py` |
+| Generator and Pages | `test_policy_generator.py`, `test_pages_landing.py`, `test_wiki_markdown_links.py`, `test_remote_policy.py` |
 | Source diagnostics issue sync | `test_source_diagnostics_issue_metadata.py`, `test_source_diagnostics_issue_sync.py` |
+| GitHub internal Wiki sync | `test_github_wiki_sync.py` |
 | Signing and JSON hardening | `test_signing.py`, `test_signing_key_management.py`, `test_json_hardening.py` |
 | Automation and release | `test_repository_automation.py`, `test_publish_policy_workflow.py`, `test_ci_workflow.py` |
 | Identity and exports | `test_branding_contract.py`, `test_project_identity.py`, `test_export_clean_archive.py` |

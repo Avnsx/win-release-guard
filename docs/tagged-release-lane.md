@@ -13,11 +13,22 @@ Related links: [maintainer guide](maintainer-guide.md) | [v0.3.1 release notes](
 | Artifact | `dist/win11_release_guard-source.zip`. |
 | License | Repository `LICENSE.txt` is the GPL-3.0 license file and is included in the validated source archive. |
 | Default release state | Draft unless explicitly changed by workflow input. |
-| Release body | Links `CHANGELOG.md`, matching `docs/releases/vX.Y.Z.md`, Pages dashboard, public feed, and the separate PyPI lane. |
+| Release body | Links `CHANGELOG.md`, matching `docs/releases/vX.Y.Z.md`, Pages dashboard, Pages Wiki, Pages changelog, public feed, and the separate PyPI lane. |
 | Token | Built-in `github.token`; no PAT. |
-| Scope | Source archive release, not Pages policy deployment. Publishing a GitHub Release can trigger the separate PyPI workflow, which still owns its own gates and environment approval. |
+| Scope | Source archive release, not Pages policy deployment or direct Wiki mutation. Publishing a GitHub Release can trigger the separate PyPI workflow, which still owns its own gates and environment approval. A `vX.Y.Z` tag can also trigger the separate `sync-wiki.yml` workflow for GitHub internal Wiki Markdown sync. |
 
-The manual workflow can create an annotated tag only when `create_tag=true` is explicitly provided. The built-in GitHub API token is used by the workflow and must never be exposed in logs, docs, or client code.
+The manual workflow can create an annotated tag only when `create_tag=true` is explicitly provided. The built-in GitHub API token is used by the workflow and must never be exposed in logs, docs, or client code. Before publishing a release asset, `release.yml` checks that `CHANGELOG.md`, `docs/releases/vX.Y.Z.md`, and `wiki/Release-vX.Y.Z.md` contain the matching release material.
+
+Tag pushes wire the lanes together without merging their permissions:
+
+- `release.yml` validates the tag and publishes the clean source archive as a GitHub Release asset.
+- `publish-policy.yml` regenerates and deploys the static Pages dashboard, Pages Wiki, and Pages changelog from the tagged source.
+- `sync-wiki.yml` mirrors `wiki/*.md` to the GitHub internal Wiki when the built-in token is accepted by GitHub.
+
+If the GitHub internal Wiki repository is not initialized or GitHub rejects the
+built-in token for `.wiki.git`, only `sync-wiki.yml` fails. The workflow still
+uploads the clean Markdown artifact for manual Wiki application, and the
+release and Pages lanes keep their own status and permissions.
 
 ## PyPI Trusted Publishing Lane
 
@@ -68,7 +79,7 @@ python tools/export_clean_archive.py --validate dist/win11_release_guard-source.
 | 1 | Confirm worktree scope and version parity. |
 | 2 | Run the preflight gates. |
 | 3 | Create or select an annotated `vX.Y.Z` tag. |
-| 4 | Run `release.yml` through tag push or manual dispatch. |
+| 4 | Run `release.yml` through tag push or manual dispatch; tag pushes also trigger the separate Pages and Wiki sync lanes. |
 | 5 | Review the draft GitHub Release and attached clean archive. |
 | 6 | Publish the GitHub Release only after verification output is credible. |
 | 7 | Publish to PyPI separately through `pypi-publish.yml` only when explicitly intended. |
@@ -79,6 +90,7 @@ python tools/export_clean_archive.py --validate dist/win11_release_guard-source.
 | --- | --- |
 | Attach only the validated clean archive. | Upload raw worktree ZIPs. |
 | Keep Pages publishing in `publish-policy.yml`. | Use release workflow to mutate the policy feed. |
+| Keep GitHub internal Wiki sync in `sync-wiki.yml`. | Push Wiki changes directly from `release.yml`. |
 | Keep PyPI publishing in `pypi-publish.yml` with Trusted Publishing. | Add long-lived PyPI credentials to Actions. |
 | Document failed live checks honestly. | Claim live verification when network or endpoint checks failed. |
 | Keep commit messages descriptive. | Use prompt/checkpoint/final-final style commit messages. |

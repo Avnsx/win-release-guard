@@ -10,7 +10,7 @@ from win11_release_guard.policy_generator import render_policy_index
 def _assert_no_external_or_client_auth(index: str) -> None:
     lower = index.lower()
     assert "script src" not in lower
-    assert "<link" not in lower
+    assert 'rel="stylesheet"' not in lower
     assert "@import" not in lower
     assert "api.github.com" not in lower
     assert "github_token" not in lower

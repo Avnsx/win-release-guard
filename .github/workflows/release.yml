@@ -105,6 +105,24 @@ jobs:
       - name: Check version consistency
         run: python tools/check_version_consistency.py
 
+      - name: Check release changelog and wiki docs
+        run: |
+          set -euo pipefail
+          version="${{ steps.release_ref.outputs.version }}"
+          tag="v${version}"
+          if ! grep -Eq "^## ${tag} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md must contain a historical section for ${tag}."
+            exit 1
+          fi
+          if [ ! -f "docs/releases/${tag}.md" ]; then
+            echo "::error::docs/releases/${tag}.md is required for tagged releases."
+            exit 1
+          fi
+          if [ ! -f "wiki/Release-${tag}.md" ]; then
+            echo "::error::wiki/Release-${tag}.md is required so Pages Wiki and GitHub Wiki source match the release."
+            exit 1
+          fi
+
       - name: Check dependency freshness
         run: python tools/check_dependency_freshness.py --output dependency-freshness.json
 
@@ -165,7 +183,12 @@ jobs:
           - Changelog: https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md
           - Detailed release notes: https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v${{ steps.release_ref.outputs.version }}.md
           - Pages dashboard: https://avnsx.github.io/win11_release_guard/
+          - Pages Wiki: https://avnsx.github.io/win11_release_guard/wiki/
+          - Pages changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/
+          - Pages version changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/v${{ steps.release_ref.outputs.version }}/
           - Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json
+          - Pages publishing remains separate in `.github/workflows/publish-policy.yml`; tag pushes trigger that lane for the generated Pages Wiki and changelog.
+          - GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`; tag pushes trigger that lane for `wiki/*.md` source Markdown.
           - PyPI package lane: publishing is separate and runs through `.github/workflows/pypi-publish.yml` with Trusted Publishing / GitHub OIDC.
           - Runtime clients use the signed public JSON feed and detached Ed25519 signature; GitHub Release assets are distribution artifacts, not policy trust roots.
           EOF

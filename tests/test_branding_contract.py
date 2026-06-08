@@ -38,6 +38,7 @@ EXCLUDED_PARTS = {
     "site",
 }
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
+ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
 FORBIDDEN_STALE_PATTERNS = (
     "w11_" + "versioning" + "_api_controller",
     "w11" + "-versioning-api-controller",
@@ -68,7 +69,7 @@ def _iter_source_files(*, include_signed_policy: bool = False) -> list[Path]:
 def _line_findings(patterns: tuple[str, ...], *, include_signed_policy: bool = False) -> list[str]:
     findings: list[str] = []
     for path in _iter_source_files(include_signed_policy=include_signed_policy):
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace").replace(ALLOWED_NORMALIZED_PYPI_URL, "")
         for line_number, line in enumerate(text.splitlines(), start=1):
             for pattern in patterns:
                 if pattern in line:

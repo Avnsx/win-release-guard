@@ -19,8 +19,9 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | Workflow | Trigger | Role |
 | --- | --- | --- |
 | `ci.yml` | push / pull request | Compile, audit actions, check identity, run tests, generate fixture policy, scan, export archive. |
-| `publish-policy.yml` | schedule / `workflow_dispatch` / selected pushes | Generate signed Pages feed and deploy static Pages artifact. |
+| `publish-policy.yml` | schedule / `workflow_dispatch` / selected pushes / `vX.Y.Z` tags | Generate signed Pages feed and deploy static Pages artifact. |
 | `sync-source-diagnostics-issues.yml` | `workflow_dispatch` | Sync source-diagnostic notice/warning/error events to GitHub Issues using only the built-in Actions token. |
+| `sync-wiki.yml` | `workflow_dispatch` / `vX.Y.Z` tags | Sync `wiki/*.md` source Markdown to the same repository's GitHub internal Wiki. |
 | `release.yml` | tags / `workflow_dispatch` | Validate version/tag parity and publish clean source archive as GitHub Release asset. |
 | `pypi-publish.yml` | `workflow_dispatch` / published GitHub Release | Build wheel/sdist on manual runs; publish to PyPI through Trusted Publishing / GitHub OIDC only from an existing tag or published release. |
 | `codeql.yml` | schedule / push / PR | CodeQL scan. |
@@ -35,10 +36,43 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | CI / checks | Read-only repository access. |
 | Pages publish | `contents: read`, `pages: write`, `id-token: write`. |
 | Source diagnostics issue sync | `contents: read`, `issues: write`; uses `GITHUB_TOKEN` / `${{ github.token }}` only. |
+| GitHub internal Wiki sync | `contents: write` only in `sync-wiki.yml`; uses the built-in `github.token` only for the same repository's `.wiki.git` remote. |
 | Tagged releases | `contents: write` only in `release.yml`. |
 | PyPI publish | `id-token: write` only in the `publish-to-pypi` job; no PyPI API token. |
 
 Production Pages publishing must not use PATs, branch pushes, or `gh-pages` branch deployment.
+`publish-policy.yml` selected push paths include `wiki/**` and `CHANGELOG.md` because the first-party generator renders `wiki/*.md` into the static Pages Wiki and `CHANGELOG.md` into the static Pages changelog.
+
+Tagged release pushes also trigger `publish-policy.yml` without moving Pages
+deployment into `release.yml`. This keeps Pages publishing in the Pages lane
+while allowing a release tag to refresh the generated dashboard, Pages Wiki, and
+Pages changelog from the tagged source.
+
+## GitHub Internal Wiki Sync
+
+`wiki/*.md` is the shared source for the static Pages Wiki and GitHub's
+internal Wiki. GitHub documents Wikis as cloneable Git repositories ending in
+`.wiki.git`, and `sync-wiki.yml` mirrors only root `wiki/*.md` files into that
+repository. Generated Pages HTML is never pushed to the internal Wiki.
+
+`sync-wiki.yml` is separate from `publish-policy.yml` and `release.yml`.
+Manual `workflow_dispatch` defaults to dry-run and uploads a clean
+`github-wiki-sync-markdown` artifact that can be applied manually if the live
+Wiki repository is not initialized or GitHub rejects the built-in token. Tag
+runs and manual non-dry-runs attempt the push. A clone, commit, or push failure
+fails only the Wiki sync workflow and remains visible in Actions; it does not
+silently degrade Pages publishing.
+
+The Markdown artifact upload uses `if: always()` so the fallback stays
+available even when the live Wiki clone or push fails. Do not add
+`continue-on-error` to the Wiki sync push step: a failed internal Wiki sync must
+be a visible red workflow while the independent Pages publish lane remains
+separate.
+
+The workflow does not introduce a PAT or additional secret. The sync tool uses
+a temporary Git askpass helper and the built-in token environment value, keeps
+the remote URL as `https://github.com/<owner>/<repo>.wiki.git`, and does not
+print credentialed URLs.
 
 ## GitHub Actions Pinning
 
@@ -129,8 +163,9 @@ README badges show latest workflow status only. The schedule is not the only con
 
 | Do | Do not |
 | --- | --- |
-| Keep workflow permissions minimal. | Add `contents: write` outside the tagged release workflow. |
+| Keep workflow permissions minimal. | Add `contents: write` outside the tagged release workflow and the dedicated Wiki sync workflow. |
 | Keep GitHub Issues sync in Actions with the built-in token. | Add issue creation calls, tokens, or GitHub API writes to client-side Pages JavaScript. |
+| Keep GitHub internal Wiki sync in `sync-wiki.yml` with `wiki/*.md` source only. | Push generated HTML or use browser JavaScript to write the GitHub Wiki. |
 | Keep signed feed generation public-source only. | Add token-authenticated Microsoft API requirements to production generator. |
 | Keep PyPI publishing on Trusted Publishing / OIDC. | Add PyPI API tokens, Twine passwords, usernames, or credentialed repository URLs. |
 | Scan generated Pages output before upload. | Publish stale or unsigned artifacts silently. |

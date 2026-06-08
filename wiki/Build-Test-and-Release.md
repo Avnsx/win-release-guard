@@ -74,7 +74,7 @@ git diff --name-only
 
 Also run the prompt-specific Markdown stale-wording scans before handoff and resolve every hit instead of explaining it away.
 
-The repository `wiki/` folder is GitHub Wiki source/staging only. It does not auto-publish to the live GitHub Wiki; push the live wiki repository separately only when explicitly intended.
+The repository `wiki/` folder is source for the static Pages Wiki and GitHub Wiki source/staging. `publish-policy.yml` renders it to Pages under `/wiki/`; `.github/workflows/sync-wiki.yml` mirrors the same `wiki/*.md` Markdown to the live GitHub internal Wiki when explicitly run as a non-dry-run or triggered by a `vX.Y.Z` tag. Manual dry-runs upload a Markdown artifact for fallback sync. If the live Wiki push fails, the Wiki sync workflow must stay visibly failed while the clean Markdown artifact remains available for manual application.
 
 ## PyPI Publishing Check
 

@@ -159,6 +159,13 @@ def test_pypi_publish_workflow_enforces_tag_version_parity_without_tag_creation(
 def test_readme_pypi_badges_install_and_publish_links_are_visible() -> None:
     text = _repo_text(README)
 
+    assert "![Windows 11 Release Guard dashboard preview](assets/images/windows-11-release-guard-hero-dashboard.png)" in text
+    assert "assets/images/windows-11-release-guard-social-preview.png" not in text
+    assert text.index("assets/images/windows-11-release-guard-hero-dashboard.png") < text.index(
+        "assets/images/download_from_pypi.png"
+    )
+    assert '<a href="https://pypi.org/project/win11-release-guard/" aria-label="Download win11_release_guard from PyPI">' in text
+    assert '<img src="assets/images/download_from_pypi.png" alt="Download from PyPI" width="96" height="96">' in text
     assert "[![PyPI](https://img.shields.io/pypi/v/win11_release_guard?logo=pypi&label=PyPI)]" in text
     assert "[![Python](https://img.shields.io/pypi/pyversions/win11_release_guard?logo=python&label=Python)]" in text
     assert "[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)]" in text

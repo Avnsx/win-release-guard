@@ -75,9 +75,10 @@ python -m win11_release_guard --check-public-pages
 | Repository | https://github.com/Avnsx/win11_release_guard |
 | README | https://github.com/Avnsx/win11_release_guard/blob/main/README.md |
 | Pages dashboard | https://avnsx.github.io/win11_release_guard/ |
+| Pages changelog | https://avnsx.github.io/win11_release_guard/wiki/changelog/ |
 | Public policy JSON | https://avnsx.github.io/win11_release_guard/windows-release-policy.json |
 | Releases | https://github.com/Avnsx/win11_release_guard/releases |
 | Release v0.3.1 | [Release v0.3.1](Release-v0.3.1) |
 | License | https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt |
 
-The local `wiki/` folder is source/staging for GitHub Wiki pages. It does not auto-publish to the live GitHub Wiki.
+The local `wiki/` folder is source for the static Pages Wiki and source/staging for GitHub internal Wiki pages. The Pages workflow renders it to `/wiki/`; `.github/workflows/sync-wiki.yml` can mirror the same `wiki/*.md` Markdown into the live GitHub internal Wiki or produce a dry-run artifact for manual sync fallback.

@@ -24,6 +24,7 @@ LEGACY_PAGES_ROOT = "avnsx.github.io/" + LEGACY_PROJECT_NAME
 LEGACY_PAGES_URL = "https://" + LEGACY_PAGES_ROOT
 LEGACY_ARCHIVE_NAME = LEGACY_PROJECT_NAME + "-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info"))
+ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
 PACKAGING_AUTHOR = 'Mikail ("Avnsx") C.'
 PYPROJECT_AUTHOR_SNIPPET = f"authors = [{{ name = '{PACKAGING_AUTHOR}' }}]"
 TEXT_SUFFIXES = {
@@ -118,7 +119,7 @@ def _iter_files(root: Path, targets: Sequence[Path]) -> Iterable[Path]:
 
 def _line_findings(path: Path, relative_path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
+    for line_number, line in enumerate(text.replace(ALLOWED_NORMALIZED_PYPI_URL, "").splitlines(), start=1):
         for pattern, description in FORBIDDEN_PATTERNS:
             if pattern in line:
                 findings.append(Finding(relative_path, line_number, description))
@@ -157,7 +158,7 @@ def _check_generated_site(root: Path) -> list[Finding]:
         if not path.is_file() or not _is_text_file(path):
             continue
         relative_path = path.relative_to(root)
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace").replace(ALLOWED_NORMALIZED_PYPI_URL, "")
         for line_number, line in enumerate(text.splitlines(), start=1):
             for pattern, description in FORBIDDEN_PATTERNS:
                 if pattern in line:

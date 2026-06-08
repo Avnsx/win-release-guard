@@ -15,8 +15,9 @@ Use this when publishing a GitHub Release with a validated clean source archive.
 | Artifact | `dist/win11_release_guard-source.zip` |
 | License | `LICENSE.txt` carries the repository GPL-3.0 text and is included in the clean source archive. |
 | Default state | Draft release |
-| Release body | Links changelog, detailed release notes, Pages dashboard, public feed, and the separate PyPI lane |
+| Release body | Links changelog, detailed release notes, Pages dashboard, Pages Wiki, Pages changelog, public feed, and the separate PyPI lane |
 | Token | Built-in GitHub token only |
+| Pages / Wiki | Tag pushes trigger the separate Pages publish lane and the separate GitHub internal Wiki sync lane; `release.yml` does not deploy Pages or mutate the Wiki. |
 | PyPI | Separate `.github/workflows/pypi-publish.yml` lane; no normal push or pull request publishing |
 
 ## Checklist
@@ -26,7 +27,7 @@ Use this when publishing a GitHub Release with a validated clean source archive.
 | 1 | Confirm version parity with `tools/check_version_consistency.py`. |
 | 2 | Run tests and source checks. |
 | 3 | Create or select the exact `vX.Y.Z` tag. |
-| 4 | Run release workflow. |
+| 4 | Run release workflow; tag pushes also trigger the separate Pages and Wiki sync lanes. |
 | 5 | Review draft release and attached archive. |
 | 6 | Publish to PyPI separately only when explicitly intended. |
 
@@ -61,6 +62,7 @@ python -m twine check dist/*
 | --- | --- |
 | Attach only validated clean archives. | Attach raw worktree ZIPs. |
 | Keep policy feed publishing in the Pages workflow. | Use release workflow for scheduled feed publication. |
+| Keep GitHub internal Wiki sync in `sync-wiki.yml`. | Push Wiki changes directly from `release.yml`. |
 | Keep PyPI publishing OIDC-only. | Commit `dist/` or add PyPI credentials. |
 | Keep release notes factual. | Hide failed gates or skipped live checks. |
 

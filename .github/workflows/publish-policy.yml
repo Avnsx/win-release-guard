@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*.*.*"
     paths:
       - ".github/workflows/publish-policy.yml"
       - "tools/generate_policy.py"
@@ -14,8 +16,10 @@ on:
       - "tools/check_project_identity.py"
       - "tools/check_version_consistency.py"
       - "tools/scan_for_secret_material.py"
+      - "CHANGELOG.md"
       - "pyproject.toml"
       - "win11_release_guard/**"
+      - "wiki/**"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

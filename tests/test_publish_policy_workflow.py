@@ -19,12 +19,16 @@ def test_publish_policy_workflow_exists_and_has_expected_triggers() -> None:
     assert "schedule:" in text
     assert 'cron: "23 6,18 * * *"' in text
     assert "push:" in text
+    assert "tags:" in text
+    assert '"v*.*.*"' in text
     assert ".github/workflows/publish-policy.yml" in text
     assert "tools/generate_policy.py" in text
     assert "tools/check_project_identity.py" in text
     assert "tools/check_version_consistency.py" in text
     assert "pyproject.toml" in text
+    assert "CHANGELOG.md" in text
     assert "win11_release_guard/**" in text
+    assert "wiki/**" in text
 
 
 def test_publish_policy_workflow_uses_minimum_pages_permissions() -> None:
@@ -195,5 +199,19 @@ def test_publish_policy_workflow_does_not_rely_only_on_schedule() -> None:
 
     assert "workflow_dispatch:" in text
     assert "schedule:" in text
+    assert '"v*.*.*"' in text
     assert "verify-live-pages:" in text
     assert "python -m win11_release_guard --check-policy-source --check-public-pages" in text
+
+
+def test_publish_policy_workflow_keeps_pages_lane_for_wiki_and_changelog() -> None:
+    text = _workflow_text()
+
+    assert "CHANGELOG.md" in text
+    assert "wiki/**" in text
+    assert "--write-index" in text
+    assert "--write-sitemap" in text
+    assert "actions/upload-pages-artifact@v5" in text
+    assert "actions/deploy-pages@v5" in text
+    assert "tools/sync_github_wiki.py" not in text
+    assert "contents: write" not in text

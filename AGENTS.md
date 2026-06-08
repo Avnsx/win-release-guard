@@ -24,6 +24,7 @@ This repository is public software for Windows administrators. Future agents mus
 18. The source of truth is current code, tests, workflows, docs, and tools, not handover text.
 19. Public `/api/v1` Pages aliases stay backward compatible for at least 24 months; add fields compatibly instead of changing or removing the v1 contract.
 20. Signing key rotations require at least 24 months of verification overlap unless a documented last-resort trust break is required.
+21. Future agents must not delete historical `CHANGELOG.md` version sections when adding newer versions. Newer changelog entries are added at the top. Older changelog entries remain available for generated Pages changelog, release history, SEO, and auditability.
 
 Canonical repository and feed:
 
@@ -102,8 +103,11 @@ Canonical repository and feed:
 - The only current third-party exception is `pypa/gh-action-pypi-publish` in `.github/workflows/pypi-publish.yml`, pinned to `cef221092ed1bacb1cc03d23a2d87d1d172e277b` for PyPI Trusted Publishing via GitHub OIDC without stored PyPI credentials.
 - Do not add third-party actions without updating the audit tool, tests, and security automation docs with the reason.
 - Keep workflow token permissions minimal; the publish workflow must not request `contents: write`.
-- Only `.github/workflows/release.yml` may request `contents: write`, and only
-  for explicit tagged GitHub Release publication.
+- Only `.github/workflows/release.yml` and `.github/workflows/sync-wiki.yml`
+  may request `contents: write`. `release.yml` uses it only for explicit
+  tagged GitHub Release publication. `sync-wiki.yml` uses it only to push
+  source Markdown from `wiki/*.md` to the same repository's GitHub Wiki
+  `.wiki.git` repository with the built-in `github.token`.
 - `.github/workflows/pypi-publish.yml` may request `id-token: write` only in the PyPI publish job; it must not define PyPI API tokens, Twine credentials, usernames, passwords, or credentialed repository URLs.
 - Dependabot covers `github-actions` updates for GitHub-owned action majors.
 

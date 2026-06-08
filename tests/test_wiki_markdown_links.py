@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from win11_release_guard.policy_generator import _wiki_sitemap_urls, render_wiki_pages, write_wiki_pages
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WIKI = ROOT / "wiki"
@@ -287,3 +289,164 @@ def test_home_and_release_wiki_pages_have_no_broken_table_link_fragments() -> No
     )
     assert not release_table_has_wiki_link
     assert "[Quick Start](Quick-Start)" in release
+
+
+def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
+    output_dir = tmp_path / "site"
+    written = write_wiki_pages(output_dir)
+
+    assert (output_dir / "wiki/index.html").is_file()
+    assert (output_dir / "wiki/Quick-Start/index.html").is_file()
+    assert written["wiki/index.html"] == output_dir / "wiki/index.html"
+
+    home = (output_dir / "wiki/index.html").read_text(encoding="utf-8")
+    assert "<title>Windows 11 Release Guard Wiki</title>" in home
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"' in home
+    assert 'class="wiki-sidebar"' in home
+    assert 'class="skip-link" href="#wiki-content"' in home
+    assert 'id="wiki-content" class="wiki-content" tabindex="-1"' in home
+    assert 'class="wiki-breadcrumbs" aria-label="Breadcrumb"' in home
+    assert "On this page" in home
+    assert "prefers-reduced-motion: reduce" in home
+    assert "@media (max-width: 860px)" in home
+    assert "position: sticky" in home
+    sidebar_start = home.index('<aside class="wiki-sidebar"')
+    changelog_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"', sidebar_start)
+    quick_start_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"', sidebar_start)
+    assert changelog_index < quick_start_index
+    for html in render_wiki_pages().values():
+        lower = html.lower()
+        assert "<script" not in lower
+        assert "script src" not in lower
+        assert 'rel="stylesheet"' not in lower
+        assert "cdn.jsdelivr" not in lower
+        assert "esm.sh" not in lower
+        assert "npmjs.com" not in lower
+        assert "autotoc" not in lower
+        assert "auto-table-of-content-generator" not in lower
+        assert "fonts.googleapis" not in lower
+        assert "fonts.gstatic" not in lower
+        assert "unpkg.com" not in lower
+        assert "authorization:" not in lower
+        assert "bearer " not in lower
+
+
+def test_static_wiki_renderer_converts_links_anchors_and_escapes_html(tmp_path: Path) -> None:
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    (wiki_dir / "Home.md").write_text(
+        "\n".join(
+            [
+                "# Home",
+                "## First Section",
+                "[[Friendly page|Page-Name]]",
+                "[Internal](Page-Name#Target Section)",
+                "[External](https://example.com/a?b=1&c=2)",
+                "<script>alert('blocked')</script>",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (wiki_dir / "Page-Name.md").write_text("# Page Name\n## Target Section\n", encoding="utf-8")
+    (wiki_dir / "_Sidebar.md").write_text("## Navigation\n- [[Home]]\n- [[Friendly|Page-Name]]\n", encoding="utf-8")
+    (wiki_dir / "_Footer.md").write_text("Repository footer\n", encoding="utf-8")
+
+    pages = render_wiki_pages(wiki_dir=wiki_dir)
+    home = pages["wiki/index.html"]
+
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/"' in home
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/#target-section"' in home
+    assert 'id="first-section"' in home
+    assert '<a href="#first-section">First Section</a>' in home
+    assert "&lt;script&gt;alert(&#x27;blocked&#x27;)&lt;/script&gt;" in home
+    assert "<script>alert" not in home
+    assert 'href="https://example.com/a?b=1&amp;c=2" rel="noopener noreferrer"' in home
+
+
+def test_static_wiki_renderer_marks_broken_internal_links(tmp_path: Path) -> None:
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    (wiki_dir / "Home.md").write_text("# Home\n[[Missing Page]]\n[Also missing](Missing-Page)\n", encoding="utf-8")
+
+    home = render_wiki_pages(wiki_dir=wiki_dir)["wiki/index.html"]
+
+    assert 'data-broken-link="Missing Page"' in home
+    assert 'data-broken-link="Missing-Page"' in home
+    assert "Broken wiki links" in home
+
+
+def test_static_wiki_renderer_warns_for_missing_home_sidebar_footer_and_empty_sources(tmp_path: Path) -> None:
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    (wiki_dir / "Empty.md").write_text("", encoding="utf-8")
+    (wiki_dir / "Page-Name.md").write_text("# Page Name\nContent.\n", encoding="utf-8")
+
+    pages = render_wiki_pages(wiki_dir=wiki_dir)
+
+    assert "wiki/index.html" in pages
+    assert "wiki/Empty/index.html" in pages
+    home = pages["wiki/index.html"]
+    empty = pages["wiki/Empty/index.html"]
+    assert "Generator warnings" in home
+    assert "wiki/Home.md is missing" in home
+    assert "wiki/_Sidebar.md is missing" in home
+    assert "wiki/_Footer.md is missing" in home
+    assert "Empty.md is empty" in empty
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/"' in home
+
+
+def test_static_wiki_renderer_generates_fallback_when_wiki_dir_is_missing(tmp_path: Path) -> None:
+    missing_wiki = tmp_path / "missing-wiki"
+    pages = render_wiki_pages(wiki_dir=missing_wiki)
+
+    assert set(pages) == {"wiki/index.html"}
+    assert "Generator warnings" in pages["wiki/index.html"]
+    assert "missing-wiki is missing" in pages["wiki/index.html"]
+    assert _wiki_sitemap_urls(wiki_dir=missing_wiki) == ("https://avnsx.github.io/win11_release_guard/wiki/",)
+
+
+def test_static_wiki_renderer_handles_link_variants_duplicate_unicode_headings_and_structures(tmp_path: Path) -> None:
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    (wiki_dir / "Home.md").write_text(
+        "\n".join(
+            [
+                "# Home",
+                "## Duplicate",
+                "## Duplicate",
+                "## Über Café",
+                "[[Home]]",
+                "[[Label|Page-Name]]",
+                "[[Page Name With Spaces]]",
+                "`<b>inline</b>`",
+                "```powershell",
+                "<script>alert('blocked')</script>",
+                "```",
+                "| Name | Value |",
+                "| --- | --- |",
+                "| Link | [[Label|Page-Name]] |",
+                "- Parent",
+                "  - Nested stays readable",
+                "1. Ordered",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (wiki_dir / "Page-Name.md").write_text("# Page Name\n", encoding="utf-8")
+    (wiki_dir / "Page Name With Spaces.md").write_text("# Page Name With Spaces\n", encoding="utf-8")
+
+    home = render_wiki_pages(wiki_dir=wiki_dir)["wiki/index.html"]
+
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/"' in home
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/"' in home
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name-With-Spaces/"' in home
+    assert 'id="duplicate"' in home
+    assert 'id="duplicate-2"' in home
+    assert 'id="ber-caf"' in home
+    assert "&lt;b&gt;inline&lt;/b&gt;" in home
+    assert "&lt;script&gt;alert(&#x27;blocked&#x27;)&lt;/script&gt;" in home
+    assert "<table>" in home
+    assert "<ul><li>Parent<ul><li>Nested stays readable</li></ul></li></ul>" in home
+    assert "<ol>" in home
+    assert "<script>alert" not in home

@@ -48,13 +48,18 @@ def _freshness_data(index: str) -> dict:
 def _assert_no_external_page_dependencies(index: str) -> None:
     lower = index.lower()
     assert "script src" not in lower
-    assert "<link" not in lower
+    assert 'rel="stylesheet"' not in lower
     assert "fonts.googleapis" not in lower
     assert "fonts.gstatic" not in lower
     assert "@import" not in lower
     assert "cdnjs" not in lower
     assert "cdn.jsdelivr" not in lower
     assert "unpkg.com" not in lower
+    assert "esm.sh" not in lower
+    assert "animations/auto" not in lower
+    assert "auto-table-of-content" not in lower
+    assert "auto-table" not in lower
+    assert "npm" not in lower
     assert "fontawesome" not in lower
     assert "lucide" not in lower
     assert "github_token" not in lower
@@ -124,6 +129,16 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     index = _render_landing(tmp_path)
 
     assert "<title>Windows 11 Release Guard</title>" in index
+    assert (
+        '<meta name="description" content="Windows 11 Release Guard dashboard for Windows 11 release compliance, '
+        "signed public policy feed freshness, 25H2 target status, source diagnostics, and fleet administration "
+        'checks.">'
+        in index
+    )
+    assert '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/">' in index
+    assert '<meta property="og:title" content="Windows 11 Release Guard">' in index
+    assert '<meta property="og:url" content="https://avnsx.github.io/win11_release_guard/">' in index
+    assert '<meta name="twitter:card" content="summary">' in index
     assert "<h1>Windows 11 Release Guard</h1>" in index
     assert 'id="policy-status-pill"' not in index
     assert "Generated age" not in index
@@ -198,10 +213,18 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Program versioning" not in index
     assert "Program Version" in index
     assert 'class="header-actions"' in index
+    assert 'class="header-top-actions"' in index
     assert 'class="header-nav"' in index
+    assert 'class="pypi-download-link"' in index
     assert 'class="nav-hover-label"' in index
     assert "nav-binoculars" not in index
     assert 'aria-label="Header navigation"' in index
+    assert 'aria-label="Download win11_release_guard from PyPI"' in index
+    assert 'href="https://pypi.org/project/win11-release-guard/"' in index
+    assert 'src="assets/images/download_from_pypi.png"' in index
+    assert 'alt="Download from PyPI"' in index
+    assert ".pypi-download-link{display:inline-flex" in index
+    assert (tmp_path / "assets" / "images" / "download_from_pypi.png").is_file()
     assert 'id="policy-summary"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/"' in index
     _assert_glass_dashboard_ui_contract(index)
@@ -215,7 +238,11 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "https://github.com/Avnsx/win11_release_guard/issues/new" in index
     assert 'data-nav-label="Wiki"' in index
     assert "Wiki" in index
-    assert "https://github.com/Avnsx/win11_release_guard/wiki" in index
+    assert "https://avnsx.github.io/win11_release_guard/wiki/" in index
+    assert "https://github.com/Avnsx/win11_release_guard/wiki" not in index
+    assert "animations/auto" not in index
+    assert "auto-table-of-content" not in index
+    assert "esm.sh" not in index
     assert "initHeaderNav" in index
     assert "requestAnimationFrame" in index
     assert "pointermove" in index

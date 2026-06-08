@@ -70,6 +70,15 @@ def test_agents_contract_requires_descriptive_commit_messages() -> None:
     assert "checkpoint after prompt 12" in lower_text
 
 
+def test_agents_contract_preserves_historical_changelog_sections() -> None:
+    text = _agents_text()
+
+    assert "Future agents must not delete historical `CHANGELOG.md` version sections" in text
+    assert "Newer changelog entries are added at the top" in text
+    assert "Older changelog entries remain available for generated Pages changelog" in text
+    assert "release history, SEO, and auditability" in text
+
+
 def test_agents_contract_requires_live_gate_for_deployment_affecting_changes() -> None:
     text = _agents_text()
 

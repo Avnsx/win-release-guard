@@ -14,6 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARCHIVE_PATH = Path("dist") / "win11_release_guard-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
+ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
 REQUIRED_README_PUBLIC_SOURCES_STATEMENT = (
     "The production generator uses public Microsoft Release Health and Atom sources only; "
     "it does not use Microsoft "
@@ -37,12 +38,14 @@ INCLUDE_PATHS = (
     Path(".github") / "workflows" / "ci.yml",
     Path(".github") / "workflows" / "publish-policy.yml",
     Path(".github") / "workflows" / "sync-source-diagnostics-issues.yml",
+    Path(".github") / "workflows" / "sync-wiki.yml",
     Path(".github") / "workflows" / "release.yml",
     Path(".github") / "workflows" / "pypi-publish.yml",
     Path(".github") / "workflows" / "codeql.yml",
     Path(".github") / "workflows" / "pylint.yml",
     Path(".github") / "workflows" / "dependency-freshness.yml",
     Path(".github") / "workflows" / "dependency-audit.yml",
+    Path("assets"),
     Path("docs"),
     Path("wiki"),
 )
@@ -55,6 +58,7 @@ EXCLUDED_DIR_NAMES = {
     ".tmp",
     "build",
     "dist",
+    "generated_site",
     "site",
 }
 
@@ -96,18 +100,21 @@ REQUIRED_ARCHIVE_ENTRIES = {
     ".github/workflows/ci.yml",
     ".github/workflows/publish-policy.yml",
     ".github/workflows/sync-source-diagnostics-issues.yml",
+    ".github/workflows/sync-wiki.yml",
     ".github/workflows/release.yml",
     ".github/workflows/pypi-publish.yml",
     ".github/workflows/codeql.yml",
     ".github/workflows/pylint.yml",
     ".github/workflows/dependency-freshness.yml",
     ".github/workflows/dependency-audit.yml",
+    "assets/images/download_from_pypi.png",
     "win11_release_guard/__init__.py",
     "win11_release_guard/data/windows-release-policy.json",
     "win11_release_guard/data/windows-release-policy.json.sig",
     "win11_release_guard/data/trusted_policy_keys.json",
     "tools/generate_policy.py",
     "tools/generate_signing_key.py",
+    "tools/sync_github_wiki.py",
     "tools/scan_for_secret_material.py",
     "tools/check_commit_message.py",
     "tools/check_dependency_freshness.py",
@@ -120,6 +127,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "docs/security-automation.md",
     "wiki/Home.md",
     "wiki/Release-v0.3.1.md",
+    "tests/test_github_wiki_sync.py",
     "tests/test_no_secret_material.py",
 }
 
@@ -236,7 +244,7 @@ def _validate_archive_content(archive_path: Path) -> None:
     findings: list[str] = []
     with zipfile.ZipFile(archive_path) as archive:
         for name, text in _zip_text_entries(archive):
-            identity_text = text
+            identity_text = text.replace(ALLOWED_NORMALIZED_PYPI_URL, "")
             for pattern in FORBIDDEN_PACKAGE_IDENTITY_PATTERNS:
                 if pattern in identity_text:
                     findings.append(f"{name}: stale package identity {pattern!r}")

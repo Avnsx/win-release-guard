@@ -1,6 +1,6 @@
 # Maintainer Guide
 
-Purpose: this directory keeps compact technical documents for maintainers who change policy generation, signing, automation, release, or Pages behavior. The local `wiki/` folder is documentation-only and mirrors the long-form GitHub Wiki source; code, tests, workflows, and `AGENTS.md` remain source of truth.
+Purpose: this directory keeps compact technical documents for maintainers who change policy generation, signing, automation, release, or Pages behavior. The local `wiki/` folder is rendered into the static Pages Wiki and remains the long-form GitHub internal Wiki source; `CHANGELOG.md` is rendered into the static Pages changelog while staying manually maintained source of truth. Code, tests, workflows, and `AGENTS.md` remain source of truth.
 
 Related links: [root README](../README.md) | [local wiki home](../wiki/Home.md) | [GitHub Wiki](https://github.com/Avnsx/win11_release_guard/wiki)
 

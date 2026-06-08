@@ -15,9 +15,32 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki dashboard](../wik
 | `site/api/v1/policy.json` | Compatibility policy alias. |
 | `site/api/v1/policy.sig` | Compatibility signature alias. |
 | `site/api/v1/manifest.json` | Compatibility manifest alias. |
+| `site/wiki/index.html` | Static Pages Wiki home rendered from `wiki/Home.md`. |
+| `site/wiki/<slug>/index.html` | Static Pages Wiki pages rendered from `wiki/*.md`. |
+| `site/wiki/changelog/index.html` | Static Pages changelog rendered from `CHANGELOG.md`. |
+| `site/wiki/changelog/vX.Y.Z/index.html` | Per-version changelog page rendered from a historical `CHANGELOG.md` section. |
 | `site/robots.txt`, `site/sitemap.xml`, `site/.nojekyll` | GitHub Pages support files. |
 
-`site/` is generated output. Local `site/` is for testing and must not be committed; `.github/workflows/publish-policy.yml` regenerates it inside GitHub Actions, uploads it with `actions/upload-pages-artifact`, and deploys it with `actions/deploy-pages`. Use workflow_dispatch to refresh Pages manually. Docs/wiki-only changes do not need a Pages rebuild unless they affect dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+`site/` is generated output. Local `site/` is for testing and must not be committed; `.github/workflows/publish-policy.yml` regenerates it inside GitHub Actions, uploads it with `actions/upload-pages-artifact`, and deploys it with `actions/deploy-pages`. Use workflow_dispatch to refresh Pages manually. Pushes to `main` that touch `wiki/**` or `CHANGELOG.md` rebuild Pages, and `vX.Y.Z` tag pushes also trigger the Pages lane from the tagged source. Wiki and changelog changes do require a Pages rebuild because `wiki/*.md` and `CHANGELOG.md` are rendered into static Pages HTML. Docs-only changes do not need a Pages rebuild unless they affect dashboard-rendered content, generated metadata, public URLs, or workflow path filters.
+
+## Static Pages Wiki
+
+The Pages Wiki renderer is first-party Python inside `win11_release_guard.policy_generator`. It keeps `wiki/*.md` compatible with GitHub's internal Wiki while rendering HTML for GitHub Pages:
+
+- `wiki/Home.md` becomes `site/wiki/index.html`.
+- Other `wiki/*.md` files become `site/wiki/<slug>/index.html`.
+- `_Sidebar.md` and `_Footer.md` are reused as static navigation/footer sources.
+- GitHub Wiki links such as `[[Home]]`, `[[Page Name]]`, and `[[Label|Page-Name]]` become Pages Wiki links.
+- Raw HTML in Markdown is escaped; no external JS, CSS, fonts, CDN, npm, or browser GitHub write path is used.
+- Broken internal Wiki links, missing `wiki/Home.md`, missing `_Sidebar.md` or `_Footer.md`, missing/empty Wiki sources, and empty Wiki pages are rendered as visible generator warnings instead of being silently dropped. If `wiki/Home.md` is missing, the generator writes a fallback `site/wiki/index.html` so the Pages Wiki root stays reachable while source Markdown is repaired.
+
+## Static Pages Changelog
+
+`CHANGELOG.md` remains the manually maintained source of truth. The generator renders it into `/wiki/changelog/` and creates per-version pages such as `/wiki/changelog/v0.3.1/` for release sections with `vX.Y.Z` headers. `[Unreleased]` stays at the top when present; newer version sections are added above older version sections; historical sections remain visible for generated Pages changelog, release history, SEO, and auditability. Empty changelogs and h2 headings that do not match `[Unreleased]` or `vX.Y.Z` are kept in rendered HTML and surfaced as generator warnings; duplicate version headings receive duplicate-safe anchors.
+
+## Indexing Metadata
+
+Generated HTML pages include a `<title>`, a concise `meta description`, a canonical URL, Open Graph metadata, Twitter summary metadata, and semantic `<main>`, `<nav>`, and content structure. Descriptions are derived from real page content or concise page purpose text; the generator does not emit keyword stuffing, hidden text, cloaking, or external SEO scripts.
 
 ## Dashboard Contract
 
@@ -65,6 +88,6 @@ as static HTML so missing ticket links are visible without client-side API calls
 
 ```powershell
 python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest
-pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_policy_source_cli.py
+pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_wiki_markdown_links.py tests/test_policy_source_cli.py
 python -m win11_release_guard --check-public-pages
 ```

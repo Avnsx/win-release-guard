@@ -25,22 +25,28 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert ".github/workflows/ci.yml" in names
     assert ".github/workflows/publish-policy.yml" in names
     assert ".github/workflows/sync-source-diagnostics-issues.yml" in names
+    assert ".github/workflows/sync-wiki.yml" in names
     assert ".github/workflows/pypi-publish.yml" in names
     assert ".github/workflows/codeql.yml" in names
     assert ".github/workflows/pylint.yml" in names
     assert ".github/workflows/dependency-freshness.yml" in names
     assert ".github/workflows/dependency-audit.yml" in names
+    assert "assets/images/download_from_pypi.png" in names
+    assert "assets/images/windows-11-release-guard-hero-dashboard.png" in names
     assert "win11_release_guard/data/windows-release-policy.json" in names
     assert "win11_release_guard/data/windows-release-policy.json.sig" in names
     assert "tools/check_dependency_freshness.py" in names
     assert "tools/check_commit_message.py" in names
     assert "tools/check_github_action_versions.py" in names
     assert "tools/check_project_identity.py" in names
+    assert "tools/sync_github_wiki.py" in names
     assert "tools/export_clean_archive.py" in names
     assert "docs/security-automation.md" in names
     assert "wiki/Home.md" in names
     assert "wiki/Release-v0.3.1.md" in names
+    assert "tests/test_github_wiki_sync.py" in names
     assert any(name.startswith("tests/") for name in names)
+    assert any(name.startswith("assets/images/") for name in names)
     assert any(name.startswith("docs/") for name in names)
     assert any(name.startswith("wiki/") for name in names)
 
@@ -52,6 +58,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
         assert ".cache" not in parts
         assert "build" not in parts
         assert "dist" not in parts
+        assert "generated_site" not in parts
         assert "site" not in parts
         assert not name.endswith(".pyc")
         assert not name.endswith(".pem")
@@ -105,6 +112,7 @@ def _write_minimal_required_archive(archive_path: Path, forbidden_entry: str) ->
         ".tmp/signing-test/private-key.b64",
         "private-key.b64",
         "site/windows-release-policy.json",
+        "generated_site/index.html",
         "dist/win11_release_guard-source.zip",
         "win11_release_guard.egg-info/PKG-INFO",
         "win11_release_guard/__pycache__/__init__.cpython-312.pyc",

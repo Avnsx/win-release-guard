@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -48,6 +48,8 @@ GITHUB_RELEASES_BASE_URL = "https://github.com/Avnsx/win11_release_guard/release
 GITHUB_LICENSE_URL = "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"
 GITHUB_REPOSITORY_URL = "https://github.com/Avnsx/win11_release_guard"
 GITHUB_ISSUES_BASE_URL = f"{GITHUB_REPOSITORY_URL}/issues"
+PYPI_PROJECT_URL = "https://pypi.org/project/win11-release-guard/"
+PYPI_DOWNLOAD_IMAGE_PATH = Path("assets") / "images" / "download_from_pypi.png"
 PAGES_TIMEZONE = "Europe/Berlin"
 ROBOTS_TXT = (
     "User-agent: *\n"
@@ -60,6 +62,18 @@ CURATED_EXCLUDED_RELEASE_SUMMARIES = {
         "it as an in-place update from 24H2/25H2."
     )
 }
+WIKI_SOURCE_DIR = Path("wiki")
+CHANGELOG_SOURCE_PATH = Path("CHANGELOG.md")
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+_CHANGELOG_VERSION_HEADING_RE = re.compile(
+    r"^##\s+(?P<title>(?:\[?Unreleased\]?|v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?)(?:\s+[-–]\s+.+)?)\s*$",
+    re.IGNORECASE,
+)
+_CHANGELOG_RELEASE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?)\b")
+_ORDERED_LIST_RE = re.compile(r"^\s*\d+\.\s+(.+?)\s*$")
+_UNORDERED_LIST_RE = re.compile(r"^\s*[-*]\s+(.+?)\s*$")
+_LIST_ITEM_RE = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-*])|(?:\d+\.))\s+(?P<text>.+?)\s*$")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _RELEASE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 SOURCE_DIAGNOSTIC_ID_PREFIX = "wrg-source-diagnostic-v1"
 SOURCE_DIAGNOSTIC_ID_HASH_LENGTH = 16
@@ -74,6 +88,38 @@ _SOURCE_DIAGNOSTIC_TIMESTAMP_TAG_RE = re.compile(
 class SourceText:
     text: str
     status: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class WikiHeading:
+    level: int
+    text: str
+    slug: str
+
+
+@dataclass(frozen=True)
+class WikiPageSource:
+    path: Path
+    title: str
+    slug: str
+    lookup_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RenderedWikiPage:
+    source: WikiPageSource
+    html: str
+    headings: tuple[WikiHeading, ...]
+    broken_links: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChangelogSection:
+    title: str
+    slug: str
+    markdown: str
+    version: str | None = None
+    release_href: str | None = None
 
 
 _LAST_UTC_NOW_MS = 0
@@ -1361,6 +1407,1406 @@ def _write_public_artifact_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def _copy_pypi_download_image(output_dir: Path) -> Path:
+    source_path = PYPI_DOWNLOAD_IMAGE_PATH
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Required Pages image asset is missing: {source_path.as_posix()}")
+    target_path = output_dir / PYPI_DOWNLOAD_IMAGE_PATH
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source_path, target_path)
+    return target_path
+
+
+def _wiki_page_url_slug(stem: str) -> str:
+    slug = re.sub(r"\s+", "-", stem.strip())
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", slug)
+    slug = re.sub(r"-{2,}", "-", slug).strip("-")
+    return slug or "page"
+
+
+def _wiki_lookup_key(value: str) -> str:
+    normalized = value.strip()
+    if normalized.lower().endswith(".md"):
+        normalized = normalized[:-3]
+    normalized = normalized.replace("_", "-")
+    normalized = re.sub(r"\s+", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized)
+    return normalized.strip("-").casefold()
+
+
+def _wiki_first_heading(text: str) -> str | None:
+    for line in text.splitlines():
+        match = _MARKDOWN_HEADING_RE.match(line)
+        if match:
+            return _plain_wiki_inline_text(match.group(2)).strip() or None
+    return None
+
+
+def _wiki_title_from_path(path: Path, text: str) -> str:
+    heading = _wiki_first_heading(text)
+    if heading:
+        return heading
+    if path.stem.casefold() == "home":
+        return "Home"
+    return path.stem.replace("-", " ").replace("_", " ").strip() or path.stem
+
+
+def _plain_wiki_inline_text(text: str) -> str:
+    text = re.sub(r"!\[([^\]\n]*)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^\]\n]+)\]\([^)]+\)", r"\1", text)
+
+    def replace_wiki_link(match: re.Match[str]) -> str:
+        value = match.group(1)
+        if "|" in value:
+            label, _target = value.split("|", 1)
+            return label.strip()
+        return value.strip()
+
+    text = re.sub(r"\[\[([^\]\n]+)\]\]", replace_wiki_link, text)
+    text = text.replace("**", "").replace("__", "").replace("`", "")
+    return text
+
+
+def _heading_slug_base(text: str) -> str:
+    normalized = _plain_wiki_inline_text(text).casefold()
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
+    normalized = normalized.strip("-")
+    return normalized or "section"
+
+
+def _unique_heading_slug(text: str, used_slugs: dict[str, int]) -> str:
+    base = _heading_slug_base(text)
+    count = used_slugs.get(base, 0) + 1
+    used_slugs[base] = count
+    if count == 1:
+        return base
+    return f"{base}-{count}"
+
+
+def _unique_slug(base: str, used_slugs: dict[str, int]) -> str:
+    clean_base = base.strip() or "section"
+    count = used_slugs.get(clean_base, 0) + 1
+    used_slugs[clean_base] = count
+    if count == 1:
+        return clean_base
+    return f"{clean_base}-{count}"
+
+
+def _wiki_home_source(wiki_dir: Path) -> WikiPageSource:
+    title = "Home"
+    slug = _wiki_page_url_slug(title)
+    lookup_keys = tuple(dict.fromkeys((_wiki_lookup_key(title), _wiki_lookup_key(slug))))
+    return WikiPageSource(path=wiki_dir / "Home.md", title=title, slug=slug, lookup_keys=lookup_keys)
+
+
+def _fallback_wiki_home_markdown(message: str) -> str:
+    return "\n".join(("# Home", "", message, ""))
+
+
+def _wiki_dir_display_name(source_dir: Path) -> str:
+    if source_dir.is_absolute():
+        return source_dir.name or "wiki"
+    return source_dir.as_posix()
+
+
+def _wiki_source_display_name(path: Path) -> str:
+    if path.is_absolute():
+        return path.name
+    return path.as_posix()
+
+
+def _discover_wiki_sources(wiki_dir: str | Path = WIKI_SOURCE_DIR) -> tuple[tuple[WikiPageSource, ...], dict[Path, str]]:
+    source_dir = Path(wiki_dir)
+    if not source_dir.exists():
+        return (), {}
+    texts: dict[Path, str] = {}
+    sources: list[WikiPageSource] = []
+    for path in sorted(source_dir.glob("*.md"), key=lambda item: item.name.casefold()):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        texts[path] = text
+        title = _wiki_title_from_path(path, text)
+        slug = _wiki_page_url_slug(path.stem)
+        lookup_keys = tuple(
+            dict.fromkeys(
+                (
+                    _wiki_lookup_key(path.stem),
+                    _wiki_lookup_key(slug),
+                    _wiki_lookup_key(title),
+                    _wiki_lookup_key(path.stem.replace("-", " ")),
+                    _wiki_lookup_key(path.stem.replace("_", " ")),
+                )
+            )
+        )
+        sources.append(WikiPageSource(path=path, title=title, slug=slug, lookup_keys=lookup_keys))
+    return tuple(sources), texts
+
+
+def _prepare_wiki_sources(
+    wiki_dir: str | Path = WIKI_SOURCE_DIR,
+) -> tuple[tuple[WikiPageSource, ...], dict[Path, str], tuple[str, ...]]:
+    source_dir = Path(wiki_dir)
+    source_dir_label = _wiki_dir_display_name(source_dir)
+    sources, texts = _discover_wiki_sources(source_dir)
+    warnings: list[str] = []
+    if not source_dir.exists():
+        fallback_source = _wiki_home_source(source_dir)
+        warnings.append(f"{source_dir_label} is missing; generated a fallback Wiki index page.")
+        texts[fallback_source.path] = _fallback_wiki_home_markdown(
+            f"The source directory `{source_dir_label}` is missing. Add `wiki/Home.md` and related Markdown "
+            "sources to publish a full Pages Wiki."
+        )
+        return (fallback_source,), texts, tuple(warnings)
+    if not sources:
+        fallback_source = _wiki_home_source(source_dir)
+        warnings.append(f"{source_dir_label} contains no Markdown sources; generated a fallback Wiki index page.")
+        texts[fallback_source.path] = _fallback_wiki_home_markdown(
+            f"The source directory `{source_dir_label}` contains no Markdown files. Add `wiki/Home.md` "
+            "to publish a full Pages Wiki."
+        )
+        return (fallback_source,), texts, tuple(warnings)
+    if not any(source.path.stem.casefold() == "home" for source in sources):
+        fallback_source = _wiki_home_source(source_dir)
+        warnings.append("wiki/Home.md is missing; generated a fallback Wiki index page from discovered sources.")
+        texts[fallback_source.path] = _fallback_wiki_home_markdown(
+            "`wiki/Home.md` is missing. This fallback index keeps the Pages Wiki reachable while the source "
+            "Markdown is repaired."
+        )
+        sources = (fallback_source, *sources)
+    return sources, texts, tuple(warnings)
+
+
+def _wiki_page_map(sources: Sequence[WikiPageSource]) -> dict[str, WikiPageSource]:
+    pages: dict[str, WikiPageSource] = {}
+    for source in sources:
+        for key in source.lookup_keys:
+            pages.setdefault(key, source)
+    return pages
+
+
+def _wiki_output_relative_path(source: WikiPageSource) -> Path:
+    if source.path.stem.casefold() == "home":
+        return Path("wiki") / "index.html"
+    return Path("wiki") / source.slug / "index.html"
+
+
+def _pages_wiki_url(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    return f"{base_url.rstrip('/')}/wiki/"
+
+
+def _pages_root_url(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    return f"{base_url.rstrip('/')}/"
+
+
+def _pypi_download_image_url(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    _ = base_url
+    return PYPI_DOWNLOAD_IMAGE_PATH.as_posix()
+
+
+def _wiki_page_href(source: WikiPageSource, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    wiki_base = _pages_wiki_url(base_url=base_url)
+    if source.path.stem.casefold() == "home":
+        return wiki_base
+    return f"{wiki_base}{source.slug}/"
+
+
+def _resolve_wiki_target(
+    target: str,
+    pages: Mapping[str, WikiPageSource],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> tuple[str | None, str | None]:
+    page_name, separator, fragment = target.strip().partition("#")
+    if not page_name and separator:
+        return f"#{_heading_slug_base(fragment)}", None
+    page = pages.get(_wiki_lookup_key(page_name))
+    if not page:
+        return None, page_name.strip() or target.strip()
+    href = _wiki_page_href(page, base_url=base_url)
+    if fragment:
+        href = f"{href}#{_heading_slug_base(fragment)}"
+    return href, None
+
+
+def _is_allowed_absolute_url(target: str) -> bool:
+    lower = target.casefold()
+    return lower.startswith(("https://", "http://", "mailto:"))
+
+
+def _has_url_scheme(target: str) -> bool:
+    return bool(re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target))
+
+
+def _render_broken_wiki_link(label: str, target: str, broken_links: list[str]) -> str:
+    clean_target = target.strip()
+    if clean_target:
+        broken_links.append(clean_target)
+    return (
+        f'<span class="broken-link" data-broken-link="{escape(clean_target)}">'
+        f"{escape(label.strip() or clean_target or 'broken link')}</span>"
+    )
+
+
+def _render_wiki_link(
+    value: str,
+    pages: Mapping[str, WikiPageSource],
+    broken_links: list[str],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    if "|" in value:
+        label, target = value.split("|", 1)
+    else:
+        label = target = value
+    href, missing = _resolve_wiki_target(target, pages, base_url=base_url)
+    if missing:
+        return _render_broken_wiki_link(label, missing, broken_links)
+    return f'<a href="{escape(href or "#")}">{escape(label.strip() or target.strip())}</a>'
+
+
+def _render_markdown_link(
+    label: str,
+    target: str,
+    pages: Mapping[str, WikiPageSource],
+    broken_links: list[str],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    clean_target = target.strip()
+    clean_label = label.strip() or clean_target
+    if not clean_target:
+        return escape(clean_label)
+    if clean_target.startswith("#"):
+        href = f"#{_heading_slug_base(clean_target[1:])}"
+        return f'<a href="{escape(href)}">{escape(clean_label)}</a>'
+    if _is_allowed_absolute_url(clean_target):
+        rel = ' rel="noopener noreferrer"' if clean_target.casefold().startswith(("http://", "https://")) else ""
+        return f'<a href="{escape(clean_target)}"{rel}>{escape(clean_label)}</a>'
+    if _has_url_scheme(clean_target):
+        return _render_broken_wiki_link(clean_label, clean_target, broken_links)
+    if clean_target.startswith("/") and not clean_target.startswith("//"):
+        href = f"{base_url.rstrip('/')}{clean_target}"
+        return f'<a href="{escape(href)}">{escape(clean_label)}</a>'
+    if clean_target.startswith(("./", "../")):
+        return f'<a href="{escape(clean_target)}">{escape(clean_label)}</a>'
+    if "/" in clean_target and not clean_target.startswith("//"):
+        return f'<a href="{escape(clean_target)}">{escape(clean_label)}</a>'
+    href, missing = _resolve_wiki_target(clean_target, pages, base_url=base_url)
+    if missing:
+        return _render_broken_wiki_link(clean_label, missing, broken_links)
+    return f'<a href="{escape(href or "#")}">{escape(clean_label)}</a>'
+
+
+def _render_markdown_image(alt: str, target: str) -> str:
+    clean_target = target.strip()
+    if not _is_allowed_absolute_url(clean_target):
+        return escape(alt.strip())
+    return (
+        f'<img src="{escape(clean_target)}" alt="{escape(alt.strip())}" '
+        'loading="lazy" decoding="async">'
+    )
+
+
+def _render_wiki_inline(
+    text: str,
+    pages: Mapping[str, WikiPageSource],
+    broken_links: list[str],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    parts: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("![", index):
+            label_end = text.find("](", index + 2)
+            target_end = text.find(")", label_end + 2) if label_end != -1 else -1
+            if label_end != -1 and target_end != -1:
+                parts.append(_render_markdown_image(text[index + 2 : label_end], text[label_end + 2 : target_end]))
+                index = target_end + 1
+                continue
+        if text.startswith("[[", index):
+            end = text.find("]]", index + 2)
+            if end != -1:
+                parts.append(_render_wiki_link(text[index + 2 : end], pages, broken_links, base_url=base_url))
+                index = end + 2
+                continue
+        if text.startswith("[", index):
+            label_end = text.find("](", index + 1)
+            target_end = text.find(")", label_end + 2) if label_end != -1 else -1
+            if label_end != -1 and target_end != -1:
+                parts.append(
+                    _render_markdown_link(
+                        text[index + 1 : label_end],
+                        text[label_end + 2 : target_end],
+                        pages,
+                        broken_links,
+                        base_url=base_url,
+                    )
+                )
+                index = target_end + 1
+                continue
+        if text.startswith("**", index):
+            end = text.find("**", index + 2)
+            if end != -1:
+                inner = _render_wiki_inline(text[index + 2 : end], pages, broken_links, base_url=base_url)
+                parts.append(f"<strong>{inner}</strong>")
+                index = end + 2
+                continue
+        if text.startswith("`", index):
+            end = text.find("`", index + 1)
+            if end != -1:
+                parts.append(f"<code>{escape(text[index + 1 : end])}</code>")
+                index = end + 1
+                continue
+        next_special = len(text)
+        for marker in ("![", "[[", "[", "**", "`"):
+            marker_index = text.find(marker, index + 1)
+            if marker_index != -1:
+                next_special = min(next_special, marker_index)
+        parts.append(escape(text[index:next_special]))
+        index = next_special
+    return "".join(parts)
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    cells: list[str] = []
+    current: list[str] = []
+    escaped_pipe = False
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    for char in stripped:
+        if char == "|" and not escaped_pipe:
+            cells.append("".join(current).strip())
+            current = []
+            continue
+        if char == "\\" and not escaped_pipe:
+            escaped_pipe = True
+            continue
+        if escaped_pipe:
+            current.append(char)
+            escaped_pipe = False
+            continue
+        current.append(char)
+    cells.append("".join(current).strip())
+    return cells
+
+
+def _is_table_start(lines: Sequence[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    return "|" in lines[index] and bool(_TABLE_SEPARATOR_RE.match(lines[index + 1]))
+
+
+def _render_wiki_table(
+    rows: Sequence[str],
+    pages: Mapping[str, WikiPageSource],
+    broken_links: list[str],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    header = _split_markdown_table_row(rows[0])
+    body_rows = rows[2:]
+    thead = "".join(
+        f"<th>{_render_wiki_inline(cell, pages, broken_links, base_url=base_url)}</th>" for cell in header
+    )
+    tbody_lines: list[str] = []
+    for row in body_rows:
+        cells = _split_markdown_table_row(row)
+        tbody_lines.append(
+            "<tr>"
+            + "".join(f"<td>{_render_wiki_inline(cell, pages, broken_links, base_url=base_url)}</td>" for cell in cells)
+            + "</tr>"
+        )
+    return f"<table><thead><tr>{thead}</tr></thead><tbody>{''.join(tbody_lines)}</tbody></table>"
+
+
+def _list_indent_width(value: str) -> int:
+    return len(value.replace("\t", "    "))
+
+
+def _list_tag(marker: str) -> str:
+    return "ol" if marker.endswith(".") else "ul"
+
+
+def _render_wiki_list(
+    lines: Sequence[str],
+    index: int,
+    pages: Mapping[str, WikiPageSource],
+    broken_links: list[str],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+    base_indent: int | None = None,
+    expected_tag: str | None = None,
+) -> tuple[str, int]:
+    first_match = _LIST_ITEM_RE.match(lines[index])
+    if not first_match:
+        return "", index
+    if base_indent is None:
+        base_indent = _list_indent_width(first_match.group("indent"))
+    tag = expected_tag or _list_tag(first_match.group("marker"))
+    items: list[str] = []
+    while index < len(lines):
+        match = _LIST_ITEM_RE.match(lines[index])
+        if not match:
+            break
+        indent = _list_indent_width(match.group("indent"))
+        current_tag = _list_tag(match.group("marker"))
+        if indent < base_indent:
+            break
+        if indent > base_indent:
+            if not items:
+                break
+            nested_html, index = _render_wiki_list(
+                lines,
+                index,
+                pages,
+                broken_links,
+                base_url=base_url,
+                base_indent=indent,
+                expected_tag=current_tag,
+            )
+            items[-1] += nested_html
+            continue
+        if current_tag != tag:
+            break
+        items.append(_render_wiki_inline(match.group("text"), pages, broken_links, base_url=base_url))
+        index += 1
+    body = "".join(f"<li>{item}</li>" for item in items)
+    return f"<{tag}>{body}</{tag}>", index
+
+
+def _render_wiki_markdown_fragment(
+    text: str,
+    pages: Mapping[str, WikiPageSource],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+    heading_slug_overrides: Mapping[str, str | Sequence[str]] | None = None,
+) -> tuple[str, tuple[WikiHeading, ...], tuple[str, ...]]:
+    lines = text.splitlines()
+    blocks: list[str] = []
+    headings: list[WikiHeading] = []
+    broken_links: list[str] = []
+    used_heading_slugs: dict[str, int] = {}
+    slug_override_counts: dict[str, int] = {}
+    slug_overrides = heading_slug_overrides or {}
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            index += 1
+            continue
+        if stripped.startswith("```"):
+            language = re.sub(r"[^A-Za-z0-9_+-]+", "", stripped[3:].strip())
+            code_lines: list[str] = []
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                code_lines.append(lines[index])
+                index += 1
+            if index < len(lines):
+                index += 1
+            class_attr = f' class="language-{escape(language)}"' if language else ""
+            blocks.append(f"<pre><code{class_attr}>{escape(chr(10).join(code_lines))}</code></pre>")
+            continue
+        heading_match = _MARKDOWN_HEADING_RE.match(line)
+        if heading_match:
+            level = len(heading_match.group(1))
+            heading_text = _plain_wiki_inline_text(heading_match.group(2)).strip()
+            slug_override = slug_overrides.get(heading_text)
+            if isinstance(slug_override, str):
+                slug = slug_override
+            elif slug_override:
+                override_index = slug_override_counts.get(heading_text, 0)
+                slug_override_counts[heading_text] = override_index + 1
+                slug = slug_override[min(override_index, len(slug_override) - 1)]
+            else:
+                slug = _unique_heading_slug(heading_text, used_heading_slugs)
+            if slug_override:
+                slug = _unique_slug(slug, used_heading_slugs)
+            headings.append(WikiHeading(level=level, text=heading_text, slug=slug))
+            inline_heading = _render_wiki_inline(heading_match.group(2), pages, broken_links, base_url=base_url)
+            blocks.append(f'<h{level} id="{escape(slug)}">{inline_heading}</h{level}>')
+            index += 1
+            continue
+        if stripped == "---":
+            blocks.append("<hr>")
+            index += 1
+            continue
+        if _is_table_start(lines, index):
+            table_rows = [lines[index], lines[index + 1]]
+            index += 2
+            while index < len(lines) and lines[index].strip() and "|" in lines[index]:
+                table_rows.append(lines[index])
+                index += 1
+            blocks.append(_render_wiki_table(table_rows, pages, broken_links, base_url=base_url))
+            continue
+        if _LIST_ITEM_RE.match(line):
+            list_html, index = _render_wiki_list(lines, index, pages, broken_links, base_url=base_url)
+            blocks.append(list_html)
+            continue
+        paragraph_lines = [stripped]
+        index += 1
+        while index < len(lines):
+            candidate = lines[index]
+            candidate_stripped = candidate.strip()
+            if not candidate_stripped:
+                break
+            if (
+                candidate_stripped.startswith("```")
+                or _MARKDOWN_HEADING_RE.match(candidate)
+                or candidate_stripped == "---"
+                or _is_table_start(lines, index)
+                or _LIST_ITEM_RE.match(candidate)
+            ):
+                break
+            paragraph_lines.append(candidate_stripped)
+            index += 1
+        paragraph = " ".join(paragraph_lines)
+        blocks.append(f"<p>{_render_wiki_inline(paragraph, pages, broken_links, base_url=base_url)}</p>")
+    return "\n".join(blocks), tuple(headings), tuple(dict.fromkeys(broken_links))
+
+
+def _render_wiki_toc(headings: Sequence[WikiHeading]) -> str:
+    if not headings:
+        return ""
+    items = "".join(
+        f'<li class="toc-level-{heading.level}"><a href="#{escape(heading.slug)}">{escape(heading.text)}</a></li>'
+        for heading in headings
+    )
+    return f'<section class="wiki-toc" aria-label="Table of contents"><h2>On this page</h2><ol>{items}</ol></section>'
+
+
+def _wiki_navigation_html(site_navigation_html: str, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    changelog_href = _changelog_pages_base_url(base_url=base_url)
+    return (
+        '<section class="wiki-primary-nav" aria-label="Primary wiki navigation">'
+        "<h2>Wiki</h2>"
+        f'<ul><li class="wiki-nav-changelog"><a href="{escape(changelog_href, quote=True)}">'
+        "Changelog</a></li></ul></section>"
+        '<section class="wiki-source-nav" aria-label="Wiki source navigation">'
+        f"{site_navigation_html}</section>"
+    )
+
+
+def _wiki_breadcrumbs_html(source: WikiPageSource, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    dashboard_url = _pages_root_url(base_url=base_url)
+    wiki_url = _pages_wiki_url(base_url=base_url)
+    items = [
+        f'<li><a href="{escape(dashboard_url, quote=True)}">Dashboard</a></li>',
+        f'<li><a href="{escape(wiki_url, quote=True)}">Wiki</a></li>',
+    ]
+    if source.slug.startswith("changelog/"):
+        items.append(
+            f'<li><a href="{escape(_changelog_pages_base_url(base_url=base_url), quote=True)}">Changelog</a></li>'
+        )
+    items.append(f'<li aria-current="page">{escape(source.title)}</li>')
+    return f'<nav class="wiki-breadcrumbs" aria-label="Breadcrumb"><ol>{"".join(items)}</ol></nav>'
+
+
+def _render_default_wiki_navigation(sources: Sequence[WikiPageSource], *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    items = "".join(
+        f'<li><a href="{escape(_wiki_page_href(source, base_url=base_url))}">{escape(source.title)}</a></li>'
+        for source in sources
+    )
+    return f'<h2>Wiki</h2><ul>{items}</ul>'
+
+
+def _render_wiki_broken_links(broken_links: Sequence[str]) -> str:
+    if not broken_links:
+        return ""
+    items = "".join(f"<li>{escape(link)}</li>" for link in broken_links)
+    return f'<section class="wiki-broken-links"><h2>Broken wiki links</h2><ul>{items}</ul></section>'
+
+
+def _render_wiki_warnings(warnings: Sequence[str]) -> str:
+    if not warnings:
+        return ""
+    items = "".join(f"<li>{escape(warning)}</li>" for warning in dict.fromkeys(warnings))
+    return f'<section class="wiki-render-warnings"><h2>Generator warnings</h2><ul>{items}</ul></section>'
+
+
+def _clean_meta_text(text: str) -> str:
+    cleaned = _plain_wiki_inline_text(text)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _meta_description(text: str, *, fallback: str, max_length: int = 180) -> str:
+    cleaned = _clean_meta_text(text) or fallback
+    if len(cleaned) <= max_length:
+        return cleaned
+    truncated = cleaned[: max_length - 1].rsplit(" ", 1)[0].strip()
+    return (truncated or cleaned[: max_length - 1]).rstrip(".,;:") + "."
+
+
+def _first_markdown_paragraph(text: str) -> str:
+    lines = text.splitlines()
+    paragraph: list[str] = []
+    in_fence = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not stripped:
+            if paragraph:
+                break
+            continue
+        if not paragraph and (
+            stripped.startswith("#")
+            or stripped.startswith("|")
+            or stripped.startswith(("- ", "* "))
+            or _ORDERED_LIST_RE.match(stripped)
+            or stripped == "---"
+        ):
+            continue
+        paragraph.append(stripped)
+    return " ".join(paragraph)
+
+
+def _wiki_meta_description(source: WikiPageSource, markdown_text: str) -> str:
+    fallback = (
+        f"{source.title} documentation for Windows 11 Release Guard, Windows 11 release compliance, "
+        "the signed public policy feed, and fleet administration."
+    )
+    return _meta_description(_first_markdown_paragraph(markdown_text), fallback=fallback, max_length=280)
+
+
+def _wiki_document_title(title: str) -> str:
+    suffix = "Windows 11 Release Guard Wiki"
+    return title if title.strip().casefold() == suffix.casefold() else f"{title} | {suffix}"
+
+
+def _seo_meta_html(
+    *,
+    title: str,
+    description: str,
+    canonical_url: str,
+    og_type: str = "website",
+) -> str:
+    safe_title = escape(title, quote=True)
+    safe_description = escape(description, quote=True)
+    safe_url = escape(canonical_url, quote=True)
+    safe_type = escape(og_type, quote=True)
+    return (
+        f'  <meta name="description" content="{safe_description}">\n'
+        f'  <link rel="canonical" href="{safe_url}">\n'
+        f'  <meta property="og:title" content="{safe_title}">\n'
+        f'  <meta property="og:description" content="{safe_description}">\n'
+        f'  <meta property="og:type" content="{safe_type}">\n'
+        f'  <meta property="og:url" content="{safe_url}">\n'
+        '  <meta property="og:site_name" content="Windows 11 Release Guard">\n'
+        '  <meta name="twitter:card" content="summary">\n'
+        f'  <meta name="twitter:title" content="{safe_title}">\n'
+        f'  <meta name="twitter:description" content="{safe_description}">\n'
+    )
+
+
+def _wiki_page_html(
+    source: WikiPageSource,
+    body_html: str,
+    headings: Sequence[WikiHeading],
+    *,
+    site_navigation_html: str,
+    footer_html: str,
+    broken_links: Sequence[str],
+    warnings: Sequence[str] = (),
+    canonical_url: str,
+    description: str,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    wiki_url = _pages_wiki_url(base_url=base_url)
+    dashboard_url = _pages_root_url(base_url=base_url)
+    page_title = _wiki_document_title(source.title)
+    title = escape(source.title)
+    seo_meta = _seo_meta_html(title=page_title, description=description, canonical_url=canonical_url)
+    navigation_html = _wiki_navigation_html(site_navigation_html, base_url=base_url)
+    breadcrumbs_html = _wiki_breadcrumbs_html(source, base_url=base_url)
+    toc_html = _render_wiki_toc(headings)
+    broken_html = _render_wiki_broken_links(broken_links)
+    warning_html = _render_wiki_warnings(warnings)
+    content_class = "wiki-content changelog-content" if source.slug.startswith("changelog") else "wiki-content"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(page_title)}</title>
+{seo_meta}  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f5f9ff;
+      --surface: #ffffff;
+      --surface-soft: #eef6ff;
+      --border: #c8ddf7;
+      --text: #172033;
+      --muted: #53657f;
+      --brand: #0f6cbd;
+      --brand-strong: #0b4f8a;
+      --brand-soft: #e8f3ff;
+      --brand-line: #9cccf6;
+      --focus: #005fb8;
+      --warn-bg: #fff7e6;
+      --warn-border: #f2c36b;
+      --shadow: 0 18px 45px rgba(15, 108, 189, 0.12);
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ scroll-behavior: smooth; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(232, 243, 255, 0.96), rgba(245, 249, 255, 1) 18rem),
+        var(--bg);
+    }}
+    a {{ color: var(--brand); text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; }}
+    a:hover {{ color: var(--brand-strong); }}
+    a:focus-visible, summary:focus-visible {{
+      outline: 3px solid rgba(0, 95, 184, 0.34);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }}
+    .skip-link {{
+      position: absolute;
+      left: 1rem;
+      top: 0.75rem;
+      z-index: 20;
+      transform: translateY(-160%);
+      border: 1px solid var(--brand-line);
+      border-radius: 6px;
+      background: #ffffff;
+      box-shadow: var(--shadow);
+      color: var(--brand-strong);
+      font-weight: 700;
+      padding: 0.6rem 0.85rem;
+      text-decoration: none;
+    }}
+    .skip-link:focus {{ transform: translateY(0); }}
+    .wiki-topbar {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem clamp(1rem, 4vw, 3rem);
+      background: rgba(255, 255, 255, 0.92);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 8px 24px rgba(15, 108, 189, 0.08);
+    }}
+    .wiki-brand {{ color: var(--text); font-weight: 750; text-decoration: none; }}
+    .wiki-brand span {{ color: var(--brand); }}
+    .wiki-topbar nav {{ display: flex; flex-wrap: wrap; gap: 0.55rem; font-size: 0.94rem; }}
+    .wiki-topbar nav a {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 2rem;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 0.28rem 0.7rem;
+      text-decoration: none;
+      font-weight: 650;
+    }}
+    .wiki-topbar nav a:hover {{ border-color: var(--brand-line); background: var(--brand-soft); }}
+    .wiki-layout {{
+      display: grid;
+      grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
+      gap: clamp(1rem, 3vw, 2.5rem);
+      width: min(1220px, calc(100% - 2rem));
+      margin: 1.6rem auto 3rem;
+      align-items: start;
+    }}
+    .wiki-sidebar {{
+      position: sticky;
+      top: 1rem;
+      display: grid;
+      gap: 1.25rem;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 12px 30px rgba(15, 108, 189, 0.08);
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
+    }}
+    .wiki-sidebar h1, .wiki-sidebar h2, .wiki-sidebar h3 {{
+      margin: 0.35rem 0 0.2rem;
+      font-size: 0.88rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }}
+    .wiki-sidebar ul, .wiki-sidebar ol {{ margin: 0; padding-left: 1.2rem; }}
+    .wiki-sidebar li {{ margin: 0.32rem 0; }}
+    .wiki-sidebar a {{ overflow-wrap: anywhere; }}
+    .wiki-primary-nav {{
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.9rem;
+    }}
+    .wiki-primary-nav ul {{ list-style: none; padding: 0; }}
+    .wiki-nav-changelog a {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 2.35rem;
+      border: 1px solid var(--brand-line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff, var(--brand-soft));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      color: var(--brand-strong);
+      font-weight: 750;
+      padding: 0.45rem 0.7rem;
+      text-decoration: none;
+    }}
+    .wiki-nav-changelog a::after {{ content: "Release history"; color: var(--muted); font-size: 0.78rem; font-weight: 600; }}
+    .wiki-source-nav {{
+      display: grid;
+      gap: 0.75rem;
+    }}
+    .wiki-toc ol {{ list-style: none; padding-left: 0; }}
+    .wiki-toc a {{ text-decoration: none; }}
+    .wiki-toc .toc-level-2 {{ padding-left: 0.6rem; }}
+    .wiki-toc .toc-level-3, .wiki-toc .toc-level-4, .wiki-toc .toc-level-5, .wiki-toc .toc-level-6 {{
+      padding-left: 1.2rem;
+    }}
+    .wiki-content {{
+      min-width: 0;
+      padding: clamp(1.25rem, 4vw, 2.25rem);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }}
+    .wiki-content:focus {{ outline: none; }}
+    .wiki-breadcrumbs {{
+      margin: 0 0 1.15rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }}
+    .wiki-breadcrumbs ol {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }}
+    .wiki-breadcrumbs li {{ display: inline-flex; align-items: center; gap: 0.4rem; }}
+    .wiki-breadcrumbs li + li::before {{ content: "/"; color: #8aa3bd; }}
+    .wiki-breadcrumbs [aria-current="page"] {{ color: var(--text); font-weight: 650; }}
+    .wiki-content h1, .wiki-content h2, .wiki-content h3 {{ line-height: 1.2; letter-spacing: 0; scroll-margin-top: 1rem; }}
+    .wiki-content h1 {{ margin-top: 0; font-size: clamp(1.8rem, 3vw, 2.55rem); }}
+    .wiki-content h2 {{ margin-top: 2rem; padding-top: 0.3rem; border-top: 1px solid var(--border); }}
+    .wiki-content h3 {{ margin-top: 1.45rem; color: #21395d; }}
+    .wiki-content p, .wiki-content li {{ color: var(--text); }}
+    .wiki-content p {{ max-width: 74ch; }}
+    .wiki-content code {{
+      padding: 0.1rem 0.28rem;
+      background: var(--surface-soft);
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 0.92em;
+    }}
+    .wiki-content pre {{
+      overflow: auto;
+      padding: 1rem;
+      background: #0b1f33;
+      color: #eaf4ff;
+      border-radius: 8px;
+    }}
+    .wiki-content pre code {{ padding: 0; background: transparent; color: inherit; }}
+    .wiki-content table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.95rem;
+      box-shadow: 0 1px 0 rgba(15, 108, 189, 0.06);
+    }}
+    .wiki-content th, .wiki-content td {{ padding: 0.65rem 0.75rem; border: 1px solid var(--border); text-align: left; }}
+    .wiki-content th {{ background: var(--surface-soft); }}
+    .wiki-content img {{ max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border); }}
+    .broken-link {{
+      color: #8a4b00;
+      background: var(--warn-bg);
+      border-bottom: 1px dotted #8a4b00;
+    }}
+    .wiki-broken-links {{
+      margin-top: 2rem;
+      padding: 1rem;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 8px;
+    }}
+    .wiki-render-warnings {{
+      margin: 1.2rem 0;
+      padding: 1rem;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 8px;
+    }}
+    .wiki-render-warnings h2, .wiki-broken-links h2 {{ margin-top: 0; color: #8a4b00; }}
+    .changelog-version-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin: -0.35rem 0 1.2rem;
+    }}
+    .changelog-version-actions a, .changelog-version-nav .version-meta a {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.8rem;
+      padding: 0.18rem 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      font-size: 0.86rem;
+      font-weight: 600;
+      text-decoration: none;
+    }}
+    .changelog-content h2[id] {{
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--brand);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff, #f7fbff);
+      box-shadow: 0 8px 22px rgba(15, 108, 189, 0.07);
+      padding: 0.85rem 1rem;
+    }}
+    .changelog-version-nav .version-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.25rem;
+    }}
+    .wiki-footer {{
+      width: min(1220px, calc(100% - 2rem));
+      margin: 0 auto 2rem;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      html {{ scroll-behavior: auto; }}
+      *, *::before, *::after {{
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }}
+    }}
+    @media (max-width: 860px) {{
+      .wiki-layout {{ grid-template-columns: 1fr; margin-top: 1rem; }}
+      .wiki-sidebar {{ position: static; max-height: none; }}
+      .wiki-topbar {{ align-items: flex-start; flex-direction: column; }}
+      .wiki-nav-changelog a {{ align-items: flex-start; flex-direction: column; gap: 0.1rem; }}
+      .wiki-content table {{ display: block; overflow-x: auto; }}
+    }}
+    @media (max-width: 520px) {{
+      .wiki-layout {{ width: min(100% - 1rem, 1220px); }}
+      .wiki-content, .wiki-sidebar {{ padding: 0.9rem; }}
+      .wiki-topbar {{ padding: 0.85rem 0.75rem; }}
+      .wiki-topbar nav a {{ padding-inline: 0.55rem; }}
+    }}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#wiki-content">Skip to content</a>
+  <header class="wiki-topbar">
+    <a class="wiki-brand" href="{escape(dashboard_url)}"><span>Windows 11</span> Release Guard</a>
+    <nav aria-label="Site">
+      <a href="{escape(dashboard_url)}">Dashboard</a>
+      <a href="{escape(wiki_url)}">Wiki</a>
+      <a href="{escape(_changelog_pages_base_url(base_url=base_url))}">Changelog</a>
+      <a href="{escape(GITHUB_REPOSITORY_URL)}">Repository</a>
+    </nav>
+  </header>
+  <main class="wiki-layout">
+    <aside class="wiki-sidebar" aria-label="Wiki navigation">
+      <nav aria-label="Wiki pages">{navigation_html}</nav>
+      {toc_html}
+    </aside>
+    <article id="wiki-content" class="{content_class}" tabindex="-1">
+      {breadcrumbs_html}
+      {warning_html}
+      {body_html}
+      {broken_html}
+    </article>
+  </main>
+  <footer class="wiki-footer">{footer_html}</footer>
+</body>
+</html>
+"""
+
+
+def render_wiki_pages(
+    *,
+    wiki_dir: str | Path = WIKI_SOURCE_DIR,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> dict[str, str]:
+    sources, texts, global_warnings = _prepare_wiki_sources(wiki_dir)
+    pages = _wiki_page_map(sources)
+    sidebar_source = next((source for source in sources if source.path.name.casefold() == "_sidebar.md"), None)
+    footer_source = next((source for source in sources if source.path.name.casefold() == "_footer.md"), None)
+    if sidebar_source:
+        site_navigation_html, _nav_headings, sidebar_broken = _render_wiki_markdown_fragment(
+            texts[sidebar_source.path], pages, base_url=base_url
+        )
+    else:
+        site_navigation_html = _render_default_wiki_navigation(sources, base_url=base_url)
+        sidebar_broken = ()
+        global_warnings = (*global_warnings, "wiki/_Sidebar.md is missing; generated default Wiki navigation.")
+    if footer_source:
+        footer_html, _footer_headings, footer_broken = _render_wiki_markdown_fragment(
+            texts[footer_source.path], pages, base_url=base_url
+        )
+    else:
+        footer_html = f'<p>Windows 11 Release Guard documentation for <a href="{escape(GITHUB_REPOSITORY_URL)}">win11_release_guard</a>.</p>'
+        footer_broken = ()
+        global_warnings = (*global_warnings, "wiki/_Footer.md is missing; generated default Wiki footer.")
+
+    rendered: dict[str, str] = {}
+    for source in sources:
+        source_text = texts[source.path]
+        source_warnings = list(global_warnings)
+        if not source_text.strip():
+            source_warnings.append(
+                f"{_wiki_source_display_name(source.path)} is empty; generated an empty Wiki page with this warning."
+            )
+        body_html, headings, body_broken = _render_wiki_markdown_fragment(source_text, pages, base_url=base_url)
+        broken_links = tuple(dict.fromkeys((*body_broken, *sidebar_broken, *footer_broken)))
+        html = _wiki_page_html(
+            source,
+            body_html,
+            headings,
+            site_navigation_html=site_navigation_html,
+            footer_html=footer_html,
+            broken_links=broken_links,
+            warnings=source_warnings,
+            canonical_url=_wiki_page_href(source, base_url=base_url),
+            description=_wiki_meta_description(source, source_text),
+            base_url=base_url,
+        )
+        rendered[_wiki_output_relative_path(source).as_posix()] = html
+    return rendered
+
+
+def write_wiki_pages(
+    output_dir: str | Path,
+    *,
+    wiki_dir: str | Path = WIKI_SOURCE_DIR,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> dict[str, Path]:
+    output_path = Path(output_dir)
+    written: dict[str, Path] = {}
+    for relative_path, html in render_wiki_pages(wiki_dir=wiki_dir, base_url=base_url).items():
+        target = output_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_public_artifact_text(target, html)
+        written[relative_path] = target
+    return written
+
+
+def _wiki_sitemap_urls(*, wiki_dir: str | Path = WIKI_SOURCE_DIR, base_url: str = DEFAULT_PAGES_BASE_URL) -> tuple[str, ...]:
+    sources, _texts, _warnings = _prepare_wiki_sources(wiki_dir)
+    if not sources:
+        return ()
+    urls = [_wiki_page_href(source, base_url=base_url) for source in sources]
+    return tuple(dict.fromkeys(urls))
+
+
+def _changelog_anchor_slug(title: str) -> str:
+    if "unreleased" in title.casefold():
+        return "unreleased"
+    version = _changelog_version_from_title(title)
+    if version:
+        return version
+    return _heading_slug_base(title)
+
+
+def _changelog_version_from_title(title: str) -> str | None:
+    if "unreleased" in title.casefold():
+        return None
+    match = _CHANGELOG_RELEASE_VERSION_RE.search(title)
+    if not match:
+        return None
+    return f"v{match.group(1)}"
+
+
+def _changelog_release_href(version: str | None) -> str | None:
+    if not version:
+        return None
+    return f"{GITHUB_RELEASES_BASE_URL}/{version}"
+
+
+def _changelog_index_description() -> str:
+    return (
+        "Windows 11 Release Guard changelog for Windows 11 release compliance, signed public policy feed "
+        "changes, RMM, and fleet administration release history."
+    )
+
+
+def _changelog_section_description(section: ChangelogSection) -> str:
+    version_label = section.version or section.title
+    description = (
+        f"Windows 11 Release Guard {version_label} changelog covering Windows 11 release compliance, "
+        "signed public policy feed changes, RMM, and fleet administration."
+    )
+    lower_markdown = section.markdown.casefold()
+    if "25h2" in lower_markdown or "26h1" in lower_markdown:
+        description += " Includes Windows 11 25H2 and 26H1 release targeting notes."
+    return description
+
+
+def _parse_changelog_sections(text: str) -> tuple[ChangelogSection, ...]:
+    lines = text.splitlines()
+    starts: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        match = _CHANGELOG_VERSION_HEADING_RE.match(line)
+        if match:
+            starts.append((index, _plain_wiki_inline_text(match.group("title")).strip()))
+    sections: list[ChangelogSection] = []
+    used_slugs: dict[str, int] = {}
+    for position, (start, title) in enumerate(starts):
+        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        markdown = "\n".join(lines[start:end]).strip() + "\n"
+        version = _changelog_version_from_title(title)
+        slug = _unique_slug(_changelog_anchor_slug(title), used_slugs)
+        sections.append(
+            ChangelogSection(
+                title=title,
+                slug=slug,
+                markdown=markdown,
+                version=version,
+                release_href=_changelog_release_href(version),
+            )
+        )
+    return tuple(sections)
+
+
+def _changelog_render_warnings(text: str, sections: Sequence[ChangelogSection]) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if not text.strip():
+        warnings.append("CHANGELOG.md is empty; generated a changelog page with no release history.")
+    elif not sections:
+        warnings.append(
+            "CHANGELOG.md contains no recognized version sections; use h2 headings like [Unreleased] or vX.Y.Z."
+        )
+    recognized_titles = {section.title.casefold() for section in sections}
+    for line in text.splitlines():
+        if not line.startswith("## "):
+            continue
+        title = _plain_wiki_inline_text(line[3:]).strip()
+        if title and title.casefold() not in recognized_titles:
+            warnings.append(f"CHANGELOG.md h2 heading is not a recognized version section: {title}")
+    titles = [section.title.casefold() for section in sections]
+    if len(set(titles)) != len(titles):
+        warnings.append("CHANGELOG.md contains duplicate version headings; generated duplicate-safe anchors.")
+    return tuple(dict.fromkeys(warnings))
+
+
+def _changelog_pages_base_url(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    return f"{base_url.rstrip('/')}/wiki/changelog/"
+
+
+def _changelog_section_href(section: ChangelogSection, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    return f"{_changelog_pages_base_url(base_url=base_url)}#{section.slug}"
+
+
+def _changelog_version_page_href(section: ChangelogSection, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str | None:
+    if not section.version:
+        return None
+    return f"{_changelog_pages_base_url(base_url=base_url)}{section.version}/"
+
+
+def _changelog_heading_overrides(sections: Sequence[ChangelogSection]) -> dict[str, str | tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    for section in sections:
+        grouped.setdefault(section.title, []).append(section.slug)
+    return {title: slugs[0] if len(slugs) == 1 else tuple(slugs) for title, slugs in grouped.items()}
+
+
+def _render_changelog_version_actions(
+    section: ChangelogSection,
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    links = [
+        f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}">Pages anchor</a>',
+    ]
+    version_page_href = _changelog_version_page_href(section, base_url=base_url)
+    if version_page_href:
+        links.append(f'<a href="{escape(version_page_href)}">Version page</a>')
+    if section.release_href:
+        links.append(f'<a href="{escape(section.release_href)}" rel="noopener noreferrer">GitHub Release</a>')
+    return f'<nav class="changelog-version-actions" aria-label="{escape(section.title)} links">{"".join(links)}</nav>'
+
+
+def _inject_changelog_version_actions(
+    body_html: str,
+    sections: Sequence[ChangelogSection],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> str:
+    updated = body_html
+    for section in sections:
+        heading = f'<h2 id="{escape(section.slug)}">{escape(section.title)}</h2>'
+        if heading in updated:
+            updated = updated.replace(
+                heading,
+                heading + "\n" + _render_changelog_version_actions(section, base_url=base_url),
+                1,
+            )
+    return updated
+
+
+def _render_changelog_navigation(
+    sections: Sequence[ChangelogSection],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+    local_anchors: bool = True,
+) -> str:
+    if not sections:
+        return "<h2>Changelog</h2><p>No changelog versions found.</p>"
+    items: list[str] = []
+    for section in sections:
+        section_href = f"#{section.slug}" if local_anchors else _changelog_section_href(section, base_url=base_url)
+        links = [f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}">Pages</a>']
+        version_page_href = _changelog_version_page_href(section, base_url=base_url)
+        if version_page_href:
+            links.append(f'<a href="{escape(version_page_href)}">Page</a>')
+        if section.release_href:
+            links.append(f'<a href="{escape(section.release_href)}" rel="noopener noreferrer">Release</a>')
+        items.append(
+            '<li>'
+            f'<a href="{escape(section_href)}">{escape(section.title)}</a>'
+            f'<div class="version-meta">{"".join(links)}</div>'
+            '</li>'
+        )
+    return f'<section class="changelog-version-nav" aria-label="Changelog versions"><h2>Versions</h2><ol>{"".join(items)}</ol></section>'
+
+
+def _render_changelog_body(
+    markdown: str,
+    sections: Sequence[ChangelogSection],
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> tuple[str, tuple[WikiHeading, ...], tuple[str, ...]]:
+    wiki_sources, _texts = _discover_wiki_sources()
+    pages = _wiki_page_map(wiki_sources)
+    body_html, headings, broken_links = _render_wiki_markdown_fragment(
+        markdown,
+        pages,
+        base_url=base_url,
+        heading_slug_overrides=_changelog_heading_overrides(sections),
+    )
+    return _inject_changelog_version_actions(body_html, sections, base_url=base_url), headings, broken_links
+
+
+def render_changelog_pages(
+    *,
+    changelog_path: str | Path = CHANGELOG_SOURCE_PATH,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> dict[str, str]:
+    source = Path(changelog_path)
+    if not source.is_file():
+        return {}
+    text = source.read_text(encoding="utf-8")
+    sections = _parse_changelog_sections(text)
+    changelog_warnings = _changelog_render_warnings(text, sections)
+    body_html, _headings, broken_links = _render_changelog_body(text, sections, base_url=base_url)
+    navigation_html = _render_changelog_navigation(sections, base_url=base_url)
+    version_navigation_html = _render_changelog_navigation(sections, base_url=base_url, local_anchors=False)
+    footer_html = (
+        f'<p>Rendered from <code>CHANGELOG.md</code>. Historical version sections remain in source order for '
+        f'<a href="{escape(_changelog_pages_base_url(base_url=base_url))}">Pages changelog</a>, release history, '
+        "SEO, and auditability.</p>"
+    )
+    index_source = WikiPageSource(path=source, title="Changelog", slug="changelog", lookup_keys=())
+    rendered = {
+        "wiki/changelog/index.html": _wiki_page_html(
+            index_source,
+            body_html,
+            (),
+            site_navigation_html=navigation_html,
+            footer_html=footer_html,
+            broken_links=broken_links,
+            warnings=changelog_warnings,
+            canonical_url=_changelog_pages_base_url(base_url=base_url),
+            description=_changelog_index_description(),
+            base_url=base_url,
+        )
+    }
+    for section in sections:
+        if not section.version:
+            continue
+        version_body, _version_headings, version_broken = _render_changelog_body(
+            f"# Changelog\n\n{section.markdown}",
+            (section,),
+            base_url=base_url,
+        )
+        version_source = WikiPageSource(
+            path=source,
+            title=f"Changelog {section.version}",
+            slug=section.version,
+            lookup_keys=(),
+        )
+        rendered[f"wiki/changelog/{section.version}/index.html"] = _wiki_page_html(
+            version_source,
+            version_body,
+            (),
+            site_navigation_html=version_navigation_html,
+            footer_html=footer_html,
+            broken_links=version_broken,
+            warnings=changelog_warnings,
+            canonical_url=_changelog_version_page_href(section, base_url=base_url) or _changelog_section_href(
+                section, base_url=base_url
+            ),
+            description=_changelog_section_description(section),
+            base_url=base_url,
+        )
+    return rendered
+
+
+def write_changelog_pages(
+    output_dir: str | Path,
+    *,
+    changelog_path: str | Path = CHANGELOG_SOURCE_PATH,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> dict[str, Path]:
+    output_path = Path(output_dir)
+    written: dict[str, Path] = {}
+    for relative_path, html in render_changelog_pages(changelog_path=changelog_path, base_url=base_url).items():
+        target = output_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_public_artifact_text(target, html)
+        written[relative_path] = target
+    return written
+
+
+def _changelog_sitemap_urls(
+    *,
+    changelog_path: str | Path = CHANGELOG_SOURCE_PATH,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+) -> tuple[str, ...]:
+    source = Path(changelog_path)
+    if not source.is_file():
+        return ()
+    sections = _parse_changelog_sections(source.read_text(encoding="utf-8"))
+    urls = [_changelog_pages_base_url(base_url=base_url)]
+    urls.extend(
+        href
+        for href in (_changelog_version_page_href(section, base_url=base_url) for section in sections)
+        if href
+    )
+    return tuple(dict.fromkeys(urls))
+
+
 def write_policy_outputs(
     policy: ReleasePolicy,
     *,
@@ -1401,6 +2847,11 @@ def write_policy_outputs(
             ),
         )
         written["index"] = index_file
+        written["asset:pypi_download"] = _copy_pypi_download_image(output_path)
+        for relative_path, wiki_file in write_wiki_pages(output_path).items():
+            written[f"wiki:{relative_path}"] = wiki_file
+        for relative_path, changelog_file in write_changelog_pages(output_path).items():
+            written[f"changelog:{relative_path}"] = changelog_file
 
     if write_robots:
         robots_file = output_path / "robots.txt"
@@ -2442,7 +3893,17 @@ def _program_title_version_html(version: str | None) -> str:
     )
 
 
-def _header_nav_html() -> str:
+def _pypi_download_link_html(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+    image_url = _pypi_download_image_url(base_url=base_url)
+    return (
+        f'<a class="pypi-download-link" href="{escape(PYPI_PROJECT_URL, quote=True)}" '
+        'aria-label="Download win11_release_guard from PyPI" data-nav-label="PyPI">'
+        f'<img src="{escape(image_url, quote=True)}" alt="Download from PyPI" width="96" height="96">'
+        "</a>"
+    )
+
+
+def _header_nav_html(*, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
     dashboard_icon = (
         '<svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">'
         '<path d="M20,4H6A2,2,0,0,0,4,6V20a2,2,0,0,0,2,2H20a2,2,0,0,0,2-2V6A2,2,0,0,0,20,4Z"/>'
@@ -2463,9 +3924,9 @@ def _header_nav_html() -> str:
         "</svg>"
     )
     items = (
-        ("Dashboard", DEFAULT_PUBLISHED_POLICY_URLS["landing"], dashboard_icon),
+        ("Dashboard", _pages_root_url(base_url=base_url), dashboard_icon),
         ("Write a Issue Ticket", "https://github.com/Avnsx/win11_release_guard/issues/new", issue_icon),
-        ("Wiki", "https://github.com/Avnsx/win11_release_guard/wiki", wiki_icon),
+        ("Wiki", _pages_wiki_url(base_url=base_url), wiki_icon),
     )
     links = "".join(
         (
@@ -2629,6 +4090,7 @@ def render_policy_index(
     *,
     policy_bytes: bytes | None = None,
     signature: Mapping[str, Any] | None = None,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     target = policy.broad_target_existing_devices
     policy_hash = _sha256_hex(policy_bytes)
@@ -2680,6 +4142,16 @@ def render_policy_index(
     target_family = str(target.build_family) if target else "unknown"
     target_latest_observed = target.latest_observed_build if target else None
     target_baseline = target.required_baseline_build if target else None
+    dashboard_url = _pages_root_url(base_url=base_url)
+    dashboard_description = (
+        "Windows 11 Release Guard dashboard for Windows 11 release compliance, signed public policy feed "
+        f"freshness, {target_release} target status, source diagnostics, and fleet administration checks."
+    )
+    dashboard_seo_meta = _seo_meta_html(
+        title="Windows 11 Release Guard",
+        description=dashboard_description,
+        canonical_url=dashboard_url,
+    )
     return (
         "<!doctype html>\n"
         "<html lang=\"en\">\n"
@@ -2687,11 +4159,12 @@ def render_policy_index(
         "  <meta charset=\"utf-8\">\n"
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
         "  <title>Windows 11 Release Guard</title>\n"
+        f"{dashboard_seo_meta}"
         "  <style>\n"
         "    :root{color-scheme:light;--bg:#f4f8fd;--ink:#172033;--muted:#667085;--soft:#f8fbff;--line:#d8e3f0;--panel:#ffffff;--blue:#0078d4;--blue-strong:#0067c0;--blue-soft:#e8f3ff;--ok:#107c10;--ok-soft:#eaf7ed;--warn:#b45309;--warn-soft:#fff4df;--err:#b42318;--err-soft:#fff0ed;--unknown:#64748b;--unknown-soft:#f1f5f9;--code:#063f63;--shadow:0 18px 55px rgba(31,79,143,.12)}\n"
         "    *{box-sizing:border-box}html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}html,body{max-width:100%;overflow-x:hidden}body{position:relative;isolation:isolate;margin:0;min-height:100vh;background:radial-gradient(circle at 14% 9%,#8ee4ff 0,#39b9ff 15%,rgba(57,185,255,0) 34%),radial-gradient(circle at 78% -10%,#78d6ff 0,#168df0 22%,rgba(22,141,240,0) 43%),radial-gradient(circle at 72% 78%,#0036bd 0,#005bd8 27%,rgba(0,91,216,0) 48%),linear-gradient(145deg,#34c8ff 0%,#0587ee 33%,#0058d4 61%,#002b99 100%);color:var(--ink);font-family:Segoe UI,Arial,sans-serif;line-height:1.45}body:before,body:after{content:'';position:fixed;pointer-events:none;z-index:0}body:before{width:115vw;height:84vh;left:-17vw;top:-18vh;border-radius:0 0 58% 52%;background:radial-gradient(ellipse at 32% 35%,rgba(255,255,255,.72),rgba(185,232,255,.38) 28%,rgba(0,120,212,0) 58%);transform:rotate(-8deg);filter:blur(2px)}body:after{width:92vw;height:76vh;right:-26vw;bottom:-29vh;border:2px solid rgba(255,255,255,.32);border-left-color:rgba(151,220,255,.48);border-radius:50%;box-shadow:-120px -82px 0 -26px rgba(255,255,255,.18),-230px -122px 0 -72px rgba(0,120,212,.34);transform:rotate(-18deg)}\n"
         "    main{position:relative;z-index:1;width:calc(100% - 80px);max-width:1580px;margin:40px auto;padding:34px;border:1px solid rgba(255,255,255,.65);border-radius:32px;background:linear-gradient(180deg,rgba(255,255,255,.86),rgba(239,248,255,.74));box-shadow:0 42px 110px rgba(0,35,126,.34),inset 0 1px 0 rgba(255,255,255,.82);backdrop-filter:blur(28px);-webkit-backdrop-filter:blur(28px)}.masthead{margin-bottom:28px;padding:0 2px 10px;border:0;border-radius:0;background:transparent;box-shadow:none;backdrop-filter:none}\n"
-        "    .brand{display:flex;gap:32px;align-items:center;min-width:0}.brand>div:last-child{min-width:0;flex:1}.brand-layout{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center}.brand-copy{min-width:0}.header-actions{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:18px;min-width:0}.winmark{width:132px;height:132px;display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:0 0 auto;filter:drop-shadow(0 18px 28px rgba(0,88,212,.22))}.winmark span{background:linear-gradient(145deg,#3fb8ff 0%,#0a84ff 42%,#0055ef 100%);border-radius:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.38),0 8px 18px rgba(0,78,184,.18)}\n"
+        "    .brand{display:flex;gap:32px;align-items:center;min-width:0}.brand>div:last-child{min-width:0;flex:1}.brand-layout{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:28px;align-items:center}.brand-copy{min-width:0}.header-actions{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:14px;min-width:0}.header-top-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;max-width:100%;flex-wrap:wrap}.pypi-download-link{display:inline-flex;align-items:center;justify-content:center;width:96px;height:96px;line-height:0;text-decoration:none;filter:drop-shadow(0 14px 22px rgba(0,79,168,.18))}.pypi-download-link:hover{text-decoration:none;filter:drop-shadow(0 16px 26px rgba(0,79,168,.24))}.pypi-download-link:focus-visible{outline:3px solid rgba(0,120,212,.3);outline-offset:4px;border-radius:20px}.pypi-download-link img{display:block;width:96px;height:96px;object-fit:contain;border-radius:18px}.winmark{width:132px;height:132px;display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:0 0 auto;filter:drop-shadow(0 18px 28px rgba(0,88,212,.22))}.winmark span{background:linear-gradient(145deg,#3fb8ff 0%,#0a84ff 42%,#0055ef 100%);border-radius:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.38),0 8px 18px rgba(0,78,184,.18)}\n"
         "    .title-line h1{font-size:clamp(34px,4rem,64px);line-height:1.04;margin:0 0 10px;font-weight:760;overflow-wrap:anywhere;color:#071632;letter-spacing:0}.subtitle-line{display:flex;align-items:baseline;gap:16px;min-width:0}.title-version-link{display:inline-flex;align-items:center;gap:8px;margin-left:auto;border:1px solid rgba(142,188,236,.72);border-radius:999px;background:rgba(255,255,255,.7);box-shadow:0 14px 30px rgba(0,79,168,.12),inset 0 1px 0 rgba(255,255,255,.85);padding:13px 20px;font-size:16px;font-weight:700;color:#0b5bd3;white-space:nowrap;flex:0 0 auto;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}.title-version-link:after{content:'';width:7px;height:7px;border-radius:999px;background:#0b5bd3;box-shadow:0 0 0 4px rgba(11,91,211,.1)}.title-version-label{color:#233152;font-family:Segoe UI,Arial,sans-serif;font-weight:500}p{margin:0}.subtitle{font-size:23px;color:#263858;overflow-wrap:anywhere;min-width:0}.eyebrow{display:inline-flex;align-items:center;gap:8px;margin-bottom:8px;color:#004de6;font-size:20px;font-weight:740;text-transform:uppercase;letter-spacing:0}.eyebrow-icon{width:22px;height:22px;color:#0057e7}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}\n"
         "    .header-nav{--item-size:42px;--nav-gap:5px;--enter-nav:0;--label-x:21px;--label-y:0px;position:relative;isolation:isolate}.header-nav ul{list-style:none;margin:0;padding:0}.header-nav .nav-inner{display:flex;gap:var(--nav-gap);white-space:nowrap;border:1px solid rgba(142,188,236,.7);border-radius:999px;background:rgba(255,255,255,.62);box-shadow:0 14px 30px rgba(0,79,168,.13),inset 0 1px 0 rgba(255,255,255,.85);padding:4px;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}.header-nav .nav-inner li{display:flex}.header-nav .nav-inner a{width:var(--item-size);height:38px;display:grid;place-items:center;border-radius:999px;color:#5e6b86;text-decoration:none;transition:color .16s ease,background-color .16s ease,transform .16s ease}.header-nav .nav-inner a:hover,.header-nav .nav-inner a:focus-visible{color:var(--blue-strong);background:linear-gradient(180deg,#ffffff,#eaf5ff);text-decoration:none;transform:translateY(-1px)}.header-nav .nav-inner a:focus-visible{outline:3px solid rgba(0,120,212,.24);outline-offset:3px}.header-nav svg{width:21px;height:21px;display:block;fill:currentColor}.nav-hover-label{position:absolute;left:0;bottom:calc(100% + 6px);max-width:180px;opacity:var(--enter-nav);pointer-events:none;white-space:nowrap;border:1px solid rgba(184,207,234,.95);border-radius:999px;background:rgba(239,246,255,.96);box-shadow:0 9px 18px rgba(31,79,143,.12);color:#075985;font-size:11px;font-weight:600;line-height:1;padding:7px 10px;transform:translate(calc(var(--label-x) - 50%),calc((1 - var(--enter-nav)) * 4px + var(--label-y)));transition:opacity .15s ease,transform .2s ease}.header-nav:not(:hover):not(:focus-within){--enter-nav:0}\n"
         "    .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.kpi-grid{gap:20px;margin-bottom:22px}.dashboard-grid{align-items:stretch}.panel{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(248,252,255,.9));border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0;box-shadow:0 10px 30px rgba(31,79,143,.08)}.panel *{min-width:0}.panel p,.panel span,.panel dd,.panel strong{overflow-wrap:anywhere}.panel.status-card{display:grid;gap:18px;padding:22px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(247,252,255,.9));border-color:#c6d9ee;box-shadow:0 18px 38px rgba(31,79,143,.12),inset 0 1px 0 rgba(255,255,255,.88)}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:span 12}\n"
@@ -2709,7 +4182,7 @@ def render_policy_index(
         "    @media(max-width:900px){main{width:calc(100% - 24px);margin:18px auto;padding:24px;border-radius:24px}.grid{grid-template-columns:repeat(6,minmax(0,1fr))}.span-3,.span-4{grid-column:span 3}.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:span 6}.source-health-grid{grid-template-columns:1fr}.brand-layout{grid-template-columns:1fr}.header-actions{align-items:flex-start}.header-nav{--item-size:37px}.nav-hover-label{display:none}.title-version-link{margin-left:0}.masthead{margin-bottom:20px}}\n"
         "    @media(min-width:741px) and (max-width:900px){.signature-panel{grid-column:span 3}.programmatic-api{grid-column:span 3}.api-endpoint-row{grid-template-columns:auto 1fr}.api-endpoint-row code{grid-column:2;text-align:left}}\n"
         "    @media(max-width:740px){.signature-panel,.programmatic-api{grid-column:1/-1}.signature-head{display:grid}.signature-kv div{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto 1fr}.api-endpoint-row code{grid-column:2;text-align:left}}\n"
-        "    @media(max-width:640px){main{width:calc(100% - 16px);margin:10px auto;padding:16px 12px;border-radius:20px}.masthead{padding:0 0 12px}.brand{display:grid;grid-template-columns:58px minmax(0,1fr);gap:14px;align-items:start}.brand-layout{gap:12px}.winmark{width:58px;height:58px;gap:4px}.winmark span{border-radius:5px}.title-line h1{font-size:34px}.subtitle-line{flex-wrap:wrap;gap:5px 12px}.eyebrow{font-size:12px}.eyebrow-icon{width:15px;height:15px}.header-nav{--item-size:35px;max-width:100%}.header-nav .nav-inner{width:max-content;max-width:100%;gap:3px;padding:3px}.header-nav .nav-inner a{height:32px}.header-nav svg{width:19px;height:19px}.title-version-link{font-size:12px;margin-left:0;padding:8px 11px}.subtitle{font-size:14px;max-width:240px}.grid{grid-template-columns:1fr;gap:12px}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:auto}.kpi-card .metric{font-size:34px}.freshness-hero{align-items:flex-start}.freshness-ring{width:84px;height:84px}.freshness-ring-icon{width:46px;height:46px}.freshness-metric{font-size:34px}.freshness-callout{align-items:flex-start}.freshness-meta-strip{grid-template-columns:1fr;gap:10px}.freshness-meta-item{justify-content:flex-start}.freshness-meta-item+.freshness-meta-item{border-left:0}.kv{grid-template-columns:1fr}.diag-summary,.thresholds{grid-template-columns:1fr}.diag-feed{height:300px;min-height:300px;max-height:300px}footer{margin-top:28px;padding-top:18px}}\n"
+        "    @media(max-width:640px){main{width:calc(100% - 16px);margin:10px auto;padding:16px 12px;border-radius:20px}.masthead{padding:0 0 12px}.brand{display:grid;grid-template-columns:58px minmax(0,1fr);gap:14px;align-items:start}.brand-layout{grid-template-columns:1fr;gap:12px}.header-actions{align-items:flex-start;gap:12px}.header-top-actions{justify-content:flex-start;gap:10px}.pypi-download-link{width:74px;height:74px}.pypi-download-link img{width:74px;height:74px;border-radius:15px}.winmark{width:58px;height:58px;gap:4px}.winmark span{border-radius:5px}.title-line h1{font-size:34px}.subtitle-line{flex-wrap:wrap;gap:5px 12px}.eyebrow{font-size:12px}.eyebrow-icon{width:15px;height:15px}.header-nav{--item-size:35px;max-width:100%}.header-nav .nav-inner{width:max-content;max-width:100%;gap:3px;padding:3px}.header-nav .nav-inner a{height:32px}.header-nav svg{width:19px;height:19px}.title-version-link{font-size:12px;margin-left:0;padding:8px 11px}.subtitle{font-size:14px;max-width:240px}.grid{grid-template-columns:1fr;gap:12px}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:auto}.kpi-card .metric{font-size:34px}.freshness-hero{align-items:flex-start}.freshness-ring{width:84px;height:84px}.freshness-ring-icon{width:46px;height:46px}.freshness-metric{font-size:34px}.freshness-callout{align-items:flex-start}.freshness-meta-strip{grid-template-columns:1fr;gap:10px}.freshness-meta-item{justify-content:flex-start}.freshness-meta-item+.freshness-meta-item{border-left:0}.kv{grid-template-columns:1fr}.diag-summary,.thresholds{grid-template-columns:1fr}.diag-feed{height:300px;min-height:300px;max-height:300px}footer{margin-top:28px;padding-top:18px}}\n"
         "    .freshness-panel{gap:24px;padding:26px;overflow:hidden}.freshness-panel .panel-head{align-items:center;padding-bottom:2px}.freshness-layout{grid-template-columns:minmax(0,1fr) minmax(182px,198px);gap:22px;align-items:stretch}.freshness-primary{gap:18px;align-content:start}.freshness-hero{display:grid;grid-template-columns:minmax(90px,112px) minmax(0,1fr);gap:20px;align-items:center}.freshness-ring{position:relative;justify-self:center;width:min(112px,100%);height:auto;aspect-ratio:1;border:0;background:radial-gradient(circle at 34% 24%,#ffffff 0 14%,#ecfff0 38%,#c8f2d5 100%);box-shadow:0 18px 34px rgba(16,124,16,.18),0 0 0 12px rgba(16,124,16,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring:after{content:'';position:absolute;inset:10px;border:2px solid currentColor;border-radius:999px;opacity:.95}.freshness-ring.refresh-due{background:radial-gradient(circle at 34% 24%,#fff 0 14%,#fff8e8 42%,#fde7bd 100%);box-shadow:0 18px 34px rgba(180,83,9,.15),0 0 0 12px rgba(180,83,9,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring.stale{background:radial-gradient(circle at 34% 24%,#fff 0 14%,#fff0ed 42%,#ffd3cc 100%);box-shadow:0 18px 34px rgba(180,35,24,.15),0 0 0 12px rgba(180,35,24,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring.unknown{background:radial-gradient(circle at 34% 24%,#fff 0 14%,#f3f7fb 42%,#dce5ef 100%);box-shadow:0 18px 34px rgba(100,116,139,.13),0 0 0 12px rgba(100,116,139,.06),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring-icon{position:relative;z-index:1;width:52px;height:52px;stroke-width:2.4;transform:translateY(-1px);filter:drop-shadow(0 4px 6px rgba(16,124,16,.16))}.freshness-age-copy{display:grid;gap:5px;align-content:center;min-width:0}.freshness-age-label{margin-top:0}.freshness-metric{font-size:clamp(34px,3.4vw,44px);line-height:1.02;max-width:100%;white-space:nowrap;overflow-wrap:normal;word-break:normal}.freshness-metric.age-wide{font-size:clamp(31px,3vw,38px)}.freshness-metric.age-compact{font-size:clamp(29px,2.8vw,36px);letter-spacing:0}.freshness-callout{gap:12px;padding:13px 15px;border-radius:14px;line-height:1.4}.freshness-callout-icon{box-sizing:content-box;width:18px;height:18px;min-width:18px;padding:5px;border:1px solid #b9e6c4;border-radius:999px;background:linear-gradient(180deg,#f8fff9,#e7f8eb);color:var(--ok)}.freshness-callout.refresh-due .freshness-callout-icon{border-color:#f6d493;background:linear-gradient(180deg,#fffaf0,#ffefd1);color:var(--warn)}.freshness-callout.stale .freshness-callout-icon{border-color:#f6b7ad;background:linear-gradient(180deg,#fff8f6,#ffe0db);color:var(--err)}.freshness-callout.unknown .freshness-callout-icon{border-color:#cbd5e1;background:linear-gradient(180deg,#fff,#f1f5f9);color:var(--unknown)}.thresholds{gap:12px;align-content:start}.threshold-card{min-height:66px;gap:12px;padding:13px 14px;border-radius:14px}.threshold-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(180deg,#fff,#eaf5ff);box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.threshold-icon svg{display:block;width:22px;height:22px;margin:auto}.threshold-card:nth-child(2) .threshold-icon{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:#c85700}.freshness-meta-strip{margin-top:2px;padding-top:18px}.freshness-meta-item{gap:11px;min-height:42px}.freshness-meta-icon{box-sizing:content-box;width:20px;height:20px;padding:5px;border:1px solid #bfdbfe;border-radius:999px;background:linear-gradient(180deg,#f8fbff,#eaf5ff);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);color:#005bd3}.freshness-metadata{margin-top:-4px}\n"
         "    @media(max-width:1400px){.freshness-panel{padding:24px}.freshness-layout{grid-template-columns:1fr;gap:22px}.freshness-hero{grid-template-columns:minmax(90px,112px) minmax(0,1fr);gap:22px}.freshness-ring{width:min(112px,100%)}.freshness-ring-icon{width:52px;height:52px}.freshness-metric{font-size:clamp(34px,5vw,44px)}.freshness-metric.age-wide{font-size:clamp(31px,4.4vw,38px)}.freshness-metric.age-compact{font-size:clamp(29px,4vw,36px)}}\n"
         "    @media(max-width:640px){.freshness-panel{padding:20px 16px;gap:20px}.freshness-panel .panel-head{gap:10px}.freshness-layout{gap:18px}.freshness-hero{grid-template-columns:82px minmax(0,1fr);gap:16px;align-items:center}.freshness-ring{width:82px}.freshness-ring:after{inset:7px}.freshness-ring-icon{width:40px;height:40px}.freshness-metric{font-size:30px}.freshness-metric.age-wide,.freshness-metric.age-compact{font-size:28px}.freshness-callout{padding:12px;align-items:flex-start}.threshold-card{min-height:62px}.freshness-meta-strip{padding-top:14px}.freshness-meta-item{min-height:34px}.freshness-meta-icon{width:18px;height:18px;padding:4px}.freshness-metadata{margin-top:-2px}}\n"
@@ -2735,8 +4208,10 @@ def render_policy_index(
         "<body>\n"
         "  <main>\n"
         "    <header class=\"masthead\">\n"
-        f"      <div class=\"brand\"><div class=\"winmark\" aria-hidden=\"true\"><span></span><span></span><span></span><span></span></div><div class=\"brand-layout\"><div class=\"brand-copy\"><span class=\"eyebrow\">{_ui_icon_html('shield', class_name='ui-icon eyebrow-icon')}<span>Signed public policy feed</span></span><div class=\"title-line\"><h1>Windows 11 Release Guard</h1></div><div class=\"subtitle-line\"><p class=\"subtitle\">Broad-fleet Windows 11 release and quality baseline dashboard.</p></div></div><div class=\"header-actions\">"
-        f"{_header_nav_html()}"
+        f"      <div class=\"brand\"><div class=\"winmark\" aria-hidden=\"true\"><span></span><span></span><span></span><span></span></div><div class=\"brand-layout\"><div class=\"brand-copy\"><span class=\"eyebrow\">{_ui_icon_html('shield', class_name='ui-icon eyebrow-icon')}<span>Signed public policy feed</span></span><div class=\"title-line\"><h1>Windows 11 Release Guard</h1></div><div class=\"subtitle-line\"><p class=\"subtitle\">Broad-fleet Windows 11 release and quality baseline dashboard.</p></div></div><div class=\"header-actions\"><div class=\"header-top-actions\">"
+        f"{_header_nav_html(base_url=base_url)}"
+        f"{_pypi_download_link_html(base_url=base_url)}"
+        "</div>"
         f"{_program_title_version_html(program_version)}"
         "</div></div></div>\n"
         "    </header>\n"
@@ -3080,10 +4555,16 @@ def render_robots_txt() -> str:
 
 def render_sitemap_xml(policy: ReleasePolicy, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
     generated_at = escape(policy.generated_at_utc or _utc_now())
-    urls = (
-        f"{base_url}/",
-        f"{base_url}/windows-release-policy.json",
-        f"{base_url}/policy-manifest.json",
+    urls = tuple(
+        dict.fromkeys(
+            (
+                f"{base_url}/",
+                f"{base_url}/windows-release-policy.json",
+                f"{base_url}/policy-manifest.json",
+                *_wiki_sitemap_urls(base_url=base_url),
+                *_changelog_sitemap_urls(base_url=base_url),
+            )
+        )
     )
     entries = "\n".join(
         (
@@ -3216,10 +4697,14 @@ __all__ = [
     "generate_policy_json",
     "load_source_text",
     "parse_atom_feed",
+    "render_changelog_pages",
     "render_policy_index",
     "render_policy_manifest",
     "render_robots_txt",
     "render_sitemap_xml",
+    "render_wiki_pages",
     "sign_policy_bytes",
     "write_policy_outputs",
+    "write_changelog_pages",
+    "write_wiki_pages",
 ]

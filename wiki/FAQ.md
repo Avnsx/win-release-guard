@@ -38,7 +38,9 @@ No. The current publish workflow uses PyPI Trusted Publishing with GitHub Action
 
 ## Does local wiki source publish automatically?
 
-No. The repository `wiki/` folder is source/staging only. Push the live GitHub Wiki repository separately when explicitly intended.
+To GitHub Pages, yes: `publish-policy.yml` renders `wiki/*.md` into the static Pages Wiki under `/wiki/`.
+
+To the GitHub internal Wiki repository, use `.github/workflows/sync-wiki.yml`. Manual runs default to dry-run and upload a Markdown artifact; tag runs and manual non-dry-runs attempt to push `wiki/*.md` to the same repository's `.wiki.git` remote with the built-in Actions token.
 
 ## Does a Pending Trusted Publisher reserve the package name?
 

@@ -1,0 +1,71 @@
+name: Sync GitHub Wiki
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Write a Markdown sync artifact without pushing to the GitHub Wiki."
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Compile
+        run: python -m compileall -q tools
+
+      - name: Test GitHub Wiki sync tooling
+        run: >
+          pytest -q
+          tests/test_github_wiki_sync.py
+          tests/test_repository_automation.py
+
+      - name: Sync GitHub Wiki Markdown
+        env:
+          WRG_WIKI_SYNC_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --repository "${{ github.repository }}"
+            --artifact-dir ".tmp/github-wiki-sync-markdown"
+            --commit-message "Sync GitHub Wiki from source Markdown"
+          )
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          else
+            args+=(--push)
+          fi
+          python tools/sync_github_wiki.py "${args[@]}"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: github-wiki-sync-markdown
+          path: .tmp/github-wiki-sync-markdown
+          if-no-files-found: error

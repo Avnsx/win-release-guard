@@ -27,6 +27,7 @@ from win11_release_guard.policy_generator import (
     build_policy_from_sources,
     generate_policy,
     parse_atom_feed,
+    render_changelog_pages,
     render_robots_txt,
     write_policy_outputs,
 )
@@ -44,6 +45,13 @@ REMOVED_SCHEMA_PANEL_LABELS = (
     "Policy " + "schema",
     "Reader " + "range",
 )
+
+
+def _assert_local_fragment_links_resolve(html: str) -> None:
+    ids = set(re.findall(r'\bid="([^"]+)"', html))
+    fragments = re.findall(r'href="#([^"]*)"', html)
+    assert "" not in fragments
+    assert [fragment for fragment in fragments if fragment not in ids] == []
 
 
 def _html() -> str:
@@ -222,6 +230,147 @@ def _without_26h1_special_note(html: str) -> str:
     return html[:start] + html[end:]
 
 
+def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## [Unreleased]",
+                "",
+                "### Added",
+                "",
+                "* Next change.",
+                "",
+                "## v0.3.1 - 2026-06-05",
+                "",
+                "### Changed",
+                "",
+                "* Current release.",
+                "",
+                "## v0.3.0 - 2026-05-20",
+                "",
+                "### Fixed",
+                "",
+                "* Older release remains visible.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    pages = render_changelog_pages(changelog_path=changelog)
+    index = pages["wiki/changelog/index.html"]
+
+    assert "wiki/changelog/v0.3.1/index.html" in pages
+    assert "wiki/changelog/v0.3.0/index.html" in pages
+    assert index.index("[Unreleased]") < index.index("v0.3.1 - 2026-06-05")
+    assert index.index("v0.3.1 - 2026-06-05") < index.index("v0.3.0 - 2026-05-20")
+    assert "Older release remains visible." in index
+    assert '<section class="changelog-version-nav" aria-label="Changelog versions">' in index
+    assert 'href="#unreleased"' in index
+    assert 'href="#v0.3.1"' in index
+    assert 'href="#v0.3.0"' in index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.1"' in index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.0"' in index
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/#unreleased"' in index
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in index
+    assert "script src" not in index.lower()
+    assert 'rel="stylesheet"' not in index.lower()
+    assert "cdn.jsdelivr" not in index.lower()
+
+
+def test_changelog_renderer_handles_missing_unreleased_without_warning(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## v0.3.1 - 2026-06-05",
+                "",
+                "### Changed",
+                "",
+                "* Current release.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    index = render_changelog_pages(changelog_path=changelog)["wiki/changelog/index.html"]
+
+    assert "v0.3.1 - 2026-06-05" in index
+    assert "Generator warnings" not in index
+    assert 'href="#v0.3.1"' in index
+
+
+def test_changelog_renderer_warns_for_empty_and_nonstandard_sections(tmp_path: Path) -> None:
+    empty_changelog = tmp_path / "EMPTY_CHANGELOG.md"
+    empty_changelog.write_text("", encoding="utf-8")
+    empty_index = render_changelog_pages(changelog_path=empty_changelog)["wiki/changelog/index.html"]
+
+    assert "Generator warnings" in empty_index
+    assert "CHANGELOG.md is empty" in empty_index
+    assert "No changelog versions found." in empty_index
+
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## Version 0.3.1",
+                "",
+                "* Non-standard release header remains visible but is not a version route.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    pages = render_changelog_pages(changelog_path=changelog)
+    index = pages["wiki/changelog/index.html"]
+
+    assert set(pages) == {"wiki/changelog/index.html"}
+    assert "Version 0.3.1" in index
+    assert "CHANGELOG.md contains no recognized version sections" in index
+    assert "CHANGELOG.md h2 heading is not a recognized version section: Version 0.3.1" in index
+
+
+def test_changelog_renderer_uses_duplicate_safe_anchors_and_escapes_long_sections(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    long_note = " ".join(["Long release note"] * 80)
+    changelog.write_text(
+        "\n".join(
+            [
+                "# Changelog",
+                "",
+                "## v0.3.1 - 2026-06-05",
+                "",
+                f"* {long_note}",
+                "",
+                "## v0.3.1 - 2026-06-05",
+                "",
+                "* <script>alert('blocked')</script>",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    pages = render_changelog_pages(changelog_path=changelog)
+    index = pages["wiki/changelog/index.html"]
+
+    assert 'id="v0.3.1"' in index
+    assert 'id="v0.3.1-2"' in index
+    assert 'href="#v0.3.1-2"' in index
+    assert "duplicate version headings" in index
+    assert "Long release note" in index
+    assert "&lt;script&gt;alert(&#x27;blocked&#x27;)&lt;/script&gt;" in index
+    assert "<script>alert" not in index
+
+
 def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
     policy = build_policy_from_sources(
         release_health_html_path=FIXTURES / "windows11-release-health.html",
@@ -242,6 +391,8 @@ def test_generate_policy_from_local_html_and_atom_fixtures(tmp_path):
 
     assert written["policy"].name == "windows-release-policy.json"
     assert written["index"].name == "index.html"
+    assert written["asset:pypi_download"].as_posix().endswith("assets/images/download_from_pypi.png")
+    assert written["asset:pypi_download"].read_bytes() == Path("assets/images/download_from_pypi.png").read_bytes()
     assert written["robots"].name == "robots.txt"
     assert written["sitemap"].name == "sitemap.xml"
     assert written["manifest"].name == "policy-manifest.json"
@@ -1044,6 +1195,10 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
         "robots.txt",
         "sitemap.xml",
         ".nojekyll",
+        "wiki/index.html",
+        "wiki/Quick-Start/index.html",
+        "wiki/changelog/index.html",
+        "wiki/changelog/v0.3.1/index.html",
     }
     actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()}
 
@@ -1113,11 +1268,70 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     source_hosts = {urlparse(url).hostname for url in generated_policy["source_urls"]}
     assert "avnsx.github.io" not in source_hosts
 
+    sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
+    assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/" in sitemap
+
+    changelog = (tmp_path / "wiki/changelog/index.html").read_text(encoding="utf-8")
+    changelog_version = (tmp_path / "wiki/changelog/v0.3.1/index.html").read_text(encoding="utf-8")
+    wiki_home = (tmp_path / "wiki/index.html").read_text(encoding="utf-8")
+    wiki_quick_start = (tmp_path / "wiki/Quick-Start/index.html").read_text(encoding="utf-8")
+    assert "<title>Changelog | Windows 11 Release Guard Wiki</title>" in changelog
+    assert 'id="wiki-content" class="wiki-content changelog-content" tabindex="-1"' in changelog
+    assert 'class="wiki-breadcrumbs" aria-label="Breadcrumb"' in changelog
+    assert 'class="skip-link" href="#wiki-content"' in changelog
+    assert '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/">' in changelog
+    assert '<meta property="og:url" content="https://avnsx.github.io/win11_release_guard/wiki/changelog/">' in changelog
+    assert '<meta name="twitter:card" content="summary">' in changelog
+    assert "Windows 11 release compliance" in changelog
+    assert "signed public policy feed" in changelog
+    assert "RMM" in changelog
+    assert changelog.index("[Unreleased]") < changelog.index("v0.3.1 - 2026-06-05")
+    assert "Version 0.3.1 documents and hardens" in changelog
+    assert "Versions" in changelog
+    assert ".changelog-content h2[id]" in changelog
+    assert 'href="#v0.3.1"' in changelog
+    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.1"' in changelog
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in changelog
+    assert "<title>Changelog v0.3.1 | Windows 11 Release Guard Wiki</title>" in changelog_version
+    assert (
+        '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/">'
+        in changelog_version
+    )
+    assert "Windows 11 25H2 and 26H1 release targeting notes" in changelog_version
+    assert "<title>Windows 11 Release Guard Wiki</title>" in wiki_home
+    assert 'id="wiki-content" class="wiki-content" tabindex="-1"' in wiki_home
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"' in wiki_home
+    assert wiki_home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"') < wiki_home.index(
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"'
+    )
+    assert "prefers-reduced-motion: reduce" in wiki_home
+    assert "@media (max-width: 860px)" in wiki_home
+    assert '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/">' in wiki_home
+    assert "signed public JSON policy feed" in wiki_home
+    assert '<meta property="og:site_name" content="Windows 11 Release Guard">' in wiki_home
+    assert '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/">' in wiki_quick_start
+    for generated_html in (wiki_home, wiki_quick_start, changelog, changelog_version):
+        _assert_local_fragment_links_resolve(generated_html)
+        assert generated_html.count("<style>") == 1
+        assert generated_html.count("</style>") == 1
+    for rendered_changelog in (changelog, changelog_version):
+        lower_changelog = rendered_changelog.lower()
+        assert "<script" not in lower_changelog
+        assert "script src" not in lower_changelog
+        assert 'rel="stylesheet"' not in lower_changelog
+        assert "cdn.jsdelivr" not in lower_changelog
+        assert "esm.sh" not in lower_changelog
+        assert "fonts.googleapis" not in lower_changelog
+
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "<title>Windows 11 Release Guard</title>" in index
     assert "<h1>Windows 11 Release Guard</h1>" in index
     assert "Broad-fleet Windows 11 release and quality baseline dashboard." in index
     assert 'class="header-nav"' in index
+    assert 'class="pypi-download-link"' in index
+    assert 'href="https://pypi.org/project/win11-release-guard/"' in index
+    assert 'src="assets/images/download_from_pypi.png"' in index
     assert 'class="nav-hover-label"' in index
     assert "nav-binoculars" not in index
     assert "main{position:relative;z-index:1;width:calc(100% - 80px);max-width:1580px" in index
@@ -1142,7 +1356,11 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "https://github.com/Avnsx/win11_release_guard/issues/new" in index
     assert 'data-nav-label="Wiki"' in index
     assert "Wiki" in index
-    assert "https://github.com/Avnsx/win11_release_guard/wiki" in index
+    assert "https://avnsx.github.io/win11_release_guard/wiki/" in index
+    assert "https://github.com/Avnsx/win11_release_guard/wiki" not in index
+    assert "animations/auto" not in index
+    assert "auto-table-of-content" not in index
+    assert "esm.sh" not in index
     assert "initHeaderNav" in index
     assert "reportUiError" in index
     assert "data-ui-last-error" in index
@@ -1295,7 +1513,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "private-" + "key" not in index.lower()
     assert "http://cdn" not in index.lower()
     assert "https://cdn" not in index.lower()
-    assert "<link" not in index.lower()
+    assert 'rel="stylesheet"' not in index.lower()
     assert "@import" not in index.lower()
     assert "fonts.googleapis" not in index.lower()
     assert "fonts.gstatic" not in index.lower()

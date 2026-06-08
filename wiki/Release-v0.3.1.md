@@ -28,7 +28,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Local diagnostic output | Default JSON compacts bulky Panther/setup log tails; `--include-raw-local-diagnostics` restores raw bounded local log tails; Panther reads use fixed known paths, 5 MiB per-file tails, and a generous 512 MiB total guard. |
 | WUA | Optional read-only secondary probe; never decides the policy verdict. |
 | Panther/setup logs | Administrator troubleshooting evidence only; never overrides signed public policy; collection is narrow, tail-bounded, and globally guarded. |
-| Release lane | `release.yml` validates `vX.Y.Z` tag/version parity, links changelog/release notes/Pages/feed in the release body, and attaches only a validated clean source archive. |
+| Release lane | `release.yml` validates `vX.Y.Z` tag/version parity, links changelog/release notes/Pages Wiki/changelog/feed in the release body, and attaches only a validated clean source archive. |
 | PyPI lane | `pypi-publish.yml` builds wheel/sdist and publishes through Trusted Publishing / GitHub OIDC only after tag or published-release gates. |
 
 ## Packaging And PyPI
@@ -55,7 +55,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Local detection | `get_local_windows_state()`, `derive_local_consensus()`, `evaluate_windows_update_state()`, `query_wua_secondary()` |
 | Local diagnostic output | `--include-raw-local-diagnostics`, compact markers such as `content_omitted`, `content_chars`, and `content_bytes_utf8` |
 | JSON/signature/cache | `strict_json_loads()`, `strict_json_object()`, `verify_policy_signature()`, `load_trusted_policy()` |
-| Workflows | `publish-policy.yml`, `release.yml`, `pypi-publish.yml`, `ci.yml`, action/dependency workflows |
+| Workflows | `publish-policy.yml`, `sync-wiki.yml`, `release.yml`, `pypi-publish.yml`, `ci.yml`, action/dependency workflows |
 | PyPI publishing | Project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`, no PyPI token |
 | Documentation | `README.md`, `CHANGELOG.md`, `docs/releases/v0.3.1.md`, `docs/`, `wiki/` |
 
@@ -77,9 +77,12 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | --- | --- |
 | Local `site/` | Generated output only; do not commit. |
 | Pages refresh | `.github/workflows/publish-policy.yml` regenerates and deploys Pages; `workflow_dispatch` can refresh manually. |
-| Docs/wiki-only changes | No Pages rebuild unless dashboard-rendered content, generated metadata, public URLs, or workflow path filters change. |
-| Local `wiki/` | Source/staging only; it does not auto-publish to the live GitHub Wiki. |
-| Live wiki | Push the GitHub Wiki repository separately only when explicitly intended. |
+| Wiki changes | Pages rebuild because `wiki/*.md` renders to `site/wiki/`. |
+| Changelog changes | Pages rebuild because `CHANGELOG.md` renders to `site/wiki/changelog/`. |
+| Docs-only changes | No Pages rebuild unless dashboard-rendered content, generated metadata, public URLs, or workflow path filters change. |
+| Local `wiki/` | Source for the static Pages Wiki and source/staging for the live GitHub internal Wiki. |
+| Live wiki | `.github/workflows/sync-wiki.yml` can mirror `wiki/*.md` with the built-in Actions token or produce a dry-run artifact for manual fallback. |
+| Changelog history | Newer entries are added at the top; older version sections stay visible for Pages changelog, release history, SEO, and auditability. |
 
 ## Verify Commands
 
@@ -106,7 +109,7 @@ python -m twine check dist/*
 | Publish raw worktree ZIPs. | Use `tools/export_clean_archive.py` and validate the archive. |
 | Add PyPI credentials to Actions. | Use Trusted Publishing with GitHub OIDC. |
 | Create GitHub Issues from dashboard JavaScript. | Keep issue sync workflow-side with the built-in Actions token and static dashboard links only. |
-| Assume local `wiki/` auto-publishes. | Push the live wiki repository separately when approved. |
+| Assume the Pages publish job also updates the GitHub internal Wiki. | Use the separate `sync-wiki.yml` workflow or its dry-run artifact fallback. |
 
 ## Related Pages
 
