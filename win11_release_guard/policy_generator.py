@@ -1991,15 +1991,61 @@ def _render_wiki_toc(headings: Sequence[WikiHeading]) -> str:
     return f'<section class="wiki-toc" aria-label="Table of contents"><h2>On this page</h2><ol>{items}</ol></section>'
 
 
-def _wiki_navigation_html(site_navigation_html: str, *, base_url: str = DEFAULT_PAGES_BASE_URL) -> str:
+_WIKI_NAV_GROUP_RE = re.compile(r"<p><strong>(.*?)</strong></p>(?=\s*<[uo]l>)", re.DOTALL)
+_WIKI_NAV_GROUP_CLASS_RE = re.compile(r'<p class="wiki-nav-group"><strong>.*?</strong></p>', re.DOTALL)
+
+
+def _mark_current_wiki_navigation_html(site_navigation_html: str, current_url: str | None) -> str:
+    html = _WIKI_NAV_GROUP_RE.sub(r'<p class="wiki-nav-group"><strong>\1</strong></p>', site_navigation_html)
+    if not current_url:
+        return html
+
+    safe_current_url = escape(current_url, quote=True)
+    anchor_pattern = re.compile(rf'<a href="{re.escape(safe_current_url)}">')
+    first_anchor = anchor_pattern.search(html)
+    if not first_anchor:
+        return html
+
+    html = anchor_pattern.sub(
+        f'<a href="{safe_current_url}" class="is-current-page" aria-current="page">',
+        html,
+    )
+    active_index = html.find(f'href="{safe_current_url}" class="is-current-page"')
+    if active_index < 0:
+        return html
+
+    groups = list(_WIKI_NAV_GROUP_CLASS_RE.finditer(html))
+    for group_index, group in enumerate(groups):
+        next_group_start = groups[group_index + 1].start() if group_index + 1 < len(groups) else len(html)
+        if group.end() <= active_index < next_group_start:
+            marked_group = group.group(0).replace(
+                'class="wiki-nav-group"',
+                'class="wiki-nav-group is-current-group"',
+                1,
+            )
+            return html[: group.start()] + marked_group + html[group.end() :]
+    return html
+
+
+def _wiki_navigation_html(
+    site_navigation_html: str,
+    *,
+    base_url: str = DEFAULT_PAGES_BASE_URL,
+    current_url: str | None = None,
+) -> str:
     changelog_href = _changelog_pages_base_url(base_url=base_url)
+    current_normalized = current_url.rstrip("/") + "/" if current_url else ""
+    changelog_normalized = changelog_href.rstrip("/") + "/"
+    current_is_changelog = current_normalized.startswith(changelog_normalized)
+    changelog_link_attrs = ' class="is-current-page" aria-current="page"' if current_is_changelog else ""
+    current_site_navigation_html = _mark_current_wiki_navigation_html(site_navigation_html, current_url)
     return (
         '<section class="wiki-primary-nav" aria-label="Primary wiki navigation">'
         "<h2>Wiki</h2>"
-        f'<ul><li class="wiki-nav-changelog"><a href="{escape(changelog_href, quote=True)}">'
+        f'<ul><li class="wiki-nav-changelog"><a href="{escape(changelog_href, quote=True)}"{changelog_link_attrs}>'
         "Changelog</a></li></ul></section>"
         '<section class="wiki-source-nav" aria-label="Wiki source navigation">'
-        f"{site_navigation_html}</section>"
+        f"{current_site_navigation_html}</section>"
     )
 
 
@@ -2234,7 +2280,7 @@ def _wiki_page_html(
     page_title = _wiki_document_title(source.title)
     title = escape(source.title)
     seo_meta = _seo_meta_html(title=page_title, description=description, canonical_url=canonical_url)
-    navigation_html = _wiki_navigation_html(site_navigation_html, base_url=base_url)
+    navigation_html = _wiki_navigation_html(site_navigation_html, base_url=base_url, current_url=canonical_url)
     breadcrumbs_html = _wiki_breadcrumbs_html(source, base_url=base_url)
     toc_html = _render_wiki_toc(headings)
     broken_html = _render_wiki_broken_links(broken_links)
@@ -2355,7 +2401,8 @@ def _wiki_page_html(
     .wiki-sidebar ul, .wiki-sidebar ol {{ margin: 0; padding-left: 1.2rem; }}
     .wiki-sidebar li {{ margin: 0.32rem 0; }}
     .wiki-sidebar a {{ overflow-wrap: anywhere; }}
-    .wiki-sidebar a.is-active-section {{
+    .wiki-sidebar a.is-active-section,
+    .wiki-sidebar a.is-current-page {{
       display: inline-flex;
       align-items: center;
       max-width: 100%;
@@ -2393,6 +2440,17 @@ def _wiki_page_html(
     .wiki-source-nav {{
       display: grid;
       gap: 0.75rem;
+    }}
+    .wiki-source-nav .wiki-nav-group {{
+      margin: 0.35rem 0 0.2rem;
+      color: var(--text);
+      font-weight: 760;
+      letter-spacing: 0;
+    }}
+    .wiki-source-nav .wiki-nav-group strong {{ font-weight: inherit; }}
+    .wiki-source-nav .wiki-nav-group.is-current-group {{
+      color: var(--brand-strong);
+      font-weight: 850;
     }}
     .wiki-toc ol {{ list-style: none; padding-left: 0; }}
     .wiki-toc a {{ text-decoration: none; }}

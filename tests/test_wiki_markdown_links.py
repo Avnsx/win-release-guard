@@ -314,11 +314,21 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     changelog_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"', sidebar_start)
     quick_start_index = home.index('href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"', sidebar_start)
     assert changelog_index < quick_start_index
+    local_detection = (output_dir / "wiki/Local-Windows-Detection/index.html").read_text(encoding="utf-8")
+    assert ".wiki-sidebar a.is-current-page" in local_detection
+    assert ".wiki-source-nav .wiki-nav-group.is-current-group" in local_detection
+    assert '<p class="wiki-nav-group is-current-group"><strong>Architecture</strong></p>' in local_detection
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/" '
+        'class="is-current-page" aria-current="page">Local Windows Detection</a>'
+    ) in local_detection
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Architecture/" class="is-current-page"' not in local_detection
     for html in render_wiki_pages().values():
         lower = html.lower()
         assert 'data-section-scrollspy="true"' in html
         assert 'if (!sidebar || !content) return;' in html
         assert ".wiki-sidebar a.is-active-section" in html
+        assert ".wiki-sidebar a.is-current-page" in html
         assert "margin-left: -" not in html
         assert "script src" not in lower
         assert 'rel="stylesheet"' not in lower
@@ -365,6 +375,13 @@ def test_static_wiki_renderer_converts_links_anchors_and_escapes_html(tmp_path: 
     assert "<script>alert" not in home
     assert 'href="https://example.com/a?b=1&amp;c=2" rel="noopener noreferrer"' in home
 
+    page_name = pages["wiki/Page-Name/index.html"]
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/" '
+        'class="is-current-page" aria-current="page">Friendly</a>'
+    ) in page_name
+    assert 'class="wiki-nav-group is-current-group"' not in page_name
+
 
 def test_static_wiki_renderer_marks_broken_internal_links(tmp_path: Path) -> None:
     wiki_dir = tmp_path / "wiki"
@@ -396,6 +413,12 @@ def test_static_wiki_renderer_warns_for_missing_home_sidebar_footer_and_empty_so
     assert "wiki/_Footer.md is missing" in home
     assert "Empty.md is empty" in empty
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/"' in home
+
+    page_name = pages["wiki/Page-Name/index.html"]
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/" '
+        'class="is-current-page" aria-current="page">Page Name</a>'
+    ) in page_name
 
 
 def test_static_wiki_renderer_generates_fallback_when_wiki_dir_is_missing(tmp_path: Path) -> None:

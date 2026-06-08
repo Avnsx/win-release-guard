@@ -276,8 +276,13 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.0"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/#unreleased"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in index
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/" '
+        'class="is-current-page" aria-current="page">Changelog</a>'
+    ) in index
     assert 'data-section-scrollspy="true"' in index
     assert ".wiki-sidebar a.is-active-section" in index
+    assert ".wiki-sidebar a.is-current-page" in index
     assert "margin-left: -" not in index
     assert 'entry.link.setAttribute("aria-current", "location")' in index
     assert 'entry.item.classList.toggle("is-active-section", selected)' in index
