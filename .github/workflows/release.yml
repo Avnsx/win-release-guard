@@ -187,8 +187,8 @@ jobs:
           - Pages changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/
           - Pages version changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/v${{ steps.release_ref.outputs.version }}/
           - Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json
-          - Pages publishing remains separate in `.github/workflows/publish-policy.yml`; tag pushes trigger that lane for the generated Pages Wiki and changelog.
-          - GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`; tag pushes trigger that lane for `wiki/*.md` source Markdown.
+          - Pages publishing remains separate in `.github/workflows/publish-policy.yml`; use the main-branch push, schedule, or workflow_dispatch lane for the generated Pages Wiki and changelog.
+          - GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`; tag pushes trigger Wiki Markdown sync for `wiki/*.md` source Markdown.
           - PyPI package lane: publishing is separate and runs through `.github/workflows/pypi-publish.yml` with Trusted Publishing / GitHub OIDC.
           - Runtime clients use the signed public JSON feed and detached Ed25519 signature; GitHub Release assets are distribution artifacts, not policy trust roots.
           EOF

@@ -19,7 +19,7 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | Workflow | Trigger | Role |
 | --- | --- | --- |
 | `ci.yml` | push / pull request | Compile, audit actions, check identity, run tests, generate fixture policy, scan, export archive. |
-| `publish-policy.yml` | schedule / `workflow_dispatch` / selected pushes / `vX.Y.Z` tags | Generate signed Pages feed and deploy static Pages artifact. |
+| `publish-policy.yml` | schedule / `workflow_dispatch` / selected `main` pushes | Generate signed Pages feed and deploy static Pages artifact. |
 | `sync-source-diagnostics-issues.yml` | `workflow_dispatch` | Sync source-diagnostic notice/warning/error events to GitHub Issues using only the built-in Actions token. |
 | `sync-wiki.yml` | `workflow_dispatch` / `vX.Y.Z` tags | Sync `wiki/*.md` source Markdown to the same repository's GitHub internal Wiki. |
 | `release.yml` | tags / `workflow_dispatch` | Validate version/tag parity and publish clean source archive as GitHub Release asset. |
@@ -43,10 +43,13 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 Production Pages publishing must not use PATs, branch pushes, or `gh-pages` branch deployment.
 `publish-policy.yml` selected push paths include `wiki/**` and `CHANGELOG.md` because the first-party generator renders `wiki/*.md` into the static Pages Wiki and `CHANGELOG.md` into the static Pages changelog.
 
-Tagged release pushes also trigger `publish-policy.yml` without moving Pages
-deployment into `release.yml`. This keeps Pages publishing in the Pages lane
-while allowing a release tag to refresh the generated dashboard, Pages Wiki, and
-Pages changelog from the tagged source.
+Tagged release pushes do not trigger `publish-policy.yml` because the
+repository's protected `github-pages` environment rejects tag-sourced Pages
+deployments. This keeps release tags from producing red Pages deploy jobs while
+still keeping Pages publishing in the Pages lane. Release managers should verify
+the main-branch Pages run for the release commit or run `publish-policy.yml`
+manually from `main` when the generated dashboard, Pages Wiki, or Pages
+changelog needs an explicit refresh.
 
 ## GitHub Internal Wiki Sync
 

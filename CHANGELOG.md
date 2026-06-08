@@ -9,7 +9,7 @@
 
 ### Changed
 
-* `publish-policy.yml` now also runs on `vX.Y.Z` tag pushes so release tags can refresh the generated Pages dashboard, Pages Wiki, and Pages changelog in the Pages lane without moving Pages deployment into `release.yml`.
+* `publish-policy.yml` now avoids tag-triggered Pages deploys because the protected `github-pages` environment rejects tag-sourced deployments; release tags rely on the main Pages publish lane or manual `workflow_dispatch` from `main`.
 * `release.yml` now checks for matching `CHANGELOG.md`, `docs/releases/vX.Y.Z.md`, and `wiki/Release-vX.Y.Z.md` release material, and links Pages Wiki/changelog routes in GitHub Release notes.
 
 ### Documentation

@@ -19,8 +19,10 @@ def test_publish_policy_workflow_exists_and_has_expected_triggers() -> None:
     assert "schedule:" in text
     assert 'cron: "23 6,18 * * *"' in text
     assert "push:" in text
-    assert "tags:" in text
-    assert '"v*.*.*"' in text
+    assert "branches:" in text
+    assert "- main" in text
+    assert "tags:" not in text
+    assert '"v*.*.*"' not in text
     assert ".github/workflows/publish-policy.yml" in text
     assert "tools/generate_policy.py" in text
     assert "tools/check_project_identity.py" in text
@@ -199,7 +201,9 @@ def test_publish_policy_workflow_does_not_rely_only_on_schedule() -> None:
 
     assert "workflow_dispatch:" in text
     assert "schedule:" in text
-    assert '"v*.*.*"' in text
+    assert "branches:" in text
+    assert "- main" in text
+    assert "tags:" not in text
     assert "verify-live-pages:" in text
     assert "python -m win11_release_guard --check-policy-source --check-public-pages" in text
 

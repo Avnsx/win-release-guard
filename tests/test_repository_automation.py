@@ -338,7 +338,10 @@ def test_release_workflow_body_links_docs_pages_and_feed() -> None:
     ) in text
     assert "Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
     assert "Pages publishing remains separate in `.github/workflows/publish-policy.yml`" in text
+    assert "use the main-branch push, schedule, or workflow_dispatch lane" in text
+    assert "tag pushes trigger that lane" not in text
     assert "GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`" in text
+    assert "tag pushes trigger Wiki Markdown sync for `wiki/*.md` source Markdown" in text
     assert "pypi-publish.yml" in text
     assert "Trusted Publishing / GitHub OIDC" in text
 

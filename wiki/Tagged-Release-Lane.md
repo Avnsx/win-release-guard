@@ -27,7 +27,7 @@ Use this when publishing a GitHub Release with a validated clean source archive.
 | 1 | Confirm version parity with `tools/check_version_consistency.py`. |
 | 2 | Run tests and source checks. |
 | 3 | Create or select the exact `vX.Y.Z` tag. |
-| 4 | Run release workflow; tag pushes also trigger the separate Pages and Wiki sync lanes. |
+| 4 | Run release workflow; tag pushes also trigger the separate Wiki sync lane. Verify the main Pages publish run or manually dispatch `publish-policy.yml` from `main` when Pages needs a release refresh. |
 | 5 | Review draft release and attached archive. |
 | 6 | Publish to PyPI separately only when explicitly intended. |
 

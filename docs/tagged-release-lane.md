@@ -19,11 +19,17 @@ Related links: [maintainer guide](maintainer-guide.md) | [v0.3.1 release notes](
 
 The manual workflow can create an annotated tag only when `create_tag=true` is explicitly provided. The built-in GitHub API token is used by the workflow and must never be exposed in logs, docs, or client code. Before publishing a release asset, `release.yml` checks that `CHANGELOG.md`, `docs/releases/vX.Y.Z.md`, and `wiki/Release-vX.Y.Z.md` contain the matching release material.
 
-Tag pushes wire the lanes together without merging their permissions:
+Tag pushes wire the release and Wiki sync lanes together without merging their permissions:
 
 - `release.yml` validates the tag and publishes the clean source archive as a GitHub Release asset.
-- `publish-policy.yml` regenerates and deploys the static Pages dashboard, Pages Wiki, and Pages changelog from the tagged source.
 - `sync-wiki.yml` mirrors `wiki/*.md` to the GitHub internal Wiki when the built-in token is accepted by GitHub.
+
+`publish-policy.yml` stays the only Pages deployment lane, but it runs from
+schedule, workflow_dispatch, or selected `main` pushes rather than tag pushes.
+The repository's protected `github-pages` environment rejects tag-sourced Pages
+deployments, so release managers must verify the main-branch Pages run for the
+release commit or manually dispatch `publish-policy.yml` from `main` before
+publishing the final release.
 
 If the GitHub internal Wiki repository is not initialized or GitHub rejects the
 built-in token for `.wiki.git`, only `sync-wiki.yml` fails. The workflow still
@@ -79,7 +85,7 @@ python tools/export_clean_archive.py --validate dist/win11_release_guard-source.
 | 1 | Confirm worktree scope and version parity. |
 | 2 | Run the preflight gates. |
 | 3 | Create or select an annotated `vX.Y.Z` tag. |
-| 4 | Run `release.yml` through tag push or manual dispatch; tag pushes also trigger the separate Pages and Wiki sync lanes. |
+| 4 | Run `release.yml` through tag push or manual dispatch; tag pushes also trigger the separate Wiki sync lane. Verify the main Pages publish run or manually dispatch `publish-policy.yml` from `main` when Pages needs a release refresh. |
 | 5 | Review the draft GitHub Release and attached clean archive. |
 | 6 | Publish the GitHub Release only after verification output is credible. |
 | 7 | Publish to PyPI separately through `pypi-publish.yml` only when explicitly intended. |
