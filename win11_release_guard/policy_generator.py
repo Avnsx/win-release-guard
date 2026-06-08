@@ -2359,7 +2359,6 @@ def _wiki_page_html(
       display: inline-flex;
       align-items: center;
       max-width: 100%;
-      margin-left: -0.35rem;
       border-radius: 6px;
       background: linear-gradient(90deg, rgba(15, 108, 189, 0.14), rgba(232, 243, 255, 0.52));
       box-shadow: inset 3px 0 0 var(--brand);

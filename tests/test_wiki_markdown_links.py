@@ -319,6 +319,7 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
         assert 'data-section-scrollspy="true"' in html
         assert 'if (!sidebar || !content) return;' in html
         assert ".wiki-sidebar a.is-active-section" in html
+        assert "margin-left: -" not in html
         assert "script src" not in lower
         assert 'rel="stylesheet"' not in lower
         assert "cdn.jsdelivr" not in lower
