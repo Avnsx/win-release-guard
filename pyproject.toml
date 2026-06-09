@@ -9,14 +9,20 @@ description = "Windows 11 broad-fleet release compliance guard."
 readme = "README.md"
 license = "GPL-3.0-only"
 license-files = ["LICENSE.txt"]
-authors = [{ name = 'Mikail ("Avnsx") C.' }]
+authors = [{ name = 'Mikail ("Avnsx") C.', email = "AvnDev@protonmail.com" }]
 requires-python = ">=3.10"
 dependencies = ["cryptography>=41"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
 [project.urls]
 Homepage = "https://github.com/Avnsx/win11_release_guard"
 Repository = "https://github.com/Avnsx/win11_release_guard"
-Documentation = "https://github.com/Avnsx/win11_release_guard/wiki"
+Documentation = "https://avnsx.github.io/win11_release_guard/wiki/"
 Changelog = "https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/Avnsx/win11_release_guard/issues"
 "Public Feed" = "https://avnsx.github.io/win11_release_guard/windows-release-policy.json"

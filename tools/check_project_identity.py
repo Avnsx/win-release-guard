@@ -26,7 +26,8 @@ LEGACY_ARCHIVE_NAME = LEGACY_PROJECT_NAME + "-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info"))
 ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
 PACKAGING_AUTHOR = 'Mikail ("Avnsx") C.'
-PYPROJECT_AUTHOR_SNIPPET = f"authors = [{{ name = '{PACKAGING_AUTHOR}' }}]"
+PACKAGING_AUTHOR_EMAIL = "AvnDev@protonmail.com"
+PYPROJECT_AUTHOR_SNIPPET = f"authors = [{{ name = '{PACKAGING_AUTHOR}', email = \"{PACKAGING_AUTHOR_EMAIL}\" }}]"
 TEXT_SUFFIXES = {
     "",
     ".cfg",

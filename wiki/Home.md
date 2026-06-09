@@ -37,6 +37,7 @@ README is the quick entry. This wiki is the deep dive. Code, tests, workflows, a
 | [Policy Feed and Trust Model](Policy-Feed-and-Trust-Model) | Signed JSON, Ed25519, manifest, key rotation, JSON hardening. |
 | [Local Windows Detection](Local-Windows-Detection) | Build-first detection, local signals, WUA role. |
 | [GitHub Pages Dashboard](GitHub-Pages-Dashboard) | Static dashboard and public endpoint contract. |
+| [Pages Changelog](https://avnsx.github.io/win11_release_guard/wiki/changelog/) | Generated release history from `CHANGELOG.md`, with historical version sections preserved. |
 | [Source Diagnostics](Source-Diagnostics) | Parser/source drift events and publish gate semantics. |
 | [Anti-Static Freshness](Anti-Static-Freshness) | `generated_at_epoch_s`, `Date.now()`, 14/45-day gates. |
 | [Configuration](Configuration) | Recommended defaults, knobs, fallback behavior. |

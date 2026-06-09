@@ -61,8 +61,6 @@ PyPI Trusted Publisher setup must match these values:
 
 If the project does not exist on PyPI, configure a Pending Trusted Publisher first. Pending Publisher does not reserve the package name; if the name is already owned by someone else, stop and report instead of publishing. Do not synthesize a publish tag from a branch run; the workflow verifies and checks out an existing tag before publishing.
 
-TestPyPI is not wired in this workflow. If added later, it needs a separate Trusted Publisher configuration and a separate environment such as `testpypi`.
-
 ## Preflight Gates
 
 ```powershell

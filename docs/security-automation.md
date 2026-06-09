@@ -100,8 +100,6 @@ print credentialed URLs.
 
 PyPI and GitHub exchange a short-lived OIDC publishing identity during the workflow run. Artifact transfer is workflow-initiated: the workflow builds generated wheel/sdist files in `dist/`, checks them with Twine, uploads the artifact between jobs, and actively publishes it only after an existing tag is checked out and the `pypi` environment gate approves. Manual dispatch without a tag is build-only. If the PyPI project does not exist yet, configure a Pending Trusted Publisher first; that does not reserve the name. Do not add workflow YAML that asks maintainers to paste publishing tokens, usernames, passwords, or credentialed repository URLs.
 
-No TestPyPI lane is currently implemented. If one is added later, use a separate TestPyPI Trusted Publisher and a separate GitHub Environment such as `testpypi`.
-
 ## Source Diagnostics Gate
 
 `publish-policy.yml` blocks deployment when generated `source_diagnostics.events` contains `severity: error`. These are source-diagnostics `error` events; notice and warning events remain visible diagnostic output.

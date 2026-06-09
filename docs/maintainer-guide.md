@@ -7,6 +7,7 @@ Related links: [root README](../README.md) | [local wiki home](../wiki/Home.md) 
 | Document | Audience | Contents |
 | --- | --- | --- |
 | [../LICENSE.txt](../LICENSE.txt) | Users, redistributors, release managers | GPL-3.0 license text for repository source distribution |
+| [../wiki/Build-Test-and-Release.md](../wiki/Build-Test-and-Release.md) | Maintainers, release managers | Editable install, smoke tests, package build checks, deployment-affecting gates |
 | [releases/v0.3.1.md](releases/v0.3.1.md) | Maintainers, release managers, future agents | Detailed v0.3.1 release notes, comparison basis, validation map |
 | [architecture-insight.md](architecture-insight.md) | Maintainers and future agents | Runtime flow, policy hierarchy, local evidence boundaries, generator boundaries |
 | [policy-signing.md](policy-signing.md) | Release and security maintainers | Ed25519 model, key rotation, signed bundled policy, verification commands |

@@ -1,10 +1,10 @@
 # Windows 11 Release Guard
 
-![Windows 11 Release Guard dashboard preview](assets/images/windows-11-release-guard-hero-dashboard.png)
+![Windows 11 Release Guard dashboard preview](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-hero-dashboard.png)
 
 <p>
   <a href="https://pypi.org/project/win11-release-guard/" aria-label="Download win11_release_guard from PyPI">
-    <img src="assets/images/download_from_pypi.png" alt="Download from PyPI" width="96" height="96">
+    <img src="https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/download_from_pypi.png" alt="Download from PyPI" width="96" height="96">
   </a>
 </p>
 
@@ -61,15 +61,6 @@ win11_release_guard --json-pretty --no-wua
 win11_release_guard --json-pretty --include-raw-local-diagnostics
 ```
 
-Use the source checkout for development or release-candidate validation:
-
-```powershell
-python -m pip install -e ".[test]"
-python -m win11_release_guard --self-test
-python -m win11_release_guard --check-policy-source
-python -m win11_release_guard --check-public-pages
-```
-
 Production compliance jobs normally use:
 
 ```powershell
@@ -94,7 +85,7 @@ Deep dive: [Quick Start](https://avnsx.github.io/win11_release_guard/wiki/Quick-
 
 Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI. Source Diagnostics tiles filter Notices, Warnings, and Errors; `View all` resets the feed. Optional `#Ticket` links are hover/focus-only static links to repository issues when workflow-generated metadata exists.
 
-Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/wiki/GitHub-Pages-Dashboard/), [Anti-Static Freshness](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/), [dashboard docs](docs/dashboard-and-pages.md).
+Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/wiki/GitHub-Pages-Dashboard/), [Anti-Static Freshness](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/), [dashboard docs](https://github.com/Avnsx/win11_release_guard/blob/main/docs/dashboard-and-pages.md).
 
 ## Common User Paths
 
@@ -103,8 +94,8 @@ Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/
 | New user | [Quick Start](https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/) |
 | Admin / RMM user | [CLI and RMM Usage](https://avnsx.github.io/win11_release_guard/wiki/CLI-and-RMM-Usage/) |
 | Maintainer | [Build, Test and Release](https://avnsx.github.io/win11_release_guard/wiki/Build-Test-and-Release/) |
-| Release manager | [Tagged release lane](docs/tagged-release-lane.md) |
-| Package maintainer | [PyPI Trusted Publishing lane](docs/tagged-release-lane.md#pypi-trusted-publishing-lane) |
+| Release manager | [Tagged release lane](https://github.com/Avnsx/win11_release_guard/blob/main/docs/tagged-release-lane.md) |
+| Package maintainer | [PyPI Trusted Publishing lane](https://github.com/Avnsx/win11_release_guard/blob/main/docs/tagged-release-lane.md#pypi-trusted-publishing-lane) |
 | Future agent | [Agent Chokepoints](https://avnsx.github.io/win11_release_guard/wiki/Agent-Chokepoints/) |
 
 ## Core Concepts
@@ -114,8 +105,8 @@ Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/
 | Trust source | Public JSON plus detached Ed25519 signature decides policy usability. | [Policy Feed and Trust Model](https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/) |
 | Local detection | Build and signed policy evidence are the release truth. | [Local Windows Detection](https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/) |
 | WUA role | Optional read-only explanation for offers/history. | [Troubleshooting](https://avnsx.github.io/win11_release_guard/wiki/Troubleshooting/) |
-| Release targeting | 25H2 is the existing-device target; 26H1 is excluded for existing devices. | [Architecture Insight](docs/architecture-insight.md) |
-| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.1 notes](docs/releases/v0.3.1.md) |
+| Release targeting | 25H2 is the existing-device target; 26H1 is excluded for existing devices. | [Architecture Insight](https://github.com/Avnsx/win11_release_guard/blob/main/docs/architecture-insight.md) |
+| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.1 notes](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.1.md) |
 | Source diagnostics | Notice/warning/error troubleshooting evidence stays visible; generator `error` events can block policy publishing, but diagnostics do not override runtime compliance verdicts. | [Source Diagnostics](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/) |
 
 ## Maintainer Commands
@@ -135,7 +126,7 @@ python tools/export_clean_archive.py --output dist/win11_release_guard-source.zi
 python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip
 ```
 
-Deployment-affecting changes require the live Pages gate before handover. Use the full gate in [AGENTS.md](AGENTS.md#deployment-affecting-live-verification-gate) and [Build, Test and Release](https://avnsx.github.io/win11_release_guard/wiki/Build-Test-and-Release/) when changing workflows, the policy generator, signing, Pages, manifest/API aliases, source URLs, or public-check CLI behavior.
+Deployment-affecting changes require the live Pages gate before handover. Use the full gate in [AGENTS.md](https://github.com/Avnsx/win11_release_guard/blob/main/AGENTS.md#deployment-affecting-live-verification-gate) and [Build, Test and Release](https://avnsx.github.io/win11_release_guard/wiki/Build-Test-and-Release/) when changing workflows, the policy generator, signing, Pages, manifest/API aliases, source URLs, or public-check CLI behavior.
 
 ## Safety And Trust Model
 
@@ -147,7 +138,7 @@ Deployment-affecting changes require the live Pages gate before handover. Use th
 - GitHub scheduled workflows are best-effort automation, not guaranteed cron. Badge status is a useful signal, not an operational proof.
 - Dependency freshness is checked by a scheduled workflow. `Dependency freshness` is a scheduled direct-dependency check over direct dependency specifiers; it is not an always-current dependency guarantee. The Pylint badge reports the workflow for the current `--fail-under=8.0` gate, not a permanent quality certificate.
 
-Deep dive: [policy signing](docs/policy-signing.md), [security automation](docs/security-automation.md), [Tagged release lane](docs/tagged-release-lane.md).
+Deep dive: [policy signing](https://github.com/Avnsx/win11_release_guard/blob/main/docs/policy-signing.md), [security automation](https://github.com/Avnsx/win11_release_guard/blob/main/docs/security-automation.md), [Tagged release lane](https://github.com/Avnsx/win11_release_guard/blob/main/docs/tagged-release-lane.md).
 
 ## Documentation Map
 
@@ -157,12 +148,12 @@ Deep dive: [policy signing](docs/policy-signing.md), [security automation](docs/
 | Pages changelog | https://avnsx.github.io/win11_release_guard/wiki/changelog/ |
 | GitHub internal Wiki (Markdown mirror) | https://github.com/Avnsx/win11_release_guard/wiki |
 | Full architecture | [Architecture](https://avnsx.github.io/win11_release_guard/wiki/Architecture/) |
-| Maintainer guide | [docs/maintainer-guide.md](docs/maintainer-guide.md) |
-| Release notes | [CHANGELOG.md](CHANGELOG.md) and [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) |
+| Maintainer guide | [docs/maintainer-guide.md](https://github.com/Avnsx/win11_release_guard/blob/main/docs/maintainer-guide.md) |
+| Release notes | [CHANGELOG.md](https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md) and [docs/releases/v0.3.1.md](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.1.md) |
 | Safe source archives | [Safe Exports and Clean Archives](https://avnsx.github.io/win11_release_guard/wiki/Safe-Exports-and-Clean-Archives/) |
 | FAQ | [FAQ](https://avnsx.github.io/win11_release_guard/wiki/FAQ/) |
 
-The generated Pages Wiki is the primary public, indexed documentation surface. The GitHub internal Wiki remains a Markdown-compatible mirror for GitHub-native browsing. The repository `wiki/` folder is source for both. `.github/workflows/publish-policy.yml` renders it into GitHub Pages. `.github/workflows/sync-wiki.yml` can mirror the same `wiki/*.md` source Markdown to the GitHub internal Wiki with the built-in Actions token, or produce a dry-run artifact for manual sync fallback.
+The generated Pages Wiki is the primary public, indexed documentation surface. The GitHub internal Wiki remains a Markdown-compatible mirror for GitHub-native browsing. The repository `wiki/` folder is source for both. `.github/workflows/publish-policy.yml` renders it into GitHub Pages. `.github/workflows/sync-wiki.yml` can mirror the same `wiki/*.md` source Markdown to the GitHub internal Wiki with the built-in Actions token, or produce a dry-run artifact for manual sync fallback. The Pages renderer is first-party Python, escapes raw HTML, emits local-only inline SVG visuals, and uses no external JS, CSS, fonts, CDN, npm, browser GitHub write path, or browser token.
 
 `CHANGELOG.md` remains the manually maintained changelog source of truth. Newer entries are added at the top; older version sections remain visible in the generated Pages changelog.
 
@@ -170,8 +161,8 @@ The generated Pages Wiki is the primary public, indexed documentation surface. T
 
 - Issues: https://github.com/Avnsx/win11_release_guard/issues
 - Releases: https://github.com/Avnsx/win11_release_guard/releases
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
-- License: GPL-3.0-only, see [LICENSE.txt](LICENSE.txt)
+- Changelog: [CHANGELOG.md](https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md)
+- License: GPL-3.0-only, see [LICENSE.txt](https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt)
 
 Do not commit GitHub tokens, private signing keys, generated `site/`, generated `dist/`, `.tmp/`, `dependency-freshness.json`, package metadata folders, pycache, raw worktree archives, or private key scratch files.
 

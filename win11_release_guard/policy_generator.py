@@ -64,6 +64,12 @@ CURATED_EXCLUDED_RELEASE_SUMMARIES = {
 }
 WIKI_SOURCE_DIR = Path("wiki")
 CHANGELOG_SOURCE_PATH = Path("CHANGELOG.md")
+WIKI_FAVICON_DATA_URL = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
+    "%3Crect width='32' height='32' rx='8' fill='%230f6cbd'/%3E"
+    "%3Cpath fill='white' d='M8 8.5h6.5v6.5H8zm7.5 0H22v6.5h-6.5zM8 16h6.5v6.5H8zm7.5 0H22v6.5h-6.5z'/%3E"
+    "%3C/svg%3E"
+)
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _CHANGELOG_VERSION_HEADING_RE = re.compile(
     r"^##\s+(?P<title>(?:\[?Unreleased\]?|v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9_.-]+)?)(?:\s+[-–]\s+.+)?)\s*$",
@@ -1719,6 +1725,170 @@ def _render_markdown_image(alt: str, target: str) -> str:
     )
 
 
+def _is_image_only_html(value: str) -> bool:
+    stripped = value.strip()
+    return stripped.startswith("<img ") and stripped.endswith(">") and stripped.count("<img ") == 1
+
+
+_WIKI_MAX_SECTION_ICONS = 3
+_WIKI_PAGE_ICON_BY_SLUG = {
+    "home": "windows",
+    "quick-start": "start",
+    "faq": "help",
+    "cli-and-rmm-usage": "terminal",
+    "configuration": "config",
+    "architecture": "architecture",
+    "local-windows-detection": "device",
+    "policy-feed-and-trust-model": "shield",
+    "source-diagnostics": "diagnostics",
+    "github-pages-dashboard": "dashboard",
+    "anti-static-freshness": "freshness",
+    "build-test-and-release": "build",
+    "safe-exports-and-clean-archives": "archive",
+    "release-v0.3.1": "release",
+    "tagged-release-lane": "tag",
+    "troubleshooting": "troubleshooting",
+    "agent-chokepoints": "guardrail",
+    "changelog": "changelog",
+}
+_WIKI_HEADING_ICON_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("start", ("quick start", "pick your path", "install", "run", "start here")),
+    ("terminal", ("cli", "rmm", "command", "commands", "usage")),
+    ("config", ("configuration", "settings", "environment", "variables")),
+    ("architecture", ("architecture", "signal map", "model", "core concepts")),
+    ("shield", ("policy", "trust", "signed", "signature", "security")),
+    ("diagnostics", ("diagnostic", "source health", "warning", "warnings", "errors")),
+    ("dashboard", ("dashboard", "pages", "api")),
+    ("freshness", ("freshness", "static", "generated time")),
+    ("build", ("build", "test", "verify")),
+    ("archive", ("archive", "archives", "export", "exports", "clean")),
+    ("release", ("release", "releases", "version", "versions", "unreleased", "tagged")),
+    ("help", ("faq", "troubleshooting", "question")),
+)
+
+
+def _wiki_icon_kind_for_page(page_slug: str | None) -> str:
+    normalized = (page_slug or "home").strip("/").casefold()
+    if normalized.startswith("changelog/"):
+        return "changelog"
+    return _WIKI_PAGE_ICON_BY_SLUG.get(normalized, "document")
+
+
+def _wiki_icon_kind_for_heading(
+    *,
+    level: int,
+    heading_text: str,
+    page_slug: str | None,
+    section_icon_count: int,
+) -> str | None:
+    if level == 1:
+        return _wiki_icon_kind_for_page(page_slug)
+    if level != 2 or section_icon_count >= _WIKI_MAX_SECTION_ICONS:
+        return None
+    lookup = _plain_wiki_inline_text(heading_text).casefold()
+    for icon_kind, needles in _WIKI_HEADING_ICON_RULES:
+        if any(needle in lookup for needle in needles):
+            return icon_kind
+    return None
+
+
+def _wiki_icon_html(kind: str) -> str:
+    icons = {
+        "archive": (
+            '<path class="wiki-icon-line" d="M9 11.5h14v11.2a2.3 2.3 0 0 1-2.3 2.3H11.3A2.3 2.3 0 0 1 9 22.7z"/>'
+            '<path class="wiki-icon-line" d="M8 9h16l-1.4-3H9.4zM13 15h6M13 19h4"/>'
+        ),
+        "architecture": (
+            '<path class="wiki-icon-line" d="M10 10h5v5h-5zM18 8h5v5h-5zM17 19h5v5h-5zM12.5 15v3.2h7M15 11h3"/>'
+            '<circle class="wiki-icon-fill" cx="12.5" cy="18.2" r="1.3"/>'
+        ),
+        "build": (
+            '<path class="wiki-icon-line" d="m11.2 18.8 7.4-7.4M17 7.1l4.9 4.9M9.2 20.8 7 23l-2-2 2.2-2.2"/>'
+            '<path class="wiki-icon-line" d="M18.7 6.3 21 4l4 4-2.3 2.3"/>'
+        ),
+        "changelog": (
+            '<path class="wiki-icon-line" d="M10 8.5h12a2 2 0 0 1 2 2v13H10zM10 12.5H7.8a2 2 0 0 0-2 2V24a2 2 0 0 0 2 2H22"/>'
+            '<path class="wiki-icon-line" d="M13 14h6M13 18h7M13 22h4"/>'
+        ),
+        "config": (
+            '<path class="wiki-icon-line" d="M8 10h14M8 16h14M8 22h14"/>'
+            '<circle class="wiki-icon-fill" cx="13" cy="10" r="2.1"/><circle class="wiki-icon-fill" cx="18" cy="16" r="2.1"/><circle class="wiki-icon-fill" cx="11" cy="22" r="2.1"/>'
+        ),
+        "dashboard": (
+            '<path class="wiki-icon-line" d="M8 9.5h7v5.5H8zM17 9.5h7v9h-7zM8 17h7v7H8zM17 21h7v3h-7z"/>'
+        ),
+        "device": (
+            '<path class="wiki-icon-line" d="M8 9h16v10H8zM13 23h6M16 19v4"/>'
+            '<path class="wiki-icon-line" d="M11 12h4v4h-4zM18 12h3M18 15h3"/>'
+        ),
+        "diagnostics": (
+            '<path class="wiki-icon-line" d="M7 19h4l2.2-7 3.4 10 2.1-6H24"/>'
+            '<path class="wiki-icon-line" d="M8 9h14M8 12h8"/>'
+        ),
+        "document": (
+            '<path class="wiki-icon-line" d="M10 6.5h8l4 4V25H10zM18 6.5v4h4M13 15h6M13 19h6M13 23h3"/>'
+        ),
+        "freshness": (
+            '<circle class="wiki-icon-line" cx="16" cy="16" r="8"/>'
+            '<path class="wiki-icon-line" d="M16 11v5l3.4 2M8.6 11.3 7.2 7.8h3.8"/>'
+        ),
+        "guardrail": (
+            '<path class="wiki-icon-line" d="M9 9v16M23 9v16M9 12h14M9 18h14M7 25h20"/>'
+            '<path class="wiki-icon-line" d="M13 8.5 16 6l3 2.5"/>'
+        ),
+        "help": (
+            '<path class="wiki-icon-line" d="M10 10.5a6 6 0 0 1 12 0c0 5-6 4.2-6 8"/>'
+            '<circle class="wiki-icon-fill" cx="16" cy="23" r="1.4"/>'
+        ),
+        "release": (
+            '<path class="wiki-icon-line" d="M8 8h9l7 7-9 9-7-7z"/>'
+            '<circle class="wiki-icon-fill" cx="13" cy="13" r="1.6"/>'
+            '<path class="wiki-icon-line" d="m14.5 19 2 2 4-5"/>'
+        ),
+        "shield": (
+            '<path class="wiki-icon-line" d="M16 5.5 23 8.6v5.2c0 5.1-3.2 9.1-7 10.7-3.8-1.6-7-5.6-7-10.7V8.6z"/>'
+            '<path class="wiki-icon-line" d="m12.6 15.7 2.5 2.5 4.5-5.5"/>'
+        ),
+        "start": (
+            '<path class="wiki-icon-line" d="M10 8.5v15l13-7.5z"/>'
+            '<path class="wiki-icon-line" d="M7 8.5v15"/>'
+        ),
+        "tag": (
+            '<path class="wiki-icon-line" d="M8 8h8.5L24 15.5 16.5 23 8 14.5z"/>'
+            '<circle class="wiki-icon-fill" cx="12.5" cy="12.5" r="1.5"/>'
+            '<path class="wiki-icon-line" d="M17 16.5h4"/>'
+        ),
+        "terminal": (
+            '<path class="wiki-icon-line" d="M7.5 8.5h17v15h-17zM7.5 12h17"/>'
+            '<path class="wiki-icon-line" d="m11 16 2.5 2-2.5 2M16 20h4"/>'
+        ),
+        "troubleshooting": (
+            '<path class="wiki-icon-line" d="m10 22 7.5-7.5M18.6 7.2a4.7 4.7 0 0 0-5.7 5.7L7.3 18.5a2.2 2.2 0 0 0 3.1 3.1l5.6-5.6a4.7 4.7 0 0 0 5.7-5.7l-3 3-2.1-2.1z"/>'
+        ),
+        "windows": (
+            '<path class="wiki-icon-fill" d="M8 8.5h6.8v6.8H8zM16.2 8.5H23v6.8h-6.8zM8 16.7h6.8v6.8H8zM16.2 16.7H23v6.8h-6.8z"/>'
+        ),
+    }
+    clean_kind = str(kind or "document").strip().casefold()
+    body = icons.get(clean_kind, icons["document"])
+    safe_kind = re.sub(r"[^a-z0-9_-]+", "-", clean_kind).strip("-") or "document"
+    return (
+        f'<svg class="wiki-heading-icon wiki-icon-{safe_kind}" viewBox="0 0 32 32" aria-hidden="true" '
+        'focusable="false"><rect class="wiki-icon-tile" x="3.5" y="3.5" width="25" height="25" rx="7"/>'
+        f"{body}</svg>"
+    )
+
+
+def _render_wiki_heading_html(level: int, slug: str, inline_heading: str, icon_kind: str | None) -> str:
+    safe_slug = escape(slug, quote=True)
+    if not icon_kind:
+        return f'<h{level} id="{safe_slug}">{inline_heading}</h{level}>'
+    return (
+        f'<h{level} id="{safe_slug}" class="wiki-heading-with-icon">'
+        f'{_wiki_icon_html(icon_kind)}<span class="wiki-heading-text">{inline_heading}</span></h{level}>'
+    )
+
+
 def _render_wiki_inline(
     text: str,
     pages: Mapping[str, WikiPageSource],
@@ -1896,6 +2066,8 @@ def _render_wiki_markdown_fragment(
     *,
     base_url: str = DEFAULT_PAGES_BASE_URL,
     heading_slug_overrides: Mapping[str, str | Sequence[str]] | None = None,
+    page_slug: str | None = None,
+    heading_icons: bool = False,
 ) -> tuple[str, tuple[WikiHeading, ...], tuple[str, ...]]:
     lines = text.splitlines()
     blocks: list[str] = []
@@ -1904,6 +2076,7 @@ def _render_wiki_markdown_fragment(
     used_heading_slugs: dict[str, int] = {}
     slug_override_counts: dict[str, int] = {}
     slug_overrides = heading_slug_overrides or {}
+    section_icon_count = 0
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -1940,7 +2113,19 @@ def _render_wiki_markdown_fragment(
                 slug = _unique_slug(slug, used_heading_slugs)
             headings.append(WikiHeading(level=level, text=heading_text, slug=slug))
             inline_heading = _render_wiki_inline(heading_match.group(2), pages, broken_links, base_url=base_url)
-            blocks.append(f'<h{level} id="{escape(slug)}">{inline_heading}</h{level}>')
+            icon_kind = (
+                _wiki_icon_kind_for_heading(
+                    level=level,
+                    heading_text=heading_text,
+                    page_slug=page_slug,
+                    section_icon_count=section_icon_count,
+                )
+                if heading_icons
+                else None
+            )
+            if icon_kind and level == 2:
+                section_icon_count += 1
+            blocks.append(_render_wiki_heading_html(level, slug, inline_heading, icon_kind))
             index += 1
             continue
         if stripped == "---":
@@ -1977,16 +2162,24 @@ def _render_wiki_markdown_fragment(
             paragraph_lines.append(candidate_stripped)
             index += 1
         paragraph = " ".join(paragraph_lines)
-        blocks.append(f"<p>{_render_wiki_inline(paragraph, pages, broken_links, base_url=base_url)}</p>")
+        rendered_paragraph = _render_wiki_inline(paragraph, pages, broken_links, base_url=base_url)
+        paragraph_class = ' class="wiki-image-block"' if _is_image_only_html(rendered_paragraph) else ""
+        blocks.append(f"<p{paragraph_class}>{rendered_paragraph}</p>")
     return "\n".join(blocks), tuple(headings), tuple(dict.fromkeys(broken_links))
 
 
-def _render_wiki_toc(headings: Sequence[WikiHeading]) -> str:
-    if not headings:
+def _render_wiki_toc(headings: Sequence[WikiHeading], *, page_title: str = "") -> str:
+    title_key = _wiki_lookup_key(page_title) if page_title else ""
+    toc_headings = tuple(
+        heading
+        for heading in headings
+        if heading.level > 1 and (not title_key or _wiki_lookup_key(heading.text) != title_key)
+    )
+    if not toc_headings:
         return ""
     items = "".join(
         f'<li class="toc-level-{heading.level}"><a href="#{escape(heading.slug)}">{escape(heading.text)}</a></li>'
-        for heading in headings
+        for heading in toc_headings
     )
     return f'<section class="wiki-toc" aria-label="Table of contents"><h2>On this page</h2><ol>{items}</ol></section>'
 
@@ -2044,11 +2237,13 @@ def _wiki_navigation_html(
         '<section class="wiki-primary-nav" aria-label="Primary wiki navigation">'
         "<h2>Wiki</h2>"
         f'<ul><li class="wiki-nav-changelog"><a href="{escape(changelog_href, quote=True)}"{changelog_link_attrs}>'
-        "Changelog</a></li></ul></section>"
+        '<span class="wiki-nav-changelog-label">Changelog</span>'
+        '<span class="wiki-nav-changelog-meta">Release history</span>'
+        "</a></li></ul></section>"
     )
     return (
-        '<div class="wiki-sidebar-pinned">'
-        f"{primary_navigation_html}{toc_html}</div>"
+        '<section class="wiki-sidebar-header" aria-label="Wiki page navigation">'
+        f"{primary_navigation_html}{toc_html}</section>"
         '<section class="wiki-source-nav" aria-label="Wiki source navigation">'
         f"{current_site_navigation_html}</section>"
     )
@@ -2215,31 +2410,20 @@ def _wiki_section_scrollspy_script_html() -> str:
       }
 
       function sidebarContentOffsetTop(target) {
-        if (target.offsetParent === sidebar && typeof target.offsetTop === "number") return target.offsetTop;
-        var top = 0;
-        var node = target;
-        while (node && node !== sidebar) {
-          top += node.offsetTop || 0;
-          node = node.offsetParent;
-        }
-        if (node === sidebar) return top;
+        if (!sidebar.contains(target)) return 0;
         var sidebarBox = sidebar.getBoundingClientRect();
         var targetBox = target.getBoundingClientRect();
         return sidebar.scrollTop + targetBox.top - sidebarBox.top;
       }
 
-      function sidebarPinnedOffset() {
-        var pinned = sidebar.querySelector(".wiki-sidebar-pinned");
-        if (!pinned) return 10;
-        var sidebarBox = sidebar.getBoundingClientRect();
-        var pinnedBox = pinned.getBoundingClientRect();
-        return Math.max(10, Math.round(pinnedBox.bottom - sidebarBox.top + 10));
+      function sidebarScrollOffset() {
+        return 10;
       }
 
       function alignSidebarTarget(target, force) {
         if (!target || !sidebar.contains(target)) return;
         if (!force && (now() < manualSidebarScrollUntil || sidebarTargetIsVisible(target))) return;
-        var targetTop = sidebarContentOffsetTop(target) - sidebarPinnedOffset();
+        var targetTop = sidebarContentOffsetTop(target) - sidebarScrollOffset();
         targetTop = Math.max(0, Math.round(targetTop));
         autoScrollingSidebar = true;
         try {
@@ -2380,7 +2564,7 @@ def _wiki_page_html(
     title = escape(source.title)
     seo_meta = _seo_meta_html(title=page_title, description=description, canonical_url=canonical_url)
     breadcrumbs_html = _wiki_breadcrumbs_html(source, base_url=base_url)
-    toc_html = _render_wiki_toc(headings)
+    toc_html = _render_wiki_toc(headings, page_title=source.title)
     navigation_html = _wiki_navigation_html(
         site_navigation_html,
         base_url=base_url,
@@ -2397,6 +2581,7 @@ def _wiki_page_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{escape(page_title)}</title>
+  <link rel="icon" href="{WIKI_FAVICON_DATA_URL}">
 {seo_meta}  <style>
     :root {{
       color-scheme: light;
@@ -2486,7 +2671,7 @@ def _wiki_page_html(
       position: sticky;
       top: 1rem;
       display: grid;
-      gap: 1.25rem;
+      gap: 1rem;
       padding: 1rem;
       background: var(--surface);
       border: 1px solid var(--border);
@@ -2494,25 +2679,29 @@ def _wiki_page_html(
       box-shadow: 0 12px 30px rgba(15, 108, 189, 0.08);
       max-height: calc(100vh - 2rem);
       overflow: auto;
+      scrollbar-gutter: stable;
+    }}
+    .wiki-sidebar > nav {{
+      display: grid;
+      gap: 1.35rem;
+      min-height: 0;
     }}
     .wiki-sidebar::after {{
       content: "";
       display: block;
       min-height: min(34rem, 58vh);
     }}
-    .wiki-sidebar-pinned {{
-      position: sticky;
-      top: 0;
-      z-index: 2;
+    .wiki-sidebar-header {{
+      position: static;
+      z-index: auto;
       display: grid;
-      gap: 0.9rem;
-      margin: -1rem -1rem 0;
-      padding: 1rem 1rem 0.95rem;
-      border-bottom: 1px solid var(--border);
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.94) 88%, rgba(255, 255, 255, 0));
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      gap: 1rem;
+      margin: 0;
+      padding: 0 0 0.2rem;
+      background: var(--surface);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }}
     .wiki-sidebar h1, .wiki-sidebar h2, .wiki-sidebar h3 {{
       margin: 0.35rem 0 0.2rem;
@@ -2548,10 +2737,14 @@ def _wiki_page_html(
       padding-bottom: 0.9rem;
     }}
     .wiki-primary-nav ul {{ list-style: none; padding: 0; }}
-    .wiki-nav-changelog a {{
-      display: flex;
+    .wiki-sidebar .wiki-nav-changelog a {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) max-content;
       align-items: center;
-      justify-content: space-between;
+      column-gap: 1.65rem;
+      row-gap: 0.2rem;
+      width: 100%;
+      box-sizing: border-box;
       min-height: 2.35rem;
       border: 1px solid var(--brand-line);
       border-radius: 8px;
@@ -2562,10 +2755,31 @@ def _wiki_page_html(
       padding: 0.45rem 0.7rem;
       text-decoration: none;
     }}
-    .wiki-nav-changelog a::after {{ content: "Release history"; color: var(--muted); font-size: 0.78rem; font-weight: 600; }}
+    .wiki-nav-changelog-label {{
+      min-width: 0;
+      color: var(--brand-strong);
+      font-weight: 760;
+      white-space: nowrap;
+    }}
+    .wiki-nav-changelog-meta {{
+      justify-self: end;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
     .wiki-source-nav {{
       display: grid;
       gap: 0.75rem;
+      min-height: 0;
+      padding-top: 1.15rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }}
+    .wiki-source-nav > h1:first-child {{
+      margin-top: 0;
     }}
     .wiki-source-nav .wiki-nav-group {{
       margin: 0.35rem 0 0.2rem;
@@ -2611,15 +2825,92 @@ def _wiki_page_html(
     .wiki-breadcrumbs [aria-current="page"] {{ color: var(--text); font-weight: 650; }}
     .wiki-content h1, .wiki-content h2, .wiki-content h3 {{ line-height: 1.2; letter-spacing: 0; scroll-margin-top: 1rem; }}
     .wiki-content h1 {{ margin-top: 0; font-size: clamp(1.8rem, 3vw, 2.55rem); }}
+    .wiki-heading-with-icon {{
+      display: flex;
+      align-items: flex-start;
+      gap: 0.58rem;
+      min-width: 0;
+    }}
+    .wiki-heading-text {{
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }}
+    .wiki-heading-icon {{
+      flex: 0 0 auto;
+      width: 1.05em;
+      height: 1.05em;
+      margin-top: 0.04em;
+      color: var(--brand);
+      filter: drop-shadow(0 8px 14px rgba(15, 108, 189, 0.12));
+    }}
+    .wiki-content h1 .wiki-heading-icon {{
+      width: 1.02em;
+      height: 1.02em;
+      margin-top: 0.02em;
+    }}
+    .wiki-content h2 .wiki-heading-icon {{
+      width: 1em;
+      height: 1em;
+      margin-top: 0.03em;
+    }}
+    .wiki-heading-icon .wiki-icon-tile {{
+      fill: #edf6ff;
+      stroke: #b7dcff;
+      stroke-width: 1;
+    }}
+    .wiki-heading-icon .wiki-icon-line {{
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }}
+    .wiki-heading-icon .wiki-icon-fill {{
+      fill: currentColor;
+      stroke: none;
+      opacity: 0.88;
+    }}
     .wiki-content h2 {{
-      margin-top: 3rem;
-      margin-bottom: 1.05rem;
-      padding-top: 0.95rem;
+      margin-top: 3.25rem;
+      margin-bottom: 1.2rem;
+      padding-top: 1rem;
       border-top: 1px solid var(--border);
     }}
-    .wiki-content h3 {{ margin-top: 1.45rem; color: #21395d; }}
+    .wiki-content hr + h2 {{
+      margin-top: 1.55rem;
+      padding-top: 0;
+      border-top: 0;
+    }}
+    .wiki-content h3 {{ margin-top: 2rem; margin-bottom: 0.85rem; color: #21395d; }}
     .wiki-content p, .wiki-content li {{ color: var(--text); }}
-    .wiki-content p {{ max-width: 74ch; }}
+    .wiki-content p {{
+      max-width: 74ch;
+      margin-top: 0;
+      margin-bottom: 1.55rem;
+    }}
+    .wiki-content p + p:not(.wiki-image-block) {{ margin-top: 0.2rem; }}
+    .wiki-content .wiki-image-block {{
+      max-width: none;
+      margin: 1.15rem 0 0.8rem;
+    }}
+    .wiki-content .wiki-image-block + p {{
+      margin-top: 0;
+      margin-bottom: 1.65rem;
+    }}
+    .wiki-content .wiki-image-block + hr {{
+      margin-top: 1.05rem;
+      margin-bottom: 1.25rem;
+    }}
+    .wiki-content ul, .wiki-content ol {{
+      margin-top: 0.6rem;
+      margin-bottom: 1.8rem;
+    }}
+    .wiki-content li + li {{ margin-top: 0.45rem; }}
+    .wiki-content hr {{
+      margin: 2rem 0 2.35rem;
+      border: 0;
+      border-top: 1px solid var(--border);
+    }}
     .wiki-content code {{
       padding: 0.1rem 0.28rem;
       background: var(--surface-soft);
@@ -2638,7 +2929,7 @@ def _wiki_page_html(
     .wiki-content table {{
       width: 100%;
       border-collapse: collapse;
-      margin: 1.15rem 0 2rem;
+      margin: 1.35rem 0 2.25rem;
       font-size: 0.95rem;
       box-shadow: 0 1px 0 rgba(15, 108, 189, 0.06);
     }}
@@ -2682,6 +2973,7 @@ def _wiki_page_html(
       font-size: 0.86rem;
       font-weight: 600;
       text-decoration: none;
+      white-space: nowrap;
     }}
     .changelog-content h2[id] {{
       border: 1px solid var(--border);
@@ -2714,18 +3006,25 @@ def _wiki_page_html(
     }}
     @media (max-width: 860px) {{
       .wiki-layout {{ grid-template-columns: 1fr; margin-top: 1rem; }}
-      .wiki-sidebar {{ position: static; max-height: none; }}
+      .wiki-sidebar {{ position: static; max-height: none; overflow: visible; }}
+      .wiki-sidebar > nav {{ max-height: none; }}
       .wiki-sidebar::after {{ display: none; }}
-      .wiki-sidebar-pinned {{ position: static; margin: 0; padding: 0 0 0.95rem; backdrop-filter: none; -webkit-backdrop-filter: none; }}
+      .wiki-sidebar-header {{ margin: 0; padding: 0; }}
+      .wiki-source-nav {{ padding-top: 0.95rem; }}
       .wiki-topbar {{ align-items: flex-start; flex-direction: column; }}
-      .wiki-nav-changelog a {{ align-items: flex-start; flex-direction: column; gap: 0.1rem; }}
+      .wiki-sidebar .wiki-nav-changelog a {{ grid-template-columns: 1fr; justify-items: start; row-gap: 0.25rem; }}
+      .wiki-nav-changelog-meta {{ justify-self: start; }}
       .wiki-content table {{ display: block; overflow-x: auto; }}
     }}
     @media (max-width: 520px) {{
       .wiki-layout {{ width: min(100% - 1rem, 1220px); }}
       .wiki-content, .wiki-sidebar {{ padding: 0.9rem; }}
-      .wiki-content h2 {{ margin-top: 2.35rem; margin-bottom: 0.85rem; padding-top: 0.75rem; }}
-      .wiki-content table {{ margin-bottom: 1.45rem; }}
+      .wiki-content h2 {{ margin-top: 2.55rem; margin-bottom: 0.95rem; padding-top: 0.8rem; }}
+      .wiki-heading-with-icon {{ gap: 0.45rem; }}
+      .wiki-content hr + h2 {{ margin-top: 1.45rem; }}
+      .wiki-content p {{ margin-bottom: 1.35rem; }}
+      .wiki-content .wiki-image-block {{ margin: 1rem 0 0.7rem; }}
+      .wiki-content table {{ margin-bottom: 1.65rem; }}
       .wiki-topbar {{ padding: 0.85rem 0.75rem; }}
       .wiki-topbar nav a {{ padding-inline: 0.55rem; }}
     }}
@@ -2793,7 +3092,13 @@ def render_wiki_pages(
             source_warnings.append(
                 f"{_wiki_source_display_name(source.path)} is empty; generated an empty Wiki page with this warning."
             )
-        body_html, headings, body_broken = _render_wiki_markdown_fragment(source_text, pages, base_url=base_url)
+        body_html, headings, body_broken = _render_wiki_markdown_fragment(
+            source_text,
+            pages,
+            base_url=base_url,
+            page_slug=source.slug,
+            heading_icons=True,
+        )
         broken_links = tuple(dict.fromkeys((*body_broken, *sidebar_broken, *footer_broken)))
         html = _wiki_page_html(
             source,
@@ -2952,13 +3257,13 @@ def _render_changelog_version_actions(
     base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     links = [
-        f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}">Pages anchor</a>',
+        f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}">Changelog section</a>',
     ]
     version_page_href = _changelog_version_page_href(section, base_url=base_url)
     if version_page_href:
         links.append(f'<a href="{escape(version_page_href)}">Version page</a>')
     if section.release_href:
-        links.append(f'<a href="{escape(section.release_href)}" rel="noopener noreferrer">GitHub Release</a>')
+        links.append(f'<a href="{escape(section.release_href)}" rel="noopener noreferrer">GitHub release</a>')
     return f'<nav class="changelog-version-actions" aria-label="{escape(section.title)} links">{"".join(links)}</nav>'
 
 
@@ -2970,13 +3275,13 @@ def _inject_changelog_version_actions(
 ) -> str:
     updated = body_html
     for section in sections:
-        heading = f'<h2 id="{escape(section.slug)}">{escape(section.title)}</h2>'
-        if heading in updated:
-            updated = updated.replace(
-                heading,
-                heading + "\n" + _render_changelog_version_actions(section, base_url=base_url),
-                1,
-            )
+        safe_slug = escape(section.slug, quote=True)
+        heading_pattern = re.compile(rf'(<h2 id="{re.escape(safe_slug)}"[^>]*>.*?</h2>)', re.DOTALL)
+        updated = heading_pattern.sub(
+            lambda match: match.group(1) + "\n" + _render_changelog_version_actions(section, base_url=base_url),
+            updated,
+            count=1,
+        )
     return updated
 
 
@@ -2991,12 +3296,24 @@ def _render_changelog_navigation(
     items: list[str] = []
     for section in sections:
         section_href = f"#{section.slug}" if local_anchors else _changelog_section_href(section, base_url=base_url)
-        links = [f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}">Pages</a>']
+        links = [
+            (
+                f'<a href="{escape(_changelog_section_href(section, base_url=base_url))}" '
+                f'aria-label="Open {escape(section.title)} section on the Pages changelog" '
+                'title="Open section on Pages changelog">Section</a>'
+            )
+        ]
         version_page_href = _changelog_version_page_href(section, base_url=base_url)
         if version_page_href:
-            links.append(f'<a href="{escape(version_page_href)}">Page</a>')
+            links.append(
+                f'<a href="{escape(version_page_href)}" '
+                f'aria-label="Open {escape(section.title)} version page" title="Open version page">Version page</a>'
+            )
         if section.release_href:
-            links.append(f'<a href="{escape(section.release_href)}" rel="noopener noreferrer">Release</a>')
+            links.append(
+                f'<a href="{escape(section.release_href)}" rel="noopener noreferrer" '
+                f'aria-label="Open GitHub release for {escape(section.title)}" title="Open GitHub release">GH release</a>'
+            )
         items.append(
             '<li>'
             f'<a href="{escape(section_href)}">{escape(section.title)}</a>'
@@ -3011,6 +3328,7 @@ def _render_changelog_body(
     sections: Sequence[ChangelogSection],
     *,
     base_url: str = DEFAULT_PAGES_BASE_URL,
+    page_slug: str = "changelog",
 ) -> tuple[str, tuple[WikiHeading, ...], tuple[str, ...]]:
     wiki_sources, _texts = _discover_wiki_sources()
     pages = _wiki_page_map(wiki_sources)
@@ -3019,6 +3337,8 @@ def _render_changelog_body(
         pages,
         base_url=base_url,
         heading_slug_overrides=_changelog_heading_overrides(sections),
+        page_slug=page_slug,
+        heading_icons=True,
     )
     return _inject_changelog_version_actions(body_html, sections, base_url=base_url), headings, broken_links
 

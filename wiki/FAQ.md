@@ -46,10 +46,6 @@ To the GitHub internal Wiki repository, use `.github/workflows/sync-wiki.yml`. M
 
 No. If the PyPI name is already owned by someone else, stop and report instead of publishing.
 
-## Is TestPyPI configured?
-
-No. Add it only as a separate lane with its own TestPyPI Trusted Publisher and GitHub Environment such as `testpypi`.
-
 ## Can `/api/v1` change?
 
 Fields can be added compatibly. Existing public v1 paths and contract fields should not be removed casually.

@@ -74,6 +74,13 @@ git diff --name-only
 
 Also run the prompt-specific Markdown stale-wording scans before handoff and resolve every hit instead of explaining it away.
 
+For `wiki/*.md`, `CHANGELOG.md`, or Pages documentation changes, regenerate the static Pages output and run the focused Wiki/generator tests:
+
+```powershell
+python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest
+pytest -q tests/test_wiki_markdown_links.py tests/test_policy_generator.py tests/test_pages_landing.py
+```
+
 The repository `wiki/` folder is source for the static Pages Wiki and GitHub Wiki source/staging. `publish-policy.yml` renders it to Pages under `/wiki/`; `.github/workflows/sync-wiki.yml` mirrors the same `wiki/*.md` Markdown to the live GitHub internal Wiki when explicitly run as a non-dry-run or triggered by a `vX.Y.Z` tag. Manual dry-runs upload a Markdown artifact for fallback sync. If the live Wiki push fails, the Wiki sync workflow must stay visibly failed while the clean Markdown artifact remains available for manual application.
 
 ## PyPI Publishing Check
@@ -88,7 +95,6 @@ The repository `wiki/` folder is source for the static Pages Wiki and GitHub Wik
 | Credential rule | No PyPI API token, Twine password, username, or credentialed URL. |
 | Package artifacts | Wheel and sdist from generated `dist/`, checked by Twine before publish. |
 | Name availability | If PyPI already owns the name under another owner, stop and report. |
-| TestPyPI | Not configured in this workflow. |
 
 ## Related Pages
 

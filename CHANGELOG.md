@@ -5,17 +5,49 @@
 ### Added
 
 * GitHub internal Wiki sync workflow and first-party `tools/sync_github_wiki.py` helper for mirroring `wiki/*.md` source Markdown to the same repository's `.wiki.git` remote with the built-in Actions token, plus dry-run Markdown artifact fallback.
-* First-party static Pages changelog generation from `CHANGELOG.md`, including `/wiki/changelog/`, per-version Pages routes, version sidebar links, GitHub Release links, sitemap entries, and no external JS/CSS/CDN dependencies.
+* First-party static Pages Wiki generation from `wiki/*.md`, including `wiki/Home.md` to `/wiki/`, all regular wiki pages to `/wiki/<slug>/`, Markdown-compatible `_Sidebar.md` / `_Footer.md` navigation, stable heading anchors, duplicate-safe heading slugs, and GitHub Wiki link conversion for `[[Home]]`, `[[Page Name]]`, and `[[Label|Page-Name]]`.
+* First-party static Pages changelog generation from `CHANGELOG.md`, including `/wiki/changelog/`, per-version Pages routes, version sidebar links, GitHub Release links, canonical metadata, sitemap entries, and no external JS/CSS/CDN dependencies.
+* Visible generator warnings for silent-error cases such as missing `wiki/Home.md`, missing `_Sidebar.md` or `_Footer.md`, empty Wiki sources, empty Wiki pages, broken internal Wiki links, empty changelogs, non-standard changelog headings, and duplicate changelog version headings.
+* Windows-11-style generated Wiki/changelog layout with breadcrumbs, skip-to-content link, left sidebar navigation, in-page table of contents, active page/group/section highlighting, reduced-motion-aware sidebar alignment, local-only inline SVG topic icons, and inline SVG favicon.
+* Dashboard top-bar PyPI download image link copied into generated Pages assets and linked to the PyPI project without external runtime dependencies.
+* Tests for Wiki/changelog rendering edge cases, sidebar and TOC behavior, raw HTML escaping, no external asset dependencies, PyPI-safe README media links, package metadata, workflow boundaries, and generated Pages sitemap/changelog routes.
 
 ### Changed
 
+* Package metadata now declares maintainer email `AvnDev@protonmail.com`; runtime dependencies remain limited to the code-backed `cryptography>=41` requirement.
+* README media and repository documentation links now use PyPI-safe absolute URLs, PyPI project metadata points `Documentation` at the Pages Wiki, and package metadata declares Python 3.10, 3.11, and 3.12 classifiers for PyPI/Shields rendering.
+* README now shows the dashboard hero image from `assets/images/windows-11-release-guard-hero-dashboard.png` through the raw GitHub URL and keeps the PyPI download image as a direct clickable image rather than a nested UI bubble.
+* Quick Start now prioritizes released-package installation and administrator usage, while source-checkout and release-candidate validation guidance stays in maintainer-oriented build/release documentation.
+* Generated Wiki spacing now separates short sections, headings, tables, and paragraphs more clearly while keeping image-plus-text pairs visually related.
+* Changelog sidebar/action labels are now compact but descriptive: section links, version pages, and GitHub release links no longer render as vague `Pages` or `Page` labels.
+* Wiki sidebar behavior no longer uses the previous translucent pinned overlay; source navigation stays readable and scrollable without text disappearing behind a glass panel.
+* The Pages Wiki renderer adds topic icons only in article content, not in the sidebar or TOC, and limits icon density so the visual layer stays useful instead of decorative noise.
 * `publish-policy.yml` now avoids tag-triggered Pages deploys because the protected `github-pages` environment rejects tag-sourced deployments; release tags rely on the main Pages publish lane or manual `workflow_dispatch` from `main`.
 * `release.yml` now checks for matching `CHANGELOG.md`, `docs/releases/vX.Y.Z.md`, and `wiki/Release-vX.Y.Z.md` release material, and links Pages Wiki/changelog routes in GitHub Release notes.
+
+### Fixed
+
+* Fixed broken README image rendering on PyPI by replacing relative README media paths with absolute raw GitHub URLs.
+* Fixed missing Python-version metadata for PyPI/Shields by declaring supported Python classifiers in `pyproject.toml`.
+* Fixed generated Wiki/changelog sidebar overlay regressions where pinned header effects could obscure source navigation headings and active entries.
+* Fixed changelog sidebar text clustering between `Changelog` and `Release history` with a structured two-column label layout and nowrap handling.
+* Fixed duplicate horizontal separator effects by suppressing a second heading border when a Markdown horizontal rule already separates sections.
+* Fixed changelog action injection for icon-bearing headings by matching heading elements more robustly instead of replacing only exact plain `<h2>` strings.
+* Fixed generated Wiki TOC duplication by excluding the current page title from in-page section navigation.
+* Fixed documentation drift that implied tag pushes deploy Pages; the docs now state that tag pushes trigger the separate Wiki sync lane only, while Pages publishing remains in `publish-policy.yml`.
+
+### Removed
+
+* Removed user-facing package-index staging-lane wording from release and security docs because the current implementation does not provide that lane.
+* Removed source-checkout and local release-candidate validation commands from the user-facing README/Quick Start flow so end users are directed to the released package path first.
+* Removed the generated Wiki sidebar glass overlay styling that made navigation text appear clipped or hidden.
 
 ### Documentation
 
 * Documented that `sync-wiki.yml` is the only non-release workflow allowed to request `contents: write`, scoped only to GitHub internal Wiki Markdown sync.
 * Added the AGENTS.md rule that future agents must keep historical `CHANGELOG.md` version sections and add newer entries at the top.
+* Updated README, `docs/dashboard-and-pages.md`, `docs/security-automation.md`, `docs/tagged-release-lane.md`, `docs/releases/v0.3.1.md`, `docs/maintainer-guide.md`, and Wiki pages so the text reflects current code, tests, workflows, package metadata, Pages generation, changelog routes, and Wiki sync behavior.
+* Added Wiki-side build/release validation guidance for regenerating Pages and running focused Wiki/generator tests after `wiki/*.md`, `CHANGELOG.md`, or Pages documentation changes.
 
 ## v0.3.1 - 2026-06-05
 
@@ -88,7 +120,7 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 * Project URLs cover Homepage, Repository, Documentation, Changelog, Bug Tracker, Public Feed, and Pages Dashboard.
 * `.github/workflows/pypi-publish.yml` builds wheel and sdist artifacts in generated `dist/`, uploads/downloads that workflow artifact between jobs, and runs `python -m twine check dist/*` before publication.
 * PyPI publishing is Trusted Publishing / GitHub OIDC only: project `win11_release_guard`, owner `Avnsx`.
-* First publish requires PyPI Pending Trusted Publisher setup if the project is not already live; TestPyPI is not implemented in the current workflow.
+* First publish requires PyPI Pending Trusted Publisher setup if the project is not already live.
 
 ### Tests
 

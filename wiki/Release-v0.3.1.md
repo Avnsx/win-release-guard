@@ -41,7 +41,6 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Build artifacts | Wheel and sdist are generated in `dist/`, checked with `python -m twine check dist/*`, and never committed. |
 | Publishing | `.github/workflows/pypi-publish.yml` uses PyPI Trusted Publishing / GitHub OIDC with environment `pypi`. |
 | First publish | Pending Trusted Publisher setup is required if the project is absent; a PyPI 404 is not a name reservation. |
-| TestPyPI | Not implemented in the current workflow. |
 
 ## What Changed By Area
 
@@ -79,6 +78,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Pages refresh | `.github/workflows/publish-policy.yml` regenerates and deploys Pages; `workflow_dispatch` can refresh manually. |
 | Wiki changes | Pages rebuild because `wiki/*.md` renders to `site/wiki/`. |
 | Changelog changes | Pages rebuild because `CHANGELOG.md` renders to `site/wiki/changelog/`. |
+| Pages renderer | First-party Python escapes raw HTML, converts GitHub Wiki links, warns on broken or missing Wiki inputs, and may add local-only inline SVG topic icons without changing Markdown source. |
 | Docs-only changes | No Pages rebuild unless dashboard-rendered content, generated metadata, public URLs, or workflow path filters change. |
 | Local `wiki/` | Source for the static Pages Wiki and source/staging for the live GitHub internal Wiki. |
 | Live wiki | `.github/workflows/sync-wiki.yml` can mirror `wiki/*.md` with the built-in Actions token or produce a dry-run artifact for manual fallback. |

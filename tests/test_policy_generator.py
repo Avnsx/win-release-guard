@@ -276,9 +276,26 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.0"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/#unreleased"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in index
+    assert 'title="Open section on Pages changelog">Section</a>' in index
+    assert 'title="Open version page">Version page</a>' in index
+    assert 'title="Open GitHub release">GH release</a>' in index
+    assert '<h1 id="changelog" class="wiki-heading-with-icon">' in index
+    assert 'class="wiki-heading-icon wiki-icon-changelog"' in index
+    assert '<h2 id="unreleased" class="wiki-heading-with-icon">' in index
+    assert 'class="wiki-heading-icon wiki-icon-release"' in index
+    assert index.index('<h2 id="unreleased" class="wiki-heading-with-icon">') < index.index(
+        '<nav class="changelog-version-actions" aria-label="[Unreleased] links">'
+    )
+    assert index.count('class="wiki-heading-icon') <= 4
+    assert 'aria-label="Open [Unreleased] section on the Pages changelog"' in index
+    assert 'aria-label="Open v0.3.1 - 2026-06-05 version page"' in index
+    assert 'aria-label="Open GitHub release for v0.3.1 - 2026-06-05"' in index
+    assert ">Pages</a>" not in index
+    assert ">Page</a>" not in index
     assert (
         'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/" '
-        'class="is-current-page" aria-current="page">Changelog</a>'
+        'class="is-current-page" aria-current="page"><span class="wiki-nav-changelog-label">Changelog</span>'
+        '<span class="wiki-nav-changelog-meta">Release history</span></a>'
     ) in index
     assert 'data-section-scrollspy="true"' in index
     assert ".wiki-sidebar a.is-active-section" in index
@@ -291,9 +308,11 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'alignCurrentPageLink();' in index
     assert 'function alignSidebarTarget(target, force)' in index
     assert "function sidebarContentOffsetTop(target)" in index
-    assert "function sidebarPinnedOffset()" in index
+    assert "function sidebarScrollOffset()" in index
     assert "manualSidebarScrollUntil = now() + 1200" in index
-    assert "var targetTop = sidebarContentOffsetTop(target) - sidebarPinnedOffset();" in index
+    assert "var targetTop = sidebarContentOffsetTop(target) - sidebarScrollOffset();" in index
+    assert "wiki-sidebar-pinned" not in index
+    assert "scrollArea" not in index
     assert 'sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });' in index
     assert "window.location.hash && initialActive" in index
     assert "allowSectionAutoAlign = true;" in index
@@ -1328,6 +1347,15 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "Version 0.3.1 documents and hardens" in changelog
     assert "Versions" in changelog
     assert ".changelog-content h2[id]" in changelog
+    assert 'class="wiki-heading-icon wiki-icon-changelog"' in changelog
+    assert 'class="wiki-heading-icon wiki-icon-release"' in changelog
+    assert "white-space: nowrap;" in changelog
+    assert ">Changelog section</a>" in changelog
+    assert ">Version page</a>" in changelog
+    assert ">GitHub release</a>" in changelog
+    assert 'title="Open section on Pages changelog">Section</a>' in changelog
+    assert 'title="Open version page">Version page</a>' in changelog
+    assert 'title="Open GitHub release">GH release</a>' in changelog
     assert 'href="#v0.3.1"' in changelog
     assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.1"' in changelog
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in changelog

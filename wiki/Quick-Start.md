@@ -1,24 +1,14 @@
 # Quick Start
 
-Use this when you want to install the released package or source tree, run a human check, and verify the public policy feed quickly.
+Use this when you want to install the released package, run a human check, and verify the public policy feed quickly.
 
 ---
 
 ## Install
 
-Released package:
-
 ```powershell
 python -m pip install win11_release_guard
 ```
-
-Source checkout or unreleased local changes:
-
-```powershell
-python -m pip install -e ".[test]"
-```
-
-PyPI install is the normal path for published releases. Source install remains the fallback for local validation and release-candidate testing.
 
 ## Run
 

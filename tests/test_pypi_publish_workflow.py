@@ -159,13 +159,19 @@ def test_pypi_publish_workflow_enforces_tag_version_parity_without_tag_creation(
 def test_readme_pypi_badges_install_and_publish_links_are_visible() -> None:
     text = _repo_text(README)
 
-    assert "![Windows 11 Release Guard dashboard preview](assets/images/windows-11-release-guard-hero-dashboard.png)" in text
-    assert "assets/images/windows-11-release-guard-social-preview.png" not in text
-    assert text.index("assets/images/windows-11-release-guard-hero-dashboard.png") < text.index(
+    hero_asset_url = (
+        "https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/"
+        "assets/images/windows-11-release-guard-hero-dashboard.png"
+    )
+    pypi_asset_url = (
+        "https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/"
         "assets/images/download_from_pypi.png"
     )
+    assert f"![Windows 11 Release Guard dashboard preview]({hero_asset_url})" in text
+    assert "assets/images/windows-11-release-guard-social-preview.png" not in text
+    assert text.index(hero_asset_url) < text.index(pypi_asset_url)
     assert '<a href="https://pypi.org/project/win11-release-guard/" aria-label="Download win11_release_guard from PyPI">' in text
-    assert '<img src="assets/images/download_from_pypi.png" alt="Download from PyPI" width="96" height="96">' in text
+    assert f'<img src="{pypi_asset_url}" alt="Download from PyPI" width="96" height="96">' in text
     assert "[![PyPI](https://img.shields.io/pypi/v/win11_release_guard?logo=pypi&label=PyPI)]" in text
     assert "[![Python](https://img.shields.io/pypi/pyversions/win11_release_guard?logo=python&label=Python)]" in text
     assert "[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)]" in text
@@ -174,9 +180,26 @@ def test_readme_pypi_badges_install_and_publish_links_are_visible() -> None:
     assert "[![Publish Python package](https://github.com/Avnsx/win11_release_guard/actions/workflows/pypi-publish.yml/badge.svg)]" in text
     assert "https://pypi.org/project/win11_release_guard/" in text
     assert "python -m pip install win11_release_guard" in text
-    assert 'python -m pip install -e ".[test]"' in text
+    assert 'python -m pip install -e ".[test]"' not in text
     assert "win11_release_guard --pretty" in text
-    assert "python -m win11_release_guard --self-test" in text
+    assert "python -m win11_release_guard --self-test" not in text
+
+
+def test_readme_uses_pypi_safe_absolute_media_and_doc_links() -> None:
+    text = _repo_text(README)
+    relative_link_patterns = (
+        "](docs/",
+        "](CHANGELOG.md",
+        "](LICENSE.txt",
+        "](AGENTS.md",
+        "](assets/",
+        'src="assets/',
+    )
+
+    for pattern in relative_link_patterns:
+        assert pattern not in text
+    assert "https://github.com/Avnsx/win11_release_guard/blob/main/docs/dashboard-and-pages.md" in text
+    assert "https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md" in text
 
 
 def test_readme_pypi_docs_do_not_document_token_secret_setup() -> None:
@@ -217,7 +240,7 @@ def test_pypi_docs_connect_release_lane_package_artifacts_and_oidc() -> None:
         assert "sdist" in text
         assert "twine check" in text.lower()
         assert "Pending Trusted Publisher" in text
-        assert "TestPyPI" in text
+    assert all("TestPyPI" not in _repo_text(path) for path in PYPI_DOC_PATHS)
 
 
 def test_pypi_docs_keep_package_name_and_release_urls_connected() -> None:
