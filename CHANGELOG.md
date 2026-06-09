@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## v0.3.2 - 2026-06-10
+
+### Summary
+
+Version 0.3.2 is the compatibility and documentation-alignment release for the current `win11_release_guard` codebase. It bumps the package/runtime/generator/WUA identity to `0.3.2`, extends declared and CI-tested Python support through 3.14, keeps Source Diagnostics as source-health evidence only, and preserves the signed public policy as the device compliance verdict authority. Windows release semantics are unchanged: existing broad-fleet devices target Windows 11 `25H2`; `26H1` remains excluded for existing-device targeting; local build evidence outranks display labels; WUA, Panther/setup logs, DISM, Event Logs, and Source Diagnostics remain diagnostic evidence only.
+
 ### Added
 
 * GitHub internal Wiki sync workflow and first-party `tools/sync_github_wiki.py` helper for mirroring `wiki/*.md` source Markdown to the same repository's `.wiki.git` remote with the built-in Actions token, plus dry-run Markdown artifact fallback.
@@ -11,11 +19,14 @@
 * Windows-11-style generated Wiki/changelog layout with breadcrumbs, skip-to-content link, left sidebar navigation, in-page table of contents, active page/group/section highlighting, reduced-motion-aware sidebar alignment, local-only inline SVG topic icons, and inline SVG favicon.
 * Dashboard top-bar PyPI download image link copied into generated Pages assets and linked to the PyPI project without external runtime dependencies.
 * Tests for Wiki/changelog rendering edge cases, sidebar and TOC behavior, raw HTML escaping, no external asset dependencies, PyPI-safe README media links, package metadata, workflow boundaries, and generated Pages sitemap/changelog routes.
+* Python 3.13 and 3.14 are added to package compatibility metadata and CI coverage so PyPI users see the same supported interpreter range that repository automation exercises.
 
 ### Changed
 
 * Package metadata now declares maintainer email `AvnDev@protonmail.com`; runtime dependencies remain limited to the code-backed `cryptography>=41` requirement.
-* README media and repository documentation links now use PyPI-safe absolute URLs, PyPI project metadata points `Documentation` at the Pages Wiki, and package metadata declares Python 3.10, 3.11, and 3.12 classifiers for PyPI/Shields rendering.
+* Program/package version is `0.3.2`; runtime user-agent, generator identity, and WUA client application ID continue to derive from the shared version helper instead of hardcoded per-module strings.
+* README media and repository documentation links now use PyPI-safe absolute URLs, PyPI project metadata points `Documentation` at the Pages Wiki, and package metadata declares Python 3.10, 3.11, 3.12, 3.13, and 3.14 classifiers for PyPI/Shields rendering.
+* CI now covers Ubuntu and Windows runners across Python 3.10, 3.11, 3.12, 3.13, and 3.14 instead of only the previously visible 3.11/3.12 jobs.
 * README now shows the dashboard hero image from `assets/images/windows-11-release-guard-hero-dashboard.png` through the raw GitHub URL and keeps the PyPI download image as a direct clickable image rather than a nested UI bubble.
 * Quick Start now prioritizes released-package installation and administrator usage, while source-checkout and release-candidate validation guidance stays in maintainer-oriented build/release documentation.
 * Generated Wiki spacing now separates short sections, headings, tables, and paragraphs more clearly while keeping image-plus-text pairs visually related.
@@ -35,6 +46,9 @@
 * Fixed changelog action injection for icon-bearing headings by matching heading elements more robustly instead of replacing only exact plain `<h2>` strings.
 * Fixed generated Wiki TOC duplication by excluding the current page title from in-page section navigation.
 * Fixed documentation drift that implied tag pushes deploy Pages; the docs now state that tag pushes trigger the separate Wiki sync lane only, while Pages publishing remains in `publish-policy.yml`.
+* Fixed Source Diagnostics GitHub Issue sync so Notice events remain dashboard-only; automatic issue creation, update, and reopen now applies only to Warning and Error events, while legacy managed Notice issues can be closed as stale.
+* Added compact Markdown tips with Pages Wiki follow-up links to managed Source Diagnostics warning/error GitHub Issues.
+* Excluded GitHub Wiki helper files `_Sidebar.md` and `_Footer.md` from standalone Pages Wiki page and sitemap generation while preserving them as navigation/footer inputs.
 
 ### Removed
 
@@ -46,6 +60,7 @@
 
 * Documented that `sync-wiki.yml` is the only non-release workflow allowed to request `contents: write`, scoped only to GitHub internal Wiki Markdown sync.
 * Added the AGENTS.md rule that future agents must keep historical `CHANGELOG.md` version sections and add newer entries at the top.
+* Clarified Source Diagnostics wording for Microsoft Release Health vs Atom/Update-History drift, including missing-KB Atom rows as notices until reliable required-baseline evidence exists.
 * Updated README, `docs/dashboard-and-pages.md`, `docs/security-automation.md`, `docs/tagged-release-lane.md`, `docs/releases/v0.3.1.md`, `docs/maintainer-guide.md`, and Wiki pages so the text reflects current code, tests, workflows, package metadata, Pages generation, changelog routes, and Wiki sync behavior.
 * Added Wiki-side build/release validation guidance for regenerating Pages and running focused Wiki/generator tests after `wiki/*.md`, `CHANGELOG.md`, or Pages documentation changes.
 
@@ -114,7 +129,7 @@ Comparison basis: no local `v*` tags are present in this checkout. These notes a
 ### Packaging And PyPI
 
 * `pyproject.toml` package name is `win11_release_guard`, version is `0.3.1`, readme is `README.md`, license is `GPL-3.0-only`, license file is `LICENSE.txt`, author metadata is `Mikail ("Avnsx") C.`, runtime dependency is `cryptography>=41`, and test extras are `packaging>=24` plus `pytest>=8`.
-* PyPI project URL is `https://pypi.org/project/win11_release_guard/`; end users install released packages with `python -m pip install win11_release_guard`.
+* PyPI project URL is `https://pypi.org/project/win11-release-guard/`; end users install released packages with `python -m pip install win11_release_guard`.
 * Console script remains `win11_release_guard = "win11_release_guard.__main__:main"`.
 * Package data includes `win11_release_guard/data/*.json` and `win11_release_guard/data/*.sig`.
 * Project URLs cover Homepage, Repository, Documentation, Changelog, Bug Tracker, Public Feed, and Pages Dashboard.
