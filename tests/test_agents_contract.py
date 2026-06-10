@@ -35,6 +35,10 @@ def test_agents_contract_documents_product_display_name_boundary() -> None:
     assert "Markdown headings and human-facing prose" in text
     assert "remain `win11_release_guard`" in text
     assert "Do not replace technical examples" in text
+    assert "README.md` intentionally starts with the dashboard preview image" in text
+    assert "Do not add tests or agent rules that require the README to start with the" in text
+    assert 'multiline `<img align="right" ... width="96" height="96">` formatting' in text
+    assert "require a PyPI\n  version badge" in text
 
 
 def test_human_facing_markdown_and_pages_headings_use_display_name() -> None:
@@ -42,8 +46,15 @@ def test_human_facing_markdown_and_pages_headings_use_display_name() -> None:
     release_lane = _repo_text("docs/tagged-release-lane.md")
     generator = _repo_text("win11_release_guard/policy_generator.py")
     release_lane_text = " ".join(release_lane.split())
+    hero_line = (
+        "![Windows 11 Release Guard dashboard preview]"
+        "(https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/"
+        "assets/images/windows-11-release-guard-hero-dashboard.png)"
+    )
 
-    assert readme.startswith("# Windows 11 Release Guard\n")
+    assert readme.splitlines()[0] == hero_line
+    assert "\n# Windows 11 Release Guard\n" in readme
+    assert readme.index(hero_line) < readme.index("\n# Windows 11 Release Guard\n")
     assert "Windows 11 Release Guard tells administrators" in readme
     assert "distribution checkpoints for Windows 11 Release Guard source archives" in release_lane_text
     assert "<title>Windows 11 Release Guard</title>" in generator
@@ -77,6 +88,14 @@ def test_agents_contract_preserves_historical_changelog_sections() -> None:
     assert "Newer changelog entries are added at the top" in text
     assert "Older changelog entries remain available for generated Pages changelog" in text
     assert "release history, SEO, and auditability" in text
+
+
+def test_agents_contract_forbids_license_badges_in_markdown_surfaces() -> None:
+    text = _agents_text()
+
+    assert "Future agents must not add or reintroduce license badges" in text
+    assert "`README.md`, `docs/*.md`, `wiki/*.md`" in text
+    assert "Markdown badge rows must not display license badges" in text
 
 
 def test_agents_contract_requires_live_gate_for_deployment_affecting_changes() -> None:

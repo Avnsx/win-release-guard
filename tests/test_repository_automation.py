@@ -134,8 +134,15 @@ def test_readme_documents_branding_and_runtime_trust_model() -> None:
     normalized = " ".join(text.split())
     agents = _read(ROOT / "AGENTS.md")
     ci_workflow = _read(WORKFLOWS / "ci.yml")
+    hero_line = (
+        "![Windows 11 Release Guard dashboard preview]"
+        "(https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/"
+        "assets/images/windows-11-release-guard-hero-dashboard.png)"
+    )
 
-    assert text.startswith("# Windows 11 Release Guard\n\n")
+    assert text.splitlines()[0] == hero_line
+    assert "\n# Windows 11 Release Guard\n" in text
+    assert text.index(hero_line) < text.index("\n# Windows 11 Release Guard\n")
     assert "Windows release policy guard for broad-fleet Windows 11 version checks." in text
     assert "installed console command, and Python import package use the same `win11_release_guard` name" in normalized
     assert "Repository | `https://github.com/Avnsx/win11_release_guard`" in text
@@ -172,6 +179,24 @@ def test_readme_uses_pages_wiki_as_primary_public_documentation() -> None:
     assert "| Pages Wiki home | https://avnsx.github.io/win11_release_guard/wiki/ |" in text
     assert "| GitHub internal Wiki (Markdown mirror) | https://github.com/Avnsx/win11_release_guard/wiki |" in text
     assert "The generated Pages Wiki is the primary public, indexed documentation surface." in text
+
+
+def test_readme_uses_github_alerts_for_compact_guidance() -> None:
+    text = _read(README)
+
+    assert text.count("> [!IMPORTANT]") == 1
+    assert text.count("> [!TIP]") == 1
+    assert text.count("> [!NOTE]") == 1
+    assert text.count("> [!WARNING]") == 1
+    assert "Compliance trust comes from the signed public policy JSON plus detached signature" in text
+    assert "RMM jobs normally want stable JSON and exit codes first" in text
+    assert "`Policy Feed Currency` is the latest compilation timestamp for the parsed policy results" in text
+    assert "Source Diagnostics explain parser/source health" in text
+    assert "https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/" in text
+    assert "https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/" in text
+    assert "https://avnsx.github.io/win11_release_guard/wiki/CLI-and-RMM-Usage/" in text
+    assert "https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/" in text
+    assert "https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/" in text
 
 
 def test_workflows_do_not_request_unnecessary_permissions_or_pat_tokens() -> None:

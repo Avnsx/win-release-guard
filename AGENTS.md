@@ -25,6 +25,7 @@ This repository is public software for Windows administrators. Future agents mus
 19. Public `/api/v1` Pages aliases stay backward compatible for at least 24 months; add fields compatibly instead of changing or removing the v1 contract.
 20. Signing key rotations require at least 24 months of verification overlap unless a documented last-resort trust break is required.
 21. Future agents must not delete historical `CHANGELOG.md` version sections when adding newer versions. Newer changelog entries are added at the top. Older changelog entries remain available for generated Pages changelog, release history, SEO, and auditability.
+22. Future agents must not add or reintroduce license badges in `README.md`, `docs/*.md`, `wiki/*.md`, generated Markdown, or other repository Markdown surfaces. License metadata may remain in package configuration and prose where it is materially relevant, but Markdown badge rows must not display license badges.
 
 Canonical repository and feed:
 
@@ -48,6 +49,14 @@ Canonical repository and feed:
   headings and narrative text easier to read, not to rename internals. The code
   and package identity must stay overwhelmingly consistent with
   `win11_release_guard` so the module remains importable and automation-safe.
+- `README.md` intentionally starts with the dashboard preview image before the
+  H1. Do not add tests or agent rules that require the README to start with the
+  heading.
+- Keep the `README.md` PyPI image button right-aligned with the explicit
+  multiline `<img align="right" ... width="96" height="96">` formatting. Do not
+  flatten it, remove `align="right"`, change the 96x96 size, or require a PyPI
+  version badge unless the user explicitly requests a README layout policy
+  change.
 
 ## Operational Notes
 
@@ -94,6 +103,11 @@ Canonical repository and feed:
   embed signed/manifest freshness data and recompute live freshness in the
   browser from `generated_at_epoch_s` or an equivalent signed timestamp, with a
   clear no-JavaScript fallback.
+- Source Diagnostic `notice` events are dashboard-only and must not be made
+  syncable to GitHub Issues again. Issue sync may create, update, or reopen only
+  `warning` and `error` events from real `source_diagnostics.events`; the legacy
+  `internals: notices` label may be searched only to close older managed Notice
+  issues that contain the exact internal marker.
 
 ## GitHub Actions Pinning Policy
 
