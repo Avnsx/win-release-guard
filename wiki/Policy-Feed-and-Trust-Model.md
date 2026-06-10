@@ -19,6 +19,18 @@ Use this when changing policy source loading, signature verification, manifest c
 
 ## Trust Rules
 
+The Pages feed is public so clients can fetch it without credentials, but public
+hosting is not the trust boundary. Runtime clients first download the policy
+bytes, then verify the detached Ed25519 signature over those exact bytes with a
+committed trusted public key. Only a matching signature and known `key_id` make
+the policy eligible for use.
+
+Key rotation is deliberately conservative. A retiring key can remain trusted for
+old signatures, but `verify_not_after_utc` limits the point after which fresh
+signatures from that key are no longer accepted. This keeps the public static
+feed easy to mirror while still making tampering, stale key use, and accidental
+API alias drift visible to clients and checks.
+
 | Rule | Detail |
 | --- | --- |
 | Public data is not automatically trusted. | Runtime verifies the detached signature before accepting policy bytes. |
@@ -48,6 +60,16 @@ Use this when changing policy source loading, signature verification, manifest c
 | 5 | No valid source | `POLICY_UNAVAILABLE` / `CHECK_INCOMPLETE` |
 
 ## Baseline And Preview Semantics
+
+The dashboard shows two build numbers that are easy to mix up. `latest_observed_build`
+is the newest Windows build the generator found in public Microsoft source data.
+It is useful context when a device is ahead of the normal fleet baseline, but it
+does not decide compliance by itself.
+
+`required_baseline_build` is the minimum signed build this policy currently
+requires for existing Windows 11 fleet devices. Devices below that build need a
+quality update. Preview or out-of-band builds can appear as the latest observed
+build without becoming the required baseline for the fleet.
 
 | Field / term | Meaning |
 | --- | --- |

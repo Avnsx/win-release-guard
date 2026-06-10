@@ -20,7 +20,7 @@ Enable or verify CodeQL in repository settings via Settings -> Code security and
 | --- | --- | --- |
 | `ci.yml` | push / pull request | Compile, audit actions, check identity, run tests, generate fixture policy, scan, export archive. |
 | `publish-policy.yml` | schedule / `workflow_dispatch` / selected `main` pushes | Generate signed Pages feed and deploy static Pages artifact. |
-| `sync-source-diagnostics-issues.yml` | `workflow_dispatch` | Sync source-diagnostic notice/warning/error events to GitHub Issues using only the built-in Actions token. |
+| `sync-source-diagnostics-issues.yml` | `workflow_dispatch` | Sync source-diagnostic warning/error events to GitHub Issues using only the built-in Actions token; notices remain dashboard-only except for closing legacy managed Notice issues. |
 | `sync-wiki.yml` | `workflow_dispatch` / `vX.Y.Z` tags | Sync `wiki/*.md` source Markdown to the same repository's GitHub internal Wiki. |
 | `release.yml` | tags / `workflow_dispatch` | Validate version/tag parity and publish clean source archive as GitHub Release asset. |
 | `pypi-publish.yml` | `workflow_dispatch` / published GitHub Release | Build wheel/sdist on manual runs; publish to PyPI through Trusted Publishing / GitHub OIDC only from an existing tag or published release. |
@@ -92,7 +92,7 @@ print credentialed URLs.
 | Field | Value |
 | --- | --- |
 | PyPI project name | Derived from `pyproject.toml` `[project].name`: `win11_release_guard` |
-| PyPI project URL | `https://pypi.org/project/win11_release_guard/` |
+| PyPI project URL | `https://pypi.org/project/win11-release-guard/` |
 | Owner | `Avnsx` |
 | Repository | `win11_release_guard` |
 | Workflow | `pypi-publish.yml` |
@@ -110,23 +110,32 @@ GitHub Issues synchronization. The deployment job does not receive issue-write
 permission. The sync reads only real `source_diagnostics.events` entries,
 deduplicates by the deterministic source diagnostic ID, stores the ID in the
 issue body as
-`<!-- wrg-source-diagnostic-id: ... -->`, and caps new issues per run. Notices,
-warnings, and errors from that event list are synced by default. Derived
-dashboard-only rows such as `No source issues reported`, existing-device
-exclusion notes, and freshness notices are not issue-sync inputs. Matching open
+`<!-- wrg-source-diagnostic-id: ... -->`, and caps new issues per run. Only
+warnings and errors from that event list are synced to GitHub Issues. Notice
+events stay visible in policy output and the dashboard, but they are
+dashboard-only for issue sync and must not create, update, or reopen GitHub
+Issues. Derived dashboard-only rows such as `No source issues reported`,
+existing-device exclusion notes, and freshness notices are not issue-sync
+inputs. Matching open
 issues are left untouched when their title, body, and labels already match the
 current diagnostic. Changed open issues are patched without a recurring
 still-present comment. Matching closed issues are reopened with a comment while
 the diagnostic is still present, and open managed issues are closed with a
-comment when their diagnostic ID disappears from the current policy.
+comment when their diagnostic ID disappears from the current policy. Created or
+updated managed warning/error issues include a compact Markdown tip at the
+bottom of the body with a Pages Wiki follow-up link chosen from the diagnostic
+kind, severity, and target flags.
 Before creating a new issue, the sync checks both GitHub Search results for the
 diagnostic ID and open issues carrying the managed internals labels. Every
 candidate is accepted only after the exact internal body marker matches the
 current diagnostic ID, so labels alone still cannot block or trigger mutation.
 
-Severity labels are fixed as `internals: notices`, `internals: warning`, and
-`internals: error`. Labels help filtering in GitHub, but they are not sufficient
-to mark an issue as managed without the internal body marker.
+Active issue-sync severity labels are fixed as `internals: warning` and
+`internals: error`. The legacy `internals: notices` label may still be searched
+only to close older managed Notice issues whose body contains the exact internal
+marker; new Notice issues are not created, updated, reopened, or kept current.
+Labels help filtering in GitHub, but they are not sufficient to mark an issue as
+managed without the internal body marker.
 
 During `publish-policy.yml`, GitHub Issues API, label, or permission failures in
 the issue-sync mutation step are degraded rather than publish-blocking. The

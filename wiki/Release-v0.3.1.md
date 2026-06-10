@@ -22,7 +22,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Packaging | `pyproject.toml` defines GPL-3.0-only metadata, `LICENSE.txt`, project URLs, console script, dependencies, test extras, and package data. |
 | Trust | Runtime uses public policy JSON plus detached Ed25519 signature; clients do not authenticate to GitHub. |
 | Freshness | Manifest/dashboard carry epoch freshness fields; browser age uses `Date.now()` and CLI checks enforce 14/45-day gates. |
-| Dashboard | Static Pages shows trust, Source Diagnostics filters, target builds, feed currency, optional static issue links, and API links. |
+| Dashboard | Static Pages shows trust, Source Diagnostics filters, target builds, feed currency, optional static issue links for real warning/error events, and API links. |
 | JSON hardening | Strict JSON rejects duplicate keys, non-finite numbers, invalid UTF-8, wrong object top-level shape, and oversized payloads. |
 | Local truth | Build evidence beats `ProductName`, WMI `Caption`, and `DisplayVersion`; those values remain raw diagnostics. |
 | Local diagnostic output | Default JSON compacts bulky Panther/setup log tails; `--include-raw-local-diagnostics` restores raw bounded local log tails; Panther reads use fixed known paths, 5 MiB per-file tails, and a generous 512 MiB total guard. |
@@ -35,7 +35,7 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 
 | Item | State |
 | --- | --- |
-| PyPI project | [win11_release_guard](https://pypi.org/project/win11_release_guard/) |
+| PyPI project | [win11_release_guard](https://pypi.org/project/win11-release-guard/) |
 | End-user install | `python -m pip install win11_release_guard` |
 | Package metadata | `pyproject.toml` defines `win11_release_guard` version `0.3.1`, GPL-3.0-only license, console script, project URLs, and package data. |
 | Build artifacts | Wheel and sdist are generated in `dist/`, checked with `python -m twine check dist/*`, and never committed. |
@@ -83,6 +83,15 @@ Compact human summary of the `0.3.1` hardening and packaging release. Code, test
 | Local `wiki/` | Source for the static Pages Wiki and source/staging for the live GitHub internal Wiki. |
 | Live wiki | `.github/workflows/sync-wiki.yml` can mirror `wiki/*.md` with the built-in Actions token or produce a dry-run artifact for manual fallback. |
 | Changelog history | Newer entries are added at the top; older version sections stay visible for Pages changelog, release history, SEO, and auditability. |
+
+## Source Diagnostics
+
+Source Diagnostics are source-health evidence, not compliance verdict authority.
+Release Health and Atom/Update History can be temporarily out of step. Preview,
+OOB, non-broad-target, unknown-family, and missing-KB Atom drift stays `notice`
+until reliable required-baseline evidence exists. Non-preview broad-target drift
+with an extracted KB and matching build/release evidence can be `warning`;
+notice-only drift does not trigger `source_drift_unresolved_after_24h`.
 
 ## Verify Commands
 

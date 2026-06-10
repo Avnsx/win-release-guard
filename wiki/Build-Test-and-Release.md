@@ -88,7 +88,7 @@ The repository `wiki/` folder is source for the static Pages Wiki and GitHub Wik
 | Check | Rule |
 | --- | --- |
 | Trusted Publisher values | Project `win11_release_guard`, owner `Avnsx`, repository `win11_release_guard`, workflow `pypi-publish.yml`, environment `pypi`. |
-| PyPI project | `https://pypi.org/project/win11_release_guard/` |
+| PyPI project | `https://pypi.org/project/win11-release-guard/` |
 | Trigger | Manual dispatch without a tag is build-only; manual dispatch with an existing `vX.Y.Z` tag, or a published GitHub Release, can publish. No normal push. |
 | Publishing model | PyPI Trusted Publishing / GitHub OIDC. |
 | Permission | `id-token: write` in the publish job only. |

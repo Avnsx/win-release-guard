@@ -18,6 +18,25 @@ Use this when changing feed age display, strict-production freshness gates, or p
 
 ## Dashboard Behavior
 
+`Policy Feed Currency` displays the latest compilation timestamp for the
+current policy results parsed by this repository's generator. In normal
+publishing, that timestamp comes from the GitHub Actions Pages lane, so delayed
+or failed workflow runs can make the dashboard age grow even when the source
+Markdown and Python code are correct.
+
+The responsible workflow is
+[publish-policy.yml](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml).
+Use it to trace the most recent scheduled, manual, or selected `main` push run
+that regenerated the public Pages output. The dashboard still recalculates the
+visible age in the browser from the generated epoch timestamp, but the timestamp
+itself represents when the current parsed results were last compiled.
+
+The thresholds are operational: under 14 days is current, 14 days starts a
+refresh-due warning, and 45 days is stale. Strict production checks use the same
+signed freshness fields and fail stale feeds instead of silently treating an old
+Pages artifact as acceptable. Without JavaScript, the page still shows the
+generated timestamp and render-time age as fallback text.
+
 | Condition | Label |
 | --- | --- |
 | Less than 14 days | `Current` |

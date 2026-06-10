@@ -36,7 +36,7 @@ Use this when publishing a GitHub Release with a validated clean source archive.
 | Field | Value |
 | --- | --- |
 | Project name | `win11_release_guard` from `pyproject.toml` |
-| PyPI project | `https://pypi.org/project/win11_release_guard/` |
+| PyPI project | `https://pypi.org/project/win11-release-guard/` |
 | Owner | `Avnsx` |
 | Repository | `win11_release_guard` |
 | Workflow | `pypi-publish.yml` |

@@ -6,6 +6,19 @@ Use this when investigating generator/parser drift, Microsoft source changes, At
 
 ## Diagnostic Sources
 
+Source diagnostics explain the health of the policy inputs and generator
+interpretation, not the final compliance verdict by themselves. They collect
+Release Health, Atom feed, parser, and drift signals so an administrator can see
+whether the public Microsoft source data changed, whether enrichment arrived
+late, or whether a parser assumption needs attention.
+
+The dashboard severity tiles are filters over those generated events. Notices
+are visibility-only, warnings call out non-blocking drift or missing enrichment,
+and errors are publish-blocking because an error means the generated policy
+could not be safely derived. This keeps source problems visible without letting
+browser JavaScript mutate GitHub, hide parser failures, or turn diagnostics into
+verdict authority.
+
 | Source | Captured data |
 | --- | --- |
 | Microsoft Release Health HTML | Bytes, fetch time, newest current-version revision, newest release-history date. |
@@ -17,9 +30,29 @@ Use this when investigating generator/parser drift, Microsoft source changes, At
 
 | Severity | Meaning |
 | --- | --- |
-| `notice` | Informational; should remain visible. |
+| `notice` | Informational; visible in policy output and the dashboard, but not synced to GitHub Issues. |
 | `warning` | Non-blocking drift or missing enrichment; verify before trusting manually. |
 | `error` | Publish-blocking source or parser failure. |
+
+Atom drift keeps Preview and out-of-band rows at `notice` severity even when the
+build number is newer than Release History. A newer non-preview build for the
+current broad target becomes `warning` only when reliable baseline evidence is
+present, because it may affect the required baseline after Microsoft source
+publication catches up. Missing or malformed Atom input is also `warning`; it is
+visible source-health degradation, not a silent condition.
+
+Microsoft's public sources can arrive out of order. The Atom/Update History feed
+can expose a KB or build before the Release Health HTML release-history table is
+manually refreshed. That race is normal for Preview, out-of-band, unknown-family,
+non-broad-target, or incomplete Atom rows, so those rows stay `notice`. Missing
+KB metadata is an uncertainty marker, not permanent proof that a row is harmless.
+A row is treated as required-baseline drift only when it maps to the current
+broad target, is not Preview or out-of-band, and has reliable baseline evidence.
+In the current generator that evidence is an extracted KB plus the build/release
+mapping; another durable upstream marker would need tests before it could serve
+the same role. The `source_drift_unresolved_after_24h` event is reserved for
+warning/error drift that remains unresolved after the newest source timestamp,
+not for normal notice-only feed lag.
 
 ## Diagnostic IDs
 
@@ -55,17 +88,23 @@ reopened, or closed by the sync.
 For managed open issues, the sync compares the current title, body, and labels
 with the desired diagnostic state. If they already match, the issue is left
 unchanged and no "still present" comment is posted. Reopened managed issues and
-stale managed issue closes still receive a short workflow comment.
+stale managed issue closes still receive a short workflow comment. New or
+updated managed warning/error issues include a compact Markdown tip at the
+bottom of the issue body. The tip is selected from the diagnostic kind, severity,
+and target flags, and links to the relevant Pages Wiki follow-up page for Atom
+drift, parser/source failures, freshness drift, or publish-gate behavior.
 
-Severity labels are fixed as:
+Issue-sync labels are fixed as:
 
 | Severity | GitHub label |
 | --- | --- |
-| `notice` | `internals: notices` |
 | `warning` | `internals: warning` |
 | `error` | `internals: error` |
 
-Labels alone do not make an issue managed; the internal body marker is required.
+Notice events do not create, update, reopen, or keep GitHub Issues current. The
+legacy `internals: notices` label may still be searched only so older managed
+Notice issues with the exact body marker can be closed as stale. Labels alone do
+not make an issue managed; the internal body marker is required.
 
 In the publish workflow, a GitHub Issues API, label, or permission failure in the
 sync step is published as static degraded metadata instead of blocking signed
@@ -80,11 +119,19 @@ when workflow-generated issue metadata provides a canonical repository issue URL
 for a real synced event. Not every visible Notice, Warning, or Error row has an
 issue.
 
+The small copy button above the diagnostic feed exports the rows visible at the
+time of the click as JSON to the local clipboard. The export includes severity,
+deterministic diagnostic ID, title, source, message, tags, optional static issue
+URL, the active filter, visible counts, and a short neutral context note. It is
+meant for technical lookup and handoff of the current dashboard state; it does
+not call GitHub, write browser-side data back to the repository, or change the
+signed policy verdict.
+
 For rehearsal runs, use `tools/sync_source_diagnostics_issues.py --dry-run` with
 `--dry-run-report-output` and `--dry-run-report-format json` or `markdown`.
-Dry-run reports list deterministic IDs, severities, labels, and planned
-create/update/reopen/close actions without mutating GitHub Issues or writing
-tokens.
+Dry-run reports list deterministic IDs, severities, labels, skipped Notice
+counts, and planned create/update/reopen/close actions without mutating GitHub
+Issues or writing tokens.
 
 ## Common Issues
 
