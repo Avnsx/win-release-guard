@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 
-from win11_release_guard.models import ReleasePolicy
+from win11_release_guard.models import ReleasePolicy, ReleasePolicyEntry
 import win11_release_guard.policy_generator as policy_generator_module
 from win11_release_guard.policy_generator import render_policy_index
 
@@ -150,19 +150,85 @@ def test_source_diagnostic_issue_metadata_ignores_invalid_issue_urls() -> None:
 def test_source_diagnostic_issue_metadata_builds_canonical_link_from_issue_number() -> None:
     diagnostic_id = _diagnostic_id()
     index = render_policy_index(
-        _policy_with_issue_status({diagnostic_id: {"number": "43", "state": "closed"}}),
+        _policy_with_issue_status({diagnostic_id: {"number": "43", "state": "open"}}),
         policy_bytes=None,
         signature=None,
     )
     HTMLParser().feed(index)
 
     assert 'href="https://github.com/Avnsx/win11_release_guard/issues/43"' in index
-    assert 'aria-label="GitHub issue 43 status closed"' in index
+    assert 'aria-label="GitHub issue 43 status open"' in index
     assert "#Ticket 43" in index
     _assert_no_external_or_client_auth(index)
 
 
-def test_source_diagnostic_ticket_links_render_for_all_severities() -> None:
+def test_source_diagnostic_issue_metadata_suppresses_closed_issue_rows() -> None:
+    diagnostic_id = _diagnostic_id()
+    index = render_policy_index(
+        _policy_with_issue_status({diagnostic_id: {"number": "43", "state": "closed"}}),
+        policy_bytes=None,
+        signature=None,
+    )
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{diagnostic_id}"' not in index
+    assert "Atom feed reports a newer baseline build." not in index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/issues/43"' not in index
+    assert "#Ticket 43" not in index
+    assert "warning diagnostic entry reported without structured row details" not in index
+    _assert_no_external_or_client_auth(index)
+
+
+def test_source_diagnostic_issue_metadata_is_ignored_for_derived_rows() -> None:
+    excluded_entry = ReleasePolicyEntry(
+        version="26H1",
+        build_family=26200,
+        latest_build="26200.1000",
+        reason="new devices only",
+    )
+    preview_policy = ReleasePolicy(
+        excluded_for_existing_devices=(excluded_entry,),
+        source_diagnostics={"event_counts": {"notice": 0, "warning": 0, "error": 0}},
+    )
+    clear_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._clear_source_diagnostic_row()
+    )
+    excluded_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._excluded_release_diagnostic_rows(preview_policy)[0]
+    )
+    policy = ReleasePolicy(
+        excluded_for_existing_devices=(excluded_entry,),
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 0, "error": 0},
+            "issue_status": {
+                clear_id: {
+                    "number": 44,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/44",
+                },
+                excluded_id: {
+                    "number": 45,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/45",
+                }
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{clear_id}"' in index
+    assert f'data-diagnostic-id="{excluded_id}"' in index
+    assert "No source issues reported" in index
+    assert "26H1 excluded for existing devices" in index
+    assert "#Ticket 44" not in index
+    assert "#Ticket 45" not in index
+    assert '<a class="diag-ticket-link"' not in index
+    _assert_no_external_or_client_auth(index)
+
+
+def test_source_diagnostic_ticket_links_render_only_for_warning_and_error_events() -> None:
     events = [
         {
             "severity": "notice",
@@ -206,10 +272,13 @@ def test_source_diagnostic_ticket_links_render_for_all_severities() -> None:
     index = render_policy_index(policy, policy_bytes=None, signature=None)
     HTMLParser().feed(index)
 
-    assert index.count('class="diag-ticket-link"') == 3
+    assert index.count('class="diag-ticket-link"') == 2
     for severity in ("notice", "warning", "error"):
         assert f'<article class="diag-row {severity}" data-diagnostic-severity="{severity}"' in index
-    for number in (50, 51, 52):
+    assert "Notice diagnostic still exists." in index
+    assert "#Ticket 50" not in index
+    assert "https://github.com/Avnsx/win11_release_guard/issues/50" not in index
+    for number in (51, 52):
         assert f"#Ticket {number}" in index
         assert f"https://github.com/Avnsx/win11_release_guard/issues/{number}" in index
     _assert_no_external_or_client_auth(index)

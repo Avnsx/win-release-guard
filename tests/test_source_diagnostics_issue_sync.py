@@ -104,6 +104,20 @@ def _managed_issue(diagnostic: sync_tool.DiagnosticIssue, *, number: int = 42, s
     }
 
 
+def test_issue_sync_label_contract_names_active_and_legacy_severities() -> None:
+    assert sync_tool.LABEL_BY_SEVERITY == {
+        "warning": "internals: warning",
+        "error": "internals: error",
+    }
+    assert sync_tool.LEGACY_NOTICE_LABEL == "internals: notices"
+    assert sync_tool.MANAGED_LABELS == (
+        "internals: warning",
+        "internals: error",
+        "internals: notices",
+    )
+    assert "notice" not in sync_tool.LABEL_BY_SEVERITY
+
+
 def test_script_help_runs_from_source_checkout_without_editable_install() -> None:
     script = Path(__file__).resolve().parents[1] / "tools" / "sync_source_diagnostics_issues.py"
     dependency_paths = [Path(path) for path in site.getsitepackages()]
@@ -198,7 +212,7 @@ def test_issue_sync_reads_only_source_diagnostics_events_not_display_rows() -> N
     assert derived_id not in client.created[0][1]["body"]
 
 
-def test_issue_sync_maps_exact_labels_for_all_enabled_severities() -> None:
+def test_issue_sync_maps_exact_labels_for_warning_and_error_only() -> None:
     events = [
         _event("wrg-source-diagnostic-v1:1111111111111111", severity="notice"),
         _event("wrg-source-diagnostic-v1:2222222222222222", severity="warning"),
@@ -215,12 +229,104 @@ def test_issue_sync_maps_exact_labels_for_all_enabled_severities() -> None:
         request_delay_seconds=0,
     )
 
-    assert summary.created == 3
+    assert summary.created == 2
     assert [payload["labels"] for _, payload in client.created] == [
-        ["internals: notices"],
         ["internals: warning"],
         ["internals: error"],
     ]
+
+
+def test_issue_body_adds_broad_target_atom_tip_at_bottom() -> None:
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy(
+            [
+                _event(
+                    "wrg-source-diagnostic-v1:1111111111111111",
+                    severity="warning",
+                    kind="atom_newer_than_release_history",
+                    message="Atom feed shows a newer broad-target baseline build.",
+                )
+            ]
+        )
+    )[0]
+
+    body = sync_tool.issue_body(diagnostic)
+
+    assert "> [!TIP]" in body
+    assert "new broad-target, non-preview build" in body
+    assert "keep WUA as read-only local context" in body
+    assert body.rstrip().endswith(
+        "> See [follow-up documentation](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/#common-issues)."
+    )
+
+
+def test_issue_body_adds_atom_enrichment_tip_for_feed_failures() -> None:
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy(
+            [
+                _event(
+                    "wrg-source-diagnostic-v1:2222222222222222",
+                    severity="warning",
+                    kind="atom_feed_parse_failed",
+                    message="Atom feed could not be parsed.",
+                )
+            ]
+        )
+    )[0]
+
+    body = sync_tool.issue_body(diagnostic)
+
+    assert "Atom enrichment is unavailable or unusable" in body
+    assert "Release Health remains the primary policy source" in body
+    assert body.rstrip().endswith(
+        "> See [follow-up documentation](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/#diagnostic-sources)."
+    )
+
+
+def test_issue_body_adds_freshness_tip_for_unresolved_source_drift() -> None:
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy(
+            [
+                _event(
+                    "wrg-source-diagnostic-v1:3333333333333333",
+                    severity="warning",
+                    kind="source_drift_unresolved_after_24h",
+                    message="Policy was generated after source drift remained unresolved.",
+                )
+            ]
+        )
+    )[0]
+
+    body = sync_tool.issue_body(diagnostic)
+
+    assert "Unresolved source drift older than 24 hours" in body
+    assert "publish workflow and source timestamps" in body
+    assert body.rstrip().endswith(
+        "> See [follow-up documentation](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/)."
+    )
+
+
+def test_issue_body_adds_publish_gate_tip_for_source_errors() -> None:
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy(
+            [
+                _event(
+                    "wrg-source-diagnostic-v1:4444444444444444",
+                    severity="error",
+                    kind="release_health_parser_failed",
+                    message="Release Health table could not be parsed safely.",
+                )
+            ]
+        )
+    )[0]
+
+    body = sync_tool.issue_body(diagnostic)
+
+    assert "source diagnostic error is publish-blocking" in body
+    assert "instead of bypassing the gate" in body
+    assert body.rstrip().endswith(
+        "> See [follow-up documentation](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/#publish-gate)."
+    )
 
 
 def test_repeated_issue_sync_leaves_current_open_issue_unchanged_without_comment() -> None:
@@ -635,21 +741,70 @@ def test_issue_sync_caps_new_issue_creation_per_run() -> None:
     assert len(client.created) == 2
 
 
-def test_notice_diagnostics_sync_by_default_with_explicit_opt_out() -> None:
+def test_notice_diagnostics_are_dashboard_only_even_with_legacy_flags() -> None:
     notice = _event("wrg-source-diagnostic-v1:9999999999999999", severity="notice")
 
-    assert [diagnostic.diagnostic_id for diagnostic in sync_tool.diagnostics_from_policy(_policy([notice]))] == [
-        "wrg-source-diagnostic-v1:9999999999999999"
-    ]
+    assert sync_tool.diagnostics_from_policy(_policy([notice])) == []
+    assert sync_tool.diagnostics_from_policy(_policy([notice]), include_notices=True) == []
     assert sync_tool.diagnostics_from_policy(_policy([notice]), include_notices=False) == []
 
 
-def test_notice_managed_issue_stays_open_while_notice_exists() -> None:
+def test_include_notices_cli_flag_does_not_create_notice_issues(tmp_path: Path) -> None:
+    notice_id = "wrg-source-diagnostic-v1:9999999999999999"
+    warning_id = "wrg-source-diagnostic-v1:aaaaaaaaaaaaaaaa"
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(
+        json.dumps(
+            _policy(
+                [
+                    _event(notice_id, severity="notice"),
+                    _event(warning_id, severity="warning"),
+                ]
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = FakeGitHubClient()
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    code = sync_tool.main(
+        [
+            "--policy-file",
+            str(policy_path),
+            "--repository",
+            "Avnsx/win11_release_guard",
+            "--include-notices",
+            "--request-delay-seconds",
+            "0",
+        ],
+        client=client,
+        environ={"GITHUB_TOKEN": "safe-test-token-value-that-must-not-print"},
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 0
+    assert [payload["labels"] for _, payload in client.created] == [["internals: warning"]]
+    assert notice_id not in "\n".join(payload["body"] for _, payload in client.created)
+    assert "Notice diagnostics are dashboard-only; --include-notices is ignored" in stdout.getvalue()
+    assert "skipped_notices=1" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_notice_managed_issue_closes_as_stale_even_while_notice_exists() -> None:
     diagnostic_id = "wrg-source-diagnostic-v1:9090909090909090"
     diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id, severity="notice")]))
+    notice_issue = {
+        "number": 90,
+        "state": "open",
+        "body": _marker(diagnostic_id),
+        "labels": [{"name": sync_tool.LEGACY_NOTICE_LABEL}],
+    }
     client = FakeGitHubClient(
-        {diagnostic_id: [_managed_issue(diagnostics[0], number=90)]},
-        open_managed_issues=[_managed_issue(diagnostics[0], number=90)],
+        {diagnostic_id: [notice_issue]},
+        open_managed_issues=[notice_issue],
     )
 
     summary = sync_tool.sync_diagnostics(
@@ -660,12 +815,13 @@ def test_notice_managed_issue_stays_open_while_notice_exists() -> None:
         request_delay_seconds=0,
     )
 
+    assert diagnostics == []
     assert summary.updated == 0
-    assert summary.commented == 0
-    assert summary.closed == 0
+    assert summary.commented == 1
+    assert summary.closed == 1
     assert client.updated == []
-    assert client.comments == []
-    assert client.closed == []
+    assert client.comments[0][1] == 90
+    assert client.closed == [("Avnsx/win11_release_guard", 90, "completed")]
 
 
 def test_issue_sync_closes_stale_open_managed_issue() -> None:
@@ -833,7 +989,12 @@ def test_end_to_end_dry_run_writes_json_and_markdown_without_mutation_or_token(t
     ]
     policy_path.write_text(json.dumps(_policy(events)) + "\n", encoding="utf-8")
     diagnostics = sync_tool.diagnostics_from_policy(_policy(events))
-    notice_issue = _managed_issue(diagnostics[0], number=90)
+    notice_issue = {
+        "number": 90,
+        "state": "open",
+        "body": _marker(notice_id),
+        "labels": [{"name": sync_tool.LEGACY_NOTICE_LABEL}],
+    }
     closed_warning_issue = {
         "number": 91,
         "state": "closed",
@@ -908,18 +1069,12 @@ def test_end_to_end_dry_run_writes_json_and_markdown_without_mutation_or_token(t
     payload = json.loads(json_report.read_text(encoding="utf-8"))
     assert payload["dry_run"] is True
     assert payload["repository"] == "Avnsx/win11_release_guard"
-    assert payload["summary"]["considered"] == 3
+    assert payload["summary"]["considered"] == 2
+    assert payload["summary"]["skipped_notices"] == 1
     assert payload["summary"]["dry_run_creates"] == 1
     assert payload["summary"]["dry_run_reopens"] == 1
-    assert payload["summary"]["dry_run_closes"] == 1
+    assert payload["summary"]["dry_run_closes"] == 2
     assert payload["diagnostics"] == [
-        {
-            "diagnostic_id": notice_id,
-            "severity": "notice",
-            "label": "internals: notices",
-            "kind": "notice_probe",
-            "title": "Notice Probe",
-        },
         {
             "diagnostic_id": warning_id,
             "severity": "warning",
@@ -939,20 +1094,13 @@ def test_end_to_end_dry_run_writes_json_and_markdown_without_mutation_or_token(t
         (action["action"], action["diagnostic_id"], action.get("label"), action.get("issue_number"))
         for action in payload["actions"]
     ] == [
-        ("current", notice_id, "internals: notices", 90),
         ("reopen", warning_id, "internals: warning", 91),
         ("create", error_id, "internals: error", None),
+        ("close", notice_id, None, 90),
         ("close", stale_id, None, 93),
     ]
-    assert payload["issue_status"] == {
-        notice_id: {
-            "number": 90,
-            "state": "open",
-            "url": "https://github.com/Avnsx/win11_release_guard/issues/90",
-        }
-    }
+    assert payload["issue_status"] == {}
     assert json_client.searches == [
-        ("Avnsx/win11_release_guard", notice_id),
         ("Avnsx/win11_release_guard", warning_id),
         ("Avnsx/win11_release_guard", error_id),
     ]
@@ -961,6 +1109,7 @@ def test_end_to_end_dry_run_writes_json_and_markdown_without_mutation_or_token(t
     markdown = markdown_report.read_text(encoding="utf-8")
     assert "# Source Diagnostics Issue Sync Dry Run" in markdown
     assert "| create | wrg-source-diagnostic-v1:3333333333333333 | error | internals: error | - | - |" in markdown
+    assert "| close | wrg-source-diagnostic-v1:1111111111111111 | - | - | #90 | stale |" in markdown
     assert "| close | wrg-source-diagnostic-v1:4444444444444444 | - | - | #93 | stale |" in markdown
     assert manual_id not in markdown
 

@@ -129,6 +129,7 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     index = _render_landing(tmp_path)
 
     assert "<title>Windows 11 Release Guard</title>" in index
+    assert '<link rel="icon" href="data:image/svg+xml,' in index
     assert (
         '<meta name="description" content="Windows 11 Release Guard dashboard for Windows 11 release compliance, '
         "signed public policy feed freshness, 25H2 target status, source diagnostics, and fleet administration "
@@ -224,6 +225,27 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert 'src="assets/images/download_from_pypi.png"' in index
     assert 'alt="Download from PyPI"' in index
     assert ".pypi-download-link{display:inline-flex" in index
+    header_actions_rule = re.search(r"\.header-actions\{([^}]*)\}", index)
+    assert header_actions_rule
+    assert "z-index:2" in header_actions_rule.group(1)
+    assert "opacity:1" in header_actions_rule.group(1)
+    assert "visibility:visible" in header_actions_rule.group(1)
+    header_nav_rule = re.search(r"\.header-nav\{([^}]*)\}", index)
+    assert header_nav_rule
+    assert "z-index:2" in header_nav_rule.group(1)
+    assert "opacity:1" in header_nav_rule.group(1)
+    assert "visibility:visible" in header_nav_rule.group(1)
+    nav_inner_rule = re.search(r"\.header-nav \.nav-inner\{([^}]*)\}", index)
+    assert nav_inner_rule
+    assert "opacity:1" in nav_inner_rule.group(1)
+    assert "visibility:visible" in nav_inner_rule.group(1)
+    assert "backdrop-filter" not in nav_inner_rule.group(1)
+    title_version_rule = re.search(r"\.title-version-link\{([^}]*)\}", index)
+    assert title_version_rule
+    assert "z-index:2" in title_version_rule.group(1)
+    assert "opacity:1" in title_version_rule.group(1)
+    assert "visibility:visible" in title_version_rule.group(1)
+    assert "backdrop-filter" not in title_version_rule.group(1)
     assert (tmp_path / "assets" / "images" / "download_from_pypi.png").is_file()
     assert 'id="policy-summary"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/"' in index
@@ -231,7 +253,10 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "--item-size:42px" in index
     assert "@media(max-width:900px)" in index
     assert ".nav-hover-label{display:none}" in index
+    assert 'data-nav-label="Repository"' in index
+    assert '<a href="https://github.com/Avnsx/win11_release_guard" aria-label="Repository" data-nav-label="Repository"><svg class="github-icon"' in index
     assert 'data-nav-label="Dashboard"' in index
+    assert index.index('data-nav-label="Repository"') < index.index('data-nav-label="Dashboard"')
     assert "Dashboard" in index
     assert 'data-nav-label="Write a Issue Ticket"' in index
     assert "Write a Issue Ticket" in index
@@ -266,6 +291,56 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Source diagnostics" in index
     assert "diag-feed" in index
     assert 'aria-label="Source diagnostic event feed"' in index
+    assert index.count('class="dashboard-info-link"') == 6
+    assert ".dashboard-info-link:after{display:none}" in index
+    assert ".dashboard-info-tooltip-action{margin-top:7px;color:#0067c0" in index
+    assert "class=\"ui-icon dashboard-info-icon\"" in index
+    for info_link_html in index.split('class="dashboard-info-link"')[1:]:
+        assert " title=" not in info_link_html.split(">", 1)[0]
+    assert index.count(
+        'class="dashboard-info-tooltip-action">Click to navigate to related wiki page</span>'
+    ) == 6
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/'
+        '#baseline-and-preview-semantics" aria-label="Learn more about latest observed build semantics"'
+        in index
+    )
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/'
+        '#baseline-and-preview-semantics" aria-label="Learn more about required baseline semantics"'
+        in index
+    )
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/'
+        '#dashboard-behavior" aria-label="Learn more about policy feed currency"'
+        in index
+    )
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/'
+        '#diagnostic-sources" aria-label="Learn more about source diagnostics"'
+        in index
+    )
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/'
+        '#trust-rules" aria-label="Learn more about signature trust"'
+        in index
+    )
+    assert (
+        'href="https://avnsx.github.io/win11_release_guard/wiki/GitHub-Pages-Dashboard/'
+        '#dashboard-sections" aria-label="Learn more about the programmatic API"'
+        in index
+    )
+    assert "Newest Windows build found in Microsoft source data" in index
+    assert "Minimum signed build this policy currently requires for existing Windows 11 fleet devices" in index
+    assert "Shows when the current parsed policy results were last compiled" in index
+    assert "Workflow timing is traceable in publish-policy.yml" in index
+    assert "Source diagnostics show parser, drift, and upstream feed events" in index
+    assert "distinguish informational notices from publish-blocking errors" in index
+    assert "The public policy feed is accepted only after detached Ed25519 verification" in index
+    assert "The API links expose the canonical signed policy, signature, manifest" in index
+    assert "Feed currency compares the signed generation timestamp with live browser time" not in index
+    assert "Learn how latest observed builds differ from the required broad-fleet baseline." not in index
+    assert "Learn how detached Ed25519 signatures make the public feed trustworthy." not in index
     assert "Notices" in index
     assert "Warnings" in index
     assert "Errors" in index
@@ -278,7 +353,11 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert 'id="source-diagnostics-feed"' in index
     assert (
         '<button type="button" class="panel-action diag-filter-reset" '
-        'data-diagnostic-filter="all" aria-controls="source-diagnostics-feed" aria-pressed="true">View all</button>'
+        'data-diagnostic-filter="all" aria-controls="source-diagnostics-feed" '
+        'aria-pressed="true">View all</button>'
+        '<button type="button" class="panel-action diag-expand-toggle" '
+        'data-diagnostics-expand-toggle="true" aria-controls="source-diagnostics-feed" '
+        'aria-expanded="false" aria-label="Expand Source Diagnostics view">Expand View</button>'
         in index
     )
     assert '<a class="panel-action" href="#source-health">Source health</a>' not in index
@@ -287,7 +366,39 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert 'id="source-diagnostics-filter-status" class="diag-filter-status" aria-live="polite"' in index
     assert "Showing all 3 source diagnostic rows." in index
     assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
-    assert "No diagnostic rows match the selected severity filter." in index
+    assert "This category currently contains no entries." in index
+    assert 'class="diag-feed-bar"' in index
+    assert (
+        '<button type="button" class="epoch-copy diag-export-copy" '
+        'data-diagnostics-copy="visible-json" '
+        'aria-label="Copy visible Source Diagnostics as JSON" '
+        'title="Copy visible Source Diagnostics JSON">'
+        in index
+    )
+    assert ".diag-feed-bar{display:flex;align-items:center;justify-content:space-between" in index
+    assert "margin:-4px 0 -8px;min-height:22px" in index
+    assert ".diag-export-copy{align-self:center;width:22px;height:22px;min-width:22px" in index
+    assert "border-color:transparent;border-radius:5px;background:transparent;box-shadow:none" in index
+    assert ".diag-export-copy:hover{border-color:transparent;background:transparent;box-shadow:none" in index
+    assert '.diag-export-copy[data-copy-state="copied"]{border-color:transparent;background:transparent;color:var(--ok)}' in index
+    assert '.diag-export-copy[data-copy-state="failed"]{border-color:transparent;background:transparent;color:var(--err)}' in index
+    assert ".diag-export-copy svg{width:16px;height:16px}" in index
+    assert ".diag-export-copy{align-self:flex-end;width:30px;height:30px" not in index
+    assert "source diagnostics export copy" in index
+    assert "data-diagnostics-copy=\"visible-json\"" in index
+    assert "function visibleDiagnosticEntries()" in index
+    assert "function sourceDiagnosticsExportPayload()" in index
+    assert "export_schema:'win11_release_guard.source_diagnostics.visible.v1'" in index
+    assert "dashboard_counts_by_severity:dashboardDiagnosticCounts()" in index
+    assert "visible_counts_by_severity:visibleCounts" in index
+    assert "active_filter:root.getAttribute('data-active-diagnostic-filter')||'all'" in index
+    assert "diagnostic_id:row.getAttribute('data-diagnostic-id')||''" in index
+    assert "issue_url:issueLink ? (issueLink.getAttribute('href')||null) : null" in index
+    assert "display_index:index+1" in index
+    assert "copyText(JSON.stringify(payload,null,2))" in index
+    assert "DOM export of currently visible Source Diagnostics rows for technical triage" in index
+    assert "These rows describe source, parser, drift, freshness, or dashboard-derived context" in index
+    assert "do not override signed policy verdicts" in index
     assert "data-diagnostic-filter-root" in index
     assert "initDiagnosticFilters" in index
     assert "source diagnostics filter init" in index
@@ -299,6 +410,27 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "source diagnostics filter','rows" in index
     assert "source diagnostics filter','status" in index
     assert "source diagnostics filter','empty state" in index
+    assert "source diagnostics expansion','dashboard grid" in index
+    assert "source diagnostics expansion','programmatic api" in index
+    assert "source diagnostics expansion','expand toggle" in index
+    assert "source diagnostics export copy','button" in index
+    assert 'data-diagnostics-expanded="false"' in index
+    assert "data-active-diagnostic-filter" in index
+    assert ".dashboard-grid.diagnostics-expanded .source-diagnostics{grid-row:1/span 3;align-self:stretch}" in index
+    assert ".dashboard-grid.diagnostics-expanded .programmatic-api{display:none!important}" in index
+    assert '.source-diagnostics[data-diagnostics-expanded="true"] .diag-feed' in index
+    assert "height:clamp(680px,82vh,900px)" in index
+    assert "programmatic.hidden=diagnosticsExpanded" in index
+    assert (
+        "expandToggle.textContent=diagnosticsExpanded?'Collapse View':'Expand View'"
+        in index
+    )
+    assert "diagnosticsExpanded?'Collapse Source Diagnostics view':'Expand Source Diagnostics view'" in index
+    assert "grid.classList.toggle('diagnostics-expanded',diagnosticsExpanded)" in index
+    assert "expandToggle.addEventListener('click',function(event){guard('source diagnostics expansion'" in index
+    assert "setDiagnosticsExpanded(!diagnosticsExpanded)" in index
+    assert "applyFilter(control.getAttribute('data-diagnostic-filter')||'all')" in index
+    assert "block.hidden=false;block.open=diagnosticsExpanded;" in index
     assert ".diag-row[hidden]" in index
     assert ".diag-more[hidden]" in index
     assert "row.hidden=!match" in index
@@ -416,7 +548,7 @@ def test_pages_index_renders_day_hour_freshness_visual_state(monkeypatch) -> Non
         'aria-label="Published feed age 6 days, 15 hours, 0 minutes">6d 15h</div>'
         in index
     )
-    assert ".freshness-panel{container-type:inline-size}" in index
+    assert ".freshness-panel{container-type:inline-size;align-content:start;grid-auto-rows:max-content}" in index
     assert ".freshness-panel .freshness-layout{grid-template-columns:1fr;gap:clamp(24px,3vw,34px)}" in index
     assert (
         ".freshness-panel .freshness-hero{grid-template-columns:minmax(104px,120px) "
@@ -564,7 +696,7 @@ def test_pages_index_source_diagnostics_empty_state_is_compact() -> None:
     assert "diag-feed" in index
     assert "diag-events-empty" in index
     assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
-    assert "No diagnostic rows match the selected severity filter." in index
+    assert "This category currently contains no entries." in index
     assert "setEmptyState" in index
     assert "labels={notice:'notice',warning:'warning',error:'error'}" in index
     assert "No warnings" in index
@@ -645,10 +777,25 @@ def test_pages_index_derived_source_diagnostic_rows_do_not_render_ticket_links()
 
     assert "No source issues reported" in index
     assert "26H1 excluded for existing devices" in index
+    assert (
+        f'<article class="diag-row notice" data-diagnostic-severity="notice" data-diagnostic-id="{clear_id}">'
+        in index
+    )
+    assert (
+        f'<article class="diag-row notice" data-diagnostic-severity="notice" data-diagnostic-id="{excluded_id}">'
+        in index
+    )
     assert f'data-diagnostic-id="{clear_id}"' in index
     assert f'data-diagnostic-id="{excluded_id}"' in index
     assert index.count(_diag_row_marker("notice")) == 2
     _assert_diag_count_tile(index, "notice", 2, "Notices")
+    assert "row.getAttribute('data-diagnostic-severity')===severity" in index
+    assert "root.setAttribute('data-active-diagnostic-filter',severity||'all')" in index
+    assert (
+        '<button type="button" class="panel-action diag-filter-reset" '
+        'data-diagnostic-filter="all" aria-controls="source-diagnostics-feed" '
+        'aria-pressed="true">View all</button>'
+    ) in index
     assert "#Ticket 70" not in index
     assert "#Ticket 71" not in index
     assert '<a class="diag-ticket-link"' not in index
@@ -747,6 +894,57 @@ def test_pages_index_source_diagnostics_ticket_link_is_static_hover_only_metadat
     _assert_no_external_page_dependencies(index)
 
 
+def test_pages_index_source_diagnostics_suppresses_closed_issue_rows() -> None:
+    open_event = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build": "26200.8461",
+        "message": "Open warning remains visible.",
+    }
+    closed_event = {
+        "severity": "error",
+        "kind": "missing_broad_target_baseline",
+        "release": "25H2",
+        "build_family": 26200,
+        "message": "Closed issue should suppress this diagnostic.",
+    }
+    open_id = policy_generator_module._source_diagnostic_id_for_event(open_event)
+    closed_id = policy_generator_module._source_diagnostic_id_for_event(closed_event)
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 1, "error": 1},
+            "events": [open_event, closed_event],
+            "issue_status": {
+                open_id: {
+                    "number": 42,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                },
+                closed_id: {
+                    "number": 43,
+                    "state": "closed",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/43",
+                },
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{open_id}"' in index
+    assert f'data-diagnostic-id="{closed_id}"' not in index
+    assert "Open warning remains visible." in index
+    assert "Closed issue should suppress this diagnostic." not in index
+    assert "#Ticket 42" in index
+    assert "#Ticket 43" not in index
+    _assert_diag_count_tile(index, "warning", 1, "Warnings")
+    _assert_diag_count_tile(index, "error", 0, "Errors")
+    assert "error diagnostic entry reported without structured row details" not in index
+    _assert_no_external_page_dependencies(index)
+
+
 def test_pages_index_source_diagnostics_renders_issue_sync_unavailable_status() -> None:
     policy = ReleasePolicy(
         source_diagnostics={
@@ -813,6 +1011,48 @@ def test_pages_index_source_diagnostics_render_warning_and_error_color_states() 
     assert "No source issues reported" not in index
 
 
+def test_pages_index_source_diagnostics_rows_sort_by_severity_priority() -> None:
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 1, "warning": 1, "error": 1},
+            "events": [
+                {
+                    "severity": "notice",
+                    "kind": "policy_feed_current",
+                    "message": "Notice should render after blocking diagnostics.",
+                },
+                {
+                    "severity": "warning",
+                    "kind": "atom_newer_than_release_history",
+                    "message": "Warning should render before notices.",
+                },
+                {
+                    "severity": "error",
+                    "kind": "release_health_parser_failed",
+                    "message": "Error should render first.",
+                },
+            ],
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert index.index("Release Health Parser Failed") < index.index("Atom Newer Than Release History")
+    assert index.index("Atom Newer Than Release History") < index.index("Policy Feed Current")
+    rendered_severities = re.findall(
+        r'<article class="diag-row (notice|warning|error)" data-diagnostic-severity="(?:notice|warning|error)"',
+        index,
+    )
+    assert rendered_severities[:3] == ["error", "warning", "notice"]
+    assert index.count(_diag_row_marker("error")) == 1
+    assert index.count(_diag_row_marker("warning")) == 1
+    assert index.count(_diag_row_marker("notice")) == 1
+    _assert_diag_count_tile(index, "error", 1, "Errors")
+    _assert_diag_count_tile(index, "warning", 1, "Warnings")
+    _assert_diag_count_tile(index, "notice", 1, "Notices")
+
+
 def test_pages_index_source_diagnostics_warning_error_counts_suppress_clear_placeholder() -> None:
     policy = ReleasePolicy(
         source_diagnostics={"event_counts": {"notice": 0, "warning": 2, "error": 1}},
@@ -866,6 +1106,13 @@ def test_pages_index_renderer_tolerates_sparse_legacy_policy() -> None:
     assert "0</strong><span>Errors" in index
     assert "3 notice diagnostic entries reported without structured row details." in index
     assert "Rendered warning &lt;without raw html&gt;" in index
+    assert 'class="grid dashboard-grid has-validation-warnings"' in index
+    assert 'class="panel span-12 dashboard-warning-panel"' in index
+    assert index.index('class="panel span-12 dashboard-warning-panel"') < index.index('id="live-freshness-panel"')
+    assert index.index('class="panel span-12 dashboard-warning-panel"') < index.index('class="panel span-7 source-diagnostics"')
+    assert ".dashboard-grid.has-validation-warnings .dashboard-warning-panel{grid-column:1/-1;grid-row:1}" in index
+    assert ".dashboard-grid.has-validation-warnings #live-freshness-panel{grid-row:2/span 2}" in index
+    assert ".dashboard-grid.has-validation-warnings .source-diagnostics{grid-row:2/span 2}" in index
     assert "&lt;unsafe&gt;" in index
     assert FRESHNESS_SCRIPT_RE.search(index) is not None
     assert "script src" not in index.lower()

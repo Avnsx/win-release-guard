@@ -16,7 +16,7 @@ from typing import Any, Mapping, Protocol, Sequence, TextIO
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from win11_release_guard.config import DEFAULT_POLICY_URL
+from win11_release_guard.config import DEFAULT_PAGES_BASE_URL, DEFAULT_POLICY_URL
 
 
 DIAGNOSTIC_ID_COMMENT_PREFIX = "wrg-source-diagnostic-id"
@@ -27,12 +27,12 @@ DIAGNOSTIC_ID_COMMENT_RE = re.compile(
     + r":\s*(wrg-source-diagnostic-v1:[0-9a-f]{16})\s*-->"
 )
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+LEGACY_NOTICE_LABEL = "internals: notices"
 LABEL_BY_SEVERITY = {
-    "notice": "internals: notices",
     "warning": "internals: warning",
     "error": "internals: error",
 }
-MANAGED_LABELS = tuple(LABEL_BY_SEVERITY.values())
+MANAGED_LABELS = (*LABEL_BY_SEVERITY.values(), LEGACY_NOTICE_LABEL)
 DEFAULT_CREATE_LIMIT = 10
 DEFAULT_REQUEST_DELAY_SECONDS = 1.0
 
@@ -275,24 +275,35 @@ def _policy_events(policy: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 def diagnostics_from_policy(
     policy: Mapping[str, Any],
     *,
-    include_notices: bool = True,
+    include_notices: bool = False,
     stdout: TextIO | None = None,
 ) -> list[DiagnosticIssue]:
+    del include_notices
     diagnostics: list[DiagnosticIssue] = []
     seen_ids: set[str] = set()
     for event in _policy_events(policy):
+        severity = _normalized_text(event.get("severity")).lower()
+        if severity == "notice":
+            continue
         diagnostic = _diagnostic_from_event(event)
         if diagnostic is None:
             if stdout is not None:
                 print("Skipping source diagnostic without a valid deterministic ID.", file=stdout)
-            continue
-        if diagnostic.severity == "notice" and not include_notices:
             continue
         if diagnostic.diagnostic_id in seen_ids:
             continue
         seen_ids.add(diagnostic.diagnostic_id)
         diagnostics.append(diagnostic)
     return diagnostics
+
+
+def _count_sync_skipped_notices(events: Sequence[Mapping[str, Any]]) -> int:
+    return sum(
+        1
+        for event in events
+        if _normalized_text(event.get("severity")).lower() == "notice"
+        and DIAGNOSTIC_ID_RE.fullmatch(_normalized_text(event.get("id")))
+    )
 
 
 def _load_policy_from_file(path: Path) -> dict[str, Any]:
@@ -327,6 +338,85 @@ def issue_title(diagnostic: DiagnosticIssue) -> str:
     return title[:217].rstrip(" .:-") + "..."
 
 
+def _wiki_url(page: str, fragment: str | None = None) -> str:
+    page_slug = page.strip("/")
+    url = f"{DEFAULT_PAGES_BASE_URL}/wiki/{page_slug}/"
+    return f"{url}#{fragment.strip('#')}" if fragment else url
+
+
+def _diagnostic_issue_tip(diagnostic: DiagnosticIssue) -> tuple[str, str]:
+    kind = diagnostic.kind.strip().lower()
+    severity = diagnostic.severity.strip().lower()
+    affects_required_baseline = bool(diagnostic.event.get("affects_required_baseline"))
+    affects_broad_target = bool(diagnostic.event.get("affects_broad_target"))
+
+    if kind == "atom_newer_than_release_history":
+        if affects_required_baseline:
+            return (
+                "Atom feed data can surface a new broad-target, non-preview build before "
+                "Release Health release history catches up. Verify the KB/build against "
+                "Microsoft source tables and keep WUA as read-only local context; do not "
+                "promote a required baseline from display labels alone.",
+                _wiki_url("Source-Diagnostics", "common-issues"),
+            )
+        return (
+            "Atom feed drift outside the required baseline is usually preview, out-of-band, "
+            "or non-target context. Keep the row visible for source awareness, but only "
+            "treat it as release-policy work after confirming it affects the broad fleet target.",
+            _wiki_url("Source-Diagnostics", "common-issues"),
+        )
+    if kind == "current_versions_lag_release_history":
+        return (
+            "Release History can move ahead of the Current Versions table during Microsoft "
+            "publication lag. Compare both public tables before changing parser behavior, and "
+            "preserve the build-first policy model when future Windows releases add new rows.",
+            _wiki_url("Source-Diagnostics", "common-issues"),
+        )
+    if kind in {"atom_feed_missing", "atom_feed_parse_failed", "atom_feed_no_usable_entries", "atom_diagnostics_unavailable"}:
+        return (
+            "Atom enrichment is unavailable or unusable for this run. Release Health remains "
+            "the primary policy source, but preview/OOB classification and drift context may "
+            "be incomplete until the public Atom source or parser path is healthy again.",
+            _wiki_url("Source-Diagnostics", "diagnostic-sources"),
+        )
+    if kind == "source_drift_unresolved_after_24h":
+        return (
+            "Unresolved source drift older than 24 hours points at automation freshness or "
+            "upstream publication lag. Check the publish workflow and source timestamps before "
+            "trusting the feed as operationally current.",
+            _wiki_url("Anti-Static-Freshness"),
+        )
+    if severity == "error":
+        return (
+            "A source diagnostic error is publish-blocking because the generator could not "
+            "derive policy safely. Fix the source/parser contract and rerun the focused tests "
+            "instead of bypassing the gate.",
+            _wiki_url("Source-Diagnostics", "publish-gate"),
+        )
+    if affects_broad_target:
+        return (
+            "This warning touches the current broad-fleet target. Verify the source evidence "
+            "and affected build fields before changing the signed policy feed or release "
+            "targeting assumptions.",
+            _wiki_url("Policy-Feed-and-Trust-Model"),
+        )
+    return (
+        "This warning is source-health context, not a runtime compliance verdict. Use the "
+        "deterministic ID and fields above to compare source data across runs before changing "
+        "policy generation logic.",
+        _wiki_url("Source-Diagnostics"),
+    )
+
+
+def issue_tip_markdown(diagnostic: DiagnosticIssue) -> str:
+    message, url = _diagnostic_issue_tip(diagnostic)
+    return (
+        "> [!TIP]\n"
+        f"> {message}\n"
+        f"> See [follow-up documentation]({url})."
+    )
+
+
 def issue_body(diagnostic: DiagnosticIssue) -> str:
     lines = [
         f"<!-- {DIAGNOSTIC_ID_COMMENT_PREFIX}: {diagnostic.diagnostic_id} -->",
@@ -348,6 +438,7 @@ def issue_body(diagnostic: DiagnosticIssue) -> str:
         value = diagnostic.event.get(field)
         if isinstance(value, bool):
             lines.append(f"{field}: `{str(value).lower()}`")
+    lines.extend(("", issue_tip_markdown(diagnostic)))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -695,6 +786,7 @@ def _print_summary(summary: SyncSummary, *, stdout: TextIO) -> None:
         f"closed={summary.closed} "
         f"skipped_closed={summary.skipped_closed} "
         f"skipped_cap={summary.skipped_cap} "
+        f"skipped_notices={summary.skipped_notices} "
         f"dry_run_creates={summary.dry_run_creates} "
         f"dry_run_updates={summary.dry_run_updates}",
         f"dry_run_reopens={summary.dry_run_reopens} "
@@ -845,9 +937,13 @@ def main(
     notice_group.add_argument(
         "--include-notices",
         action="store_true",
-        help="Deprecated no-op; notice diagnostics are synced by default.",
+        help="Deprecated no-op; notice diagnostics are dashboard-only and are not synced.",
     )
-    notice_group.add_argument("--exclude-notices", action="store_true", help="Do not sync notice diagnostics.")
+    notice_group.add_argument(
+        "--exclude-notices",
+        action="store_true",
+        help="Deprecated no-op; notice diagnostics are always excluded from issue sync.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned changes without mutating GitHub Issues.")
     parser.add_argument("--create-limit", type=int, default=DEFAULT_CREATE_LIMIT, help="Maximum new issues per run.")
     parser.add_argument(
@@ -893,20 +989,19 @@ def main(
         repository = args.repository or _repository_from_env(env)
         policy = load_policy(policy_file=args.policy_file, policy_url=args.policy_url)
         raw_events = _policy_events(policy)
-        include_notices = not args.exclude_notices
-        diagnostics = diagnostics_from_policy(policy, include_notices=include_notices)
-        if args.exclude_notices:
-            skipped_notices = sum(
-                1
-                for event in raw_events
-                if _normalized_text(event.get("severity")).lower() == "notice"
-                and DIAGNOSTIC_ID_RE.fullmatch(_normalized_text(event.get("id")))
+        include_notices = False
+        if args.include_notices:
+            print(
+                "Notice diagnostics are dashboard-only; --include-notices is ignored for GitHub Issue sync.",
+                file=stdout,
             )
-            if skipped_notices:
-                print(
-                    f"Skipping {skipped_notices} notice diagnostic(s) because --exclude-notices was supplied.",
-                    file=stdout,
-                )
+        diagnostics = diagnostics_from_policy(policy)
+        skipped_notices = _count_sync_skipped_notices(raw_events)
+        if skipped_notices:
+            print(
+                f"Skipping {skipped_notices} notice diagnostic(s); notices are dashboard-only and not synced to GitHub Issues.",
+                file=stdout,
+            )
         github_client = client if client is not None else _client_from_env(env, dry_run=args.dry_run)
         summary = sync_diagnostics(
             diagnostics,
@@ -919,7 +1014,7 @@ def main(
             close_stale=not args.no_close_stale,
             stdout=stdout,
         )
-        summary.skipped_notices = len(raw_events) - len(diagnostics) if args.exclude_notices else 0
+        summary.skipped_notices = skipped_notices
         if args.issue_status_output is not None:
             write_issue_status_output(args.issue_status_output, summary.issue_status)
         if args.dry_run_report_output is not None:
