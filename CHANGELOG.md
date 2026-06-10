@@ -18,6 +18,7 @@ Version 0.3.2 is the compatibility and documentation-alignment release for the c
 * Visible generator warnings for silent-error cases such as missing `wiki/Home.md`, missing `_Sidebar.md` or `_Footer.md`, empty Wiki sources, empty Wiki pages, broken internal Wiki links, empty changelogs, non-standard changelog headings, and duplicate changelog version headings.
 * Windows-11-style generated Wiki/changelog layout with breadcrumbs, skip-to-content link, left sidebar navigation, in-page table of contents, active page/group/section highlighting, reduced-motion-aware sidebar alignment, local-only inline SVG topic icons, and inline SVG favicon.
 * Dashboard top-bar PyPI download image link copied into generated Pages assets and linked to the PyPI project without external runtime dependencies.
+* Source Diagnostics dashboard controls for expanding the diagnostics panel and copying the currently visible diagnostic rows as local JSON for technical triage.
 * Tests for Wiki/changelog rendering edge cases, sidebar and TOC behavior, raw HTML escaping, no external asset dependencies, PyPI-safe README media links, package metadata, workflow boundaries, and generated Pages sitemap/changelog routes.
 * Python 3.13 and 3.14 are added to package compatibility metadata and CI coverage so PyPI users see the same supported interpreter range that repository automation exercises.
 
@@ -33,6 +34,7 @@ Version 0.3.2 is the compatibility and documentation-alignment release for the c
 * Changelog sidebar/action labels are now compact but descriptive: section links, version pages, and GitHub release links no longer render as vague `Pages` or `Page` labels.
 * Wiki sidebar behavior no longer uses the previous translucent pinned overlay; source navigation stays readable and scrollable without text disappearing behind a glass panel.
 * The Pages Wiki renderer adds topic icons only in article content, not in the sidebar or TOC, and limits icon density so the visual layer stays useful instead of decorative noise.
+* Dashboard info affordances now link directly to relevant Pages Wiki sections for build semantics, freshness, source diagnostics, signature trust, and API routes.
 * `publish-policy.yml` now avoids tag-triggered Pages deploys because the protected `github-pages` environment rejects tag-sourced deployments; release tags rely on the main Pages publish lane or manual `workflow_dispatch` from `main`.
 * `release.yml` now checks for matching `CHANGELOG.md`, `docs/releases/vX.Y.Z.md`, and `wiki/Release-vX.Y.Z.md` release material, and links Pages Wiki/changelog routes in GitHub Release notes.
 
@@ -47,6 +49,8 @@ Version 0.3.2 is the compatibility and documentation-alignment release for the c
 * Fixed generated Wiki TOC duplication by excluding the current page title from in-page section navigation.
 * Fixed documentation drift that implied tag pushes deploy Pages; the docs now state that tag pushes trigger the separate Wiki sync lane only, while Pages publishing remains in `publish-policy.yml`.
 * Fixed Source Diagnostics GitHub Issue sync so Notice events remain dashboard-only; automatic issue creation, update, and reopen now applies only to Warning and Error events, while legacy managed Notice issues can be closed as stale.
+* Fixed dashboard Source Diagnostics rows so closed managed issue metadata suppresses stale rows, real warning/error issue links remain static hover/focus links, and derived display rows stay filterable without ticket links.
+* Fixed project identity scans so allowed PyPI and Shields endpoints for `win11-release-guard` are not mistaken for legacy hyphenated project identity drift.
 * Added compact Markdown tips with Pages Wiki follow-up links to managed Source Diagnostics warning/error GitHub Issues.
 * Excluded GitHub Wiki helper files `_Sidebar.md` and `_Footer.md` from standalone Pages Wiki page and sitemap generation while preserving them as navigation/footer inputs.
 
@@ -60,6 +64,7 @@ Version 0.3.2 is the compatibility and documentation-alignment release for the c
 
 * Documented that `sync-wiki.yml` is the only non-release workflow allowed to request `contents: write`, scoped only to GitHub internal Wiki Markdown sync.
 * Added the AGENTS.md rule that future agents must keep historical `CHANGELOG.md` version sections and add newer entries at the top.
+* Added AGENTS.md guardrails that preserve the README dashboard-first layout, right-aligned 96x96 PyPI image button, no-license-badge Markdown policy, and dashboard-only Notice issue-sync rule.
 * Clarified Source Diagnostics wording for Microsoft Release Health vs Atom/Update-History drift, including missing-KB Atom rows as notices until reliable required-baseline evidence exists.
 * Updated README, `docs/dashboard-and-pages.md`, `docs/security-automation.md`, `docs/tagged-release-lane.md`, `docs/releases/v0.3.2.md`, `docs/maintainer-guide.md`, and Wiki pages so the text reflects current code, tests, workflows, package metadata, Pages generation, changelog routes, and Wiki sync behavior.
 * Added Wiki-side build/release validation guidance for regenerating Pages and running focused Wiki/generator tests after `wiki/*.md`, `CHANGELOG.md`, or Pages documentation changes.
