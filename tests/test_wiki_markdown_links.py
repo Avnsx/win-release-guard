@@ -279,13 +279,13 @@ def test_sidebar_keeps_wiki_link_syntax_outside_tables() -> None:
 
 def test_home_and_release_wiki_pages_have_no_broken_table_link_fragments() -> None:
     home = (WIKI / "Home.md").read_text(encoding="utf-8")
-    release = (WIKI / "Release-v0.3.1.md").read_text(encoding="utf-8")
+    release = (WIKI / "Release-v0.3.2.md").read_text(encoding="utf-8")
 
     assert "## Pick Your Path" in home
     assert "[[Quick Start" not in home
     assert "Quick-Start]]" not in home
     release_table_has_wiki_link = any(
-        "[[" in row.raw or "]]" in row.raw for row in _iter_table_rows(WIKI / "Release-v0.3.1.md")
+        "[[" in row.raw or "]]" in row.raw for row in _iter_table_rows(WIKI / "Release-v0.3.2.md")
     )
     assert not release_table_has_wiki_link
     assert "[Quick Start](Quick-Start)" in release
@@ -297,11 +297,17 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
 
     assert (output_dir / "wiki/index.html").is_file()
     assert (output_dir / "wiki/Quick-Start/index.html").is_file()
+    assert not (output_dir / "wiki/_Sidebar/index.html").exists()
+    assert not (output_dir / "wiki/_Footer/index.html").exists()
+    assert "wiki/_Sidebar/index.html" not in written
+    assert "wiki/_Footer/index.html" not in written
     assert written["wiki/index.html"] == output_dir / "wiki/index.html"
 
     home = (output_dir / "wiki/index.html").read_text(encoding="utf-8")
     assert "<title>Windows 11 Release Guard Wiki</title>" in home
     assert '<link rel="icon" href="data:image/svg+xml,' in home
+    assert 'class="wiki-brand-icon"' in home
+    assert '<a class="wiki-brand" href="https://avnsx.github.io/win11_release_guard/">' in home
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/"' in home
     assert 'class="wiki-sidebar"' in home
     assert 'class="skip-link" href="#wiki-content"' in home
@@ -382,13 +388,18 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     assert "min-height: min(34rem, 58vh);" in local_detection
     assert ".wiki-sidebar::after { display: none; }" in local_detection
     assert "scrollArea" not in local_detection
-    assert "function alignSidebarTarget(target, force)" in local_detection
+    assert "function alignSidebarTarget(target, force, behavior)" in local_detection
     assert "function sidebarContentOffsetTop(target)" in local_detection
     assert "function sidebarScrollOffset()" in local_detection
     assert "sidebarAlignmentTargetForCurrentPage" in local_detection
     assert "manualSidebarScrollUntil = now() + 1200" in local_detection
+    assert 'sidebarNavigationStorageKey = "win11_release_guard.wikiSidebarScroll.v1"' in local_detection
+    assert "function restoreSidebarNavigationPosition()" in local_detection
+    assert "var restoredSidebarNavigationPosition = restoreSidebarNavigationPosition();" in local_detection
+    assert 'return restoredSidebarNavigationPosition && !prefersReducedMotion ? "smooth" : "auto";' in local_detection
+    assert "rememberSidebarScrollForHref(href);" in local_detection
     assert "var targetTop = sidebarContentOffsetTop(target) - sidebarScrollOffset();" in local_detection
-    assert 'sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });' in local_detection
+    assert 'sidebar.scrollTo({ top: targetTop, behavior: scrollBehavior });' in local_detection
     assert '<p class="wiki-nav-group is-current-group"><strong>Architecture</strong></p>' in local_detection
     assert (
         'href="https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/" '
@@ -405,6 +416,21 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
     assert 'href="#signal-map">Signal Map</a>' in local_toc
     assert "toc-level-1" not in local_toc
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Architecture/" class="is-current-page"' not in local_detection
+    policy_feed = (output_dir / "wiki/Policy-Feed-and-Trust-Model/index.html").read_text(encoding="utf-8")
+    assert "two build numbers that are easy to mix up" in policy_feed
+    assert "does not decide compliance by itself" in policy_feed
+    assert "minimum signed build this policy currently requires" in policy_feed
+    assert "detached Ed25519 signature over those exact bytes" in policy_feed
+    anti_static = (output_dir / "wiki/Anti-Static-Freshness/index.html").read_text(encoding="utf-8")
+    assert "latest compilation timestamp for the current policy results parsed" in anti_static
+    assert "publish-policy.yml" in anti_static
+    assert "14 days starts a refresh-due warning" in anti_static
+    source_diagnostics = (output_dir / "wiki/Source-Diagnostics/index.html").read_text(encoding="utf-8")
+    assert "Source diagnostics explain the health of the policy inputs" in source_diagnostics
+    assert "errors are publish-blocking" in source_diagnostics
+    dashboard = (output_dir / "wiki/GitHub-Pages-Dashboard/index.html").read_text(encoding="utf-8")
+    assert "The dashboard is a static public control surface" in dashboard
+    assert "scripts should use the published JSON" in dashboard
     for html in render_wiki_pages().values():
         lower = html.lower()
         if '<article id="wiki-content"' in html:
@@ -416,6 +442,8 @@ def test_static_wiki_pages_render_from_markdown(tmp_path: Path) -> None:
                 assert icon_count >= 1
             if icon_count:
                 assert 'aria-hidden="true" focusable="false"' in article_html
+            icon_kinds = re.findall(r'class="wiki-heading-icon wiki-icon-([^"\s]+)"', article_html)
+            assert len(icon_kinds) == len(set(icon_kinds)), f"duplicate wiki icons in article: {icon_kinds}"
         assert 'data-section-scrollspy="true"' in html
         assert 'if (!sidebar || !content) return;' in html
         assert ".wiki-sidebar a.is-active-section" in html
@@ -458,6 +486,8 @@ def test_static_wiki_renderer_converts_links_anchors_and_escapes_html(tmp_path: 
     pages = render_wiki_pages(wiki_dir=wiki_dir)
     home = pages["wiki/index.html"]
 
+    assert "wiki/_Sidebar/index.html" not in pages
+    assert "wiki/_Footer/index.html" not in pages
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/"' in home
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/Page-Name/#target-section"' in home
     assert 'id="first-section"' in home
@@ -472,6 +502,10 @@ def test_static_wiki_renderer_converts_links_anchors_and_escapes_html(tmp_path: 
         'class="is-current-page" aria-current="page">Friendly</a>'
     ) in page_name
     assert 'class="wiki-nav-group is-current-group"' not in page_name
+    urls = _wiki_sitemap_urls(wiki_dir=wiki_dir)
+    assert "https://avnsx.github.io/win11_release_guard/wiki/" in urls
+    assert "https://avnsx.github.io/win11_release_guard/wiki/Page-Name/" in urls
+    assert not any("/wiki/_Sidebar/" in url or "/wiki/_Footer/" in url for url in urls)
 
 
 def test_static_wiki_renderer_marks_broken_internal_links(tmp_path: Path) -> None:

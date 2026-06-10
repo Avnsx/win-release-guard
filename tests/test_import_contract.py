@@ -41,10 +41,12 @@ def test_distribution_metadata_maps_author_license_and_project_urls():
     assert 'license = "GPL-3.0-only"' in pyproject
     assert 'license-files = ["LICENSE.txt"]' in pyproject
     assert 'dependencies = ["cryptography>=41"]' in pyproject
-    assert 'test = ["packaging>=24", "pytest>=8"]' in pyproject
+    assert 'test = ["packaging>=24", "pytest>=8", "tomli>=2; python_version < \'3.11\'"]' in pyproject
     assert '"Programming Language :: Python :: 3.10"' in pyproject
     assert '"Programming Language :: Python :: 3.11"' in pyproject
     assert '"Programming Language :: Python :: 3.12"' in pyproject
+    assert '"Programming Language :: Python :: 3.13"' in pyproject
+    assert '"Programming Language :: Python :: 3.14"' in pyproject
     assert '[project.urls]' in pyproject
     assert 'Repository = "https://github.com/Avnsx/win11_release_guard"' in pyproject
     assert 'Documentation = "https://avnsx.github.io/win11_release_guard/wiki/"' in pyproject

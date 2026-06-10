@@ -11,8 +11,8 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _minimal_repo(tmp_path: Path, identity_version: str = "win11_release_guard/0.3.1") -> Path:
-    _write(tmp_path / "pyproject.toml", '[project]\nname = "win11_release_guard"\nversion = "0.3.1"\n')
+def _minimal_repo(tmp_path: Path, identity_version: str = "win11_release_guard/0.3.2") -> Path:
+    _write(tmp_path / "pyproject.toml", '[project]\nname = "win11_release_guard"\nversion = "0.3.2"\n')
     _write(tmp_path / "win11_release_guard/version.py", 'PACKAGE_NAME = "win11_release_guard"\n')
     _write(tmp_path / "win11_release_guard/config.py", f'DEFAULT_USER_AGENT = "{identity_version}"\n')
     _write(tmp_path / "win11_release_guard/policy_schema.py", f'GENERATOR_VERSION = "{identity_version}"\n')
@@ -30,7 +30,7 @@ def test_version_consistency_check_fails_runtime_marker_mismatch(tmp_path: Path)
     findings = check_version_consistency.check_version_consistency(root)
 
     assert len(findings) == 3
-    assert all("expected 'win11_release_guard/0.3.1'" in finding.message for finding in findings)
+    assert all("expected 'win11_release_guard/0.3.2'" in finding.message for finding in findings)
 
 
 def test_version_consistency_cli_returns_nonzero_for_mismatch(tmp_path: Path, capsys) -> None:

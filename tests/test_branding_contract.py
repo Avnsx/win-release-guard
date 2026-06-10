@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -39,6 +40,11 @@ EXCLUDED_PARTS = {
 }
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
+ALLOWED_NORMALIZED_PYPI_BADGE_ENDPOINTS = (
+    "https://img.shields.io/pypi/v/win11-release-guard",
+    "https://img.shields.io/pypi/pyversions/win11-release-guard",
+    "https://img.shields.io/pypi/dm/win11-release-guard",
+)
 FORBIDDEN_STALE_PATTERNS = (
     "w11_" + "versioning" + "_api_controller",
     "w11" + "-versioning-api-controller",
@@ -70,6 +76,8 @@ def _line_findings(patterns: tuple[str, ...], *, include_signed_policy: bool = F
     findings: list[str] = []
     for path in _iter_source_files(include_signed_policy=include_signed_policy):
         text = path.read_text(encoding="utf-8", errors="replace").replace(ALLOWED_NORMALIZED_PYPI_URL, "")
+        for allowed_url in ALLOWED_NORMALIZED_PYPI_BADGE_ENDPOINTS:
+            text = text.replace(allowed_url, "")
         for line_number, line in enumerate(text.splitlines(), start=1):
             for pattern in patterns:
                 if pattern in line:
@@ -121,7 +129,7 @@ def test_program_version_identity_markers_are_current() -> None:
     )
     from win11_release_guard.wua_probe import CLIENT_APPLICATION_ID
 
-    expected_version = "0.3.1"
+    expected_version = "0.3.2"
     expected_identity = f"win11_release_guard/{expected_version}"
 
     assert __version__ == expected_version
@@ -140,6 +148,26 @@ def test_removed_prototype_entrypoint_is_absent() -> None:
 
 def test_no_stale_package_or_project_identities() -> None:
     assert _line_findings(FORBIDDEN_STALE_PATTERNS + (LEGACY_PROTOTYPE_NAME,)) == []
+
+
+def test_markdown_badge_rows_do_not_display_license_badges() -> None:
+    markdown_roots = (
+        ROOT / "README.md",
+        ROOT / "AGENTS.md",
+        ROOT / "docs",
+        ROOT / "wiki",
+    )
+    findings: list[str] = []
+    badge_pattern = re.compile(r"!\[[^\]]*license[^\]]*\]|\bimg\.shields\.io/[^)\s]*license|\bpypi/l/", re.IGNORECASE)
+    for target in markdown_roots:
+        candidates = [target] if target.is_file() else [path for path in target.rglob("*.md") if path.is_file()]
+        for path in candidates:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if badge_pattern.search(line):
+                    findings.append(f"{path.relative_to(ROOT)}:{line_number}: {line.strip()}")
+
+    assert findings == []
 
 
 def test_signed_bundled_policy_json_has_current_identity_and_valid_signature() -> None:

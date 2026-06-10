@@ -18,7 +18,7 @@ from win11_release_guard.config import (
 )
 from win11_release_guard.exceptions import PolicyParseError
 from win11_release_guard.freshness import epoch_milliseconds_from_iso
-from win11_release_guard.models import QualityPolicy, ReleasePolicy
+from win11_release_guard.models import QualityPolicy, ReleasePolicy, ReleasePolicyEntry
 import win11_release_guard.policy_generator as policy_generator_module
 from win11_release_guard.policy_generator import (
     SOURCE_DIAGNOSTIC_ID_PREFIX,
@@ -90,6 +90,20 @@ def _atom_with_new_b_release() -> str:
     return _atom().replace("</feed>", entry + "</feed>")
 
 
+def _atom_with_new_preview_release() -> str:
+    entry = """
+  <entry>
+    <id>tag:support.microsoft.com,2026:KB5089601</id>
+    <title>June 9, 2026-KB5089601 Preview (OS Build 26200.8461)</title>
+    <published>2026-06-09T18:00:00Z</published>
+    <updated>2026-06-09T18:00:00Z</updated>
+    <link rel="alternate" href="https://support.microsoft.com/help/5089601" />
+    <content type="text">Preview update for Windows 11.</content>
+  </entry>
+"""
+    return _atom().replace("</feed>", entry + "</feed>")
+
+
 def _atom_with_duplicate_new_b_release() -> str:
     entry = """
   <entry>
@@ -102,6 +116,35 @@ def _atom_with_duplicate_new_b_release() -> str:
   </entry>
 """
     return _atom_with_new_b_release().replace("</feed>", entry + "</feed>")
+
+
+def _atom_feed_with_entries(*entries: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<feed xmlns="http://www.w3.org/2005/Atom">\n'
+        "  <title>Windows 11 update history</title>\n"
+        + "\n".join(entries)
+        + "\n</feed>\n"
+    )
+
+
+def _atom_entry(
+    entry_id: str,
+    title: str,
+    *,
+    published: str = "2026-06-09T18:00:00Z",
+    updated: str = "2026-06-09T18:00:00Z",
+    link: str = "https://support.microsoft.com/help/5089600",
+    content: str = "Monthly security update for Windows 11.",
+) -> str:
+    return f"""  <entry>
+    <id>tag:support.microsoft.com,2026:{entry_id}</id>
+    <title>{title}</title>
+    <published>{published}</published>
+    <updated>{updated}</updated>
+    <link rel="alternate" href="{link}" />
+    <content type="text">{content}</content>
+  </entry>"""
 
 
 def test_source_label_requires_exact_upstream_hosts() -> None:
@@ -276,6 +319,7 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.0"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/#unreleased"' in index
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in index
+    assert 'title="Open pre-release section" class="changelog-pre-release-badge">pre-release</a>' in index
     assert 'title="Open section on Pages changelog">Section</a>' in index
     assert 'title="Open version page">Version page</a>' in index
     assert 'title="Open GitHub release">GH release</a>' in index
@@ -283,6 +327,10 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'class="wiki-heading-icon wiki-icon-changelog"' in index
     assert '<h2 id="unreleased" class="wiki-heading-with-icon">' in index
     assert 'class="wiki-heading-icon wiki-icon-release"' in index
+    article_start = index.index('<article id="wiki-content"')
+    article_html = index[article_start : index.index("</article>", article_start)]
+    icon_kinds = re.findall(r'class="wiki-heading-icon wiki-icon-([^"\s]+)"', article_html)
+    assert len(icon_kinds) == len(set(icon_kinds)), f"duplicate changelog icons: {icon_kinds}"
     assert index.index('<h2 id="unreleased" class="wiki-heading-with-icon">') < index.index(
         '<nav class="changelog-version-actions" aria-label="[Unreleased] links">'
     )
@@ -290,6 +338,17 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'aria-label="Open [Unreleased] section on the Pages changelog"' in index
     assert 'aria-label="Open v0.3.1 - 2026-06-05 version page"' in index
     assert 'aria-label="Open GitHub release for v0.3.1 - 2026-06-05"' in index
+    assert "border-color: #f0c74c;" in index
+    assert "background: linear-gradient(180deg, #fff8db, #ffefad);" in index
+    assert ".changelog-content h2[id]:first-of-type" in index
+    assert "margin-top: 4.75rem;" in index
+    assert "margin: -0.25rem 0 1.9rem 1.05rem;" in index
+    assert ".changelog-version-nav ol {" in index
+    assert "gap: 1.18rem;" in index
+    assert "margin: 0.3rem 0 0 0.65rem;" in index
+    assert ".changelog-version-nav .version-meta a {" in index
+    assert "font-size: 0.76rem;" in index
+    assert "min-height: 1.42rem;" in index
     assert ">Pages</a>" not in index
     assert ">Page</a>" not in index
     assert (
@@ -305,15 +364,21 @@ def test_changelog_renderer_preserves_history_order_and_links(tmp_path: Path) ->
     assert 'entry.item.classList.toggle("is-active-section", selected)' in index
     assert 'if (!sidebar || !content) return;' in index
     assert 'if (!items.length) {' in index
-    assert 'alignCurrentPageLink();' in index
-    assert 'function alignSidebarTarget(target, force)' in index
+    assert 'alignCurrentPageLink(initialSidebarAlignmentBehavior());' in index
+    assert 'function alignSidebarTarget(target, force, behavior)' in index
     assert "function sidebarContentOffsetTop(target)" in index
     assert "function sidebarScrollOffset()" in index
     assert "manualSidebarScrollUntil = now() + 1200" in index
+    assert 'sidebarNavigationStorageKey = "win11_release_guard.wikiSidebarScroll.v1"' in index
+    assert "function restoreSidebarNavigationPosition()" in index
+    assert "var restoredSidebarNavigationPosition = restoreSidebarNavigationPosition();" in index
+    assert 'return restoredSidebarNavigationPosition && !prefersReducedMotion ? "smooth" : "auto";' in index
+    assert "rememberSidebarScrollForHref(href);" in index
+    assert "if (pendingSidebarNavigationHref) return;" in index
     assert "var targetTop = sidebarContentOffsetTop(target) - sidebarScrollOffset();" in index
     assert "wiki-sidebar-pinned" not in index
     assert "scrollArea" not in index
-    assert 'sidebar.scrollTo({ top: targetTop, behavior: prefersReducedMotion ? "auto" : "smooth" });' in index
+    assert 'sidebar.scrollTo({ top: targetTop, behavior: scrollBehavior });' in index
     assert "window.location.hash && initialActive" in index
     assert "allowSectionAutoAlign = true;" in index
     assert 'node.classList.contains("version-meta")' in index
@@ -360,7 +425,7 @@ def test_changelog_renderer_warns_for_empty_and_nonstandard_sections(tmp_path: P
     assert "No changelog versions found." in empty_index
     assert 'data-section-scrollspy="true"' in empty_index
     assert 'if (!items.length) {' in empty_index
-    assert 'alignCurrentPageLink();' in empty_index
+    assert 'alignCurrentPageLink(initialSidebarAlignmentBehavior());' in empty_index
     assert "script src" not in empty_index.lower()
 
     changelog = tmp_path / "CHANGELOG.md"
@@ -594,7 +659,128 @@ def test_source_diagnostics_notice_when_atom_oob_is_newer_than_release_history()
         and event["affects_required_baseline"] is False
         for event in events
     )
+    assert not any(event["kind"] == "source_drift_unresolved_after_24h" for event in events)
     assert not any("Atom feed shows a newer non-preview build" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_notice_when_atom_preview_is_newer_than_release_history():
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom_with_new_preview_release(),
+        generated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+    events = policy.source_diagnostics["events"]
+
+    event = next(
+        event
+        for event in events
+        if event["kind"] == "atom_newer_than_release_history" and event["build"] == "26200.8461"
+    )
+    assert event["severity"] == "notice"
+    assert event["release"] == "25H2"
+    assert event["kb_article"] == "KB5089601"
+    assert event["affects_broad_target"] is True
+    assert event["affects_required_baseline"] is False
+    assert not any("newer non-preview build for the broad target" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_notice_when_atom_newer_is_not_broad_target() -> None:
+    atom = _atom_feed_with_entries(
+        _atom_entry(
+            "KB5089602",
+            "June 9, 2026-KB5089602 (OS Build 28000.2114)",
+            link="https://support.microsoft.com/help/5089602",
+        )
+    )
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=atom,
+        generated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+
+    event = next(
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history" and event["build"] == "28000.2114"
+    )
+    assert event["severity"] == "notice"
+    assert event["release"] == "26H1"
+    assert event["affects_broad_target"] is False
+    assert event["affects_required_baseline"] is False
+    assert not any("newer non-preview build for the broad target" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_notice_when_atom_build_family_has_no_release_mapping() -> None:
+    atom = _atom_feed_with_entries(
+        _atom_entry(
+            "KB5089603",
+            "June 9, 2026-KB5089603 (OS Build 29999.1000)",
+            link="https://support.microsoft.com/help/5089603",
+        )
+    )
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=atom,
+        generated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+
+    event = next(
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history" and event["build"] == "29999.1000"
+    )
+    assert event["severity"] == "notice"
+    assert event["release"] is None
+    assert event["build_family"] == 29999
+    assert event["affects_broad_target"] is False
+    assert event["affects_required_baseline"] is False
+
+
+def test_source_diagnostics_notice_when_atom_broad_target_build_lacks_kb() -> None:
+    atom = _atom_feed_with_entries(
+        _atom_entry(
+            "no-kb-build",
+            "June 9, 2026 servicing update (OS Build 26200.8462)",
+            link="https://support.microsoft.com/help/no-kb-build",
+            content="Windows 11 servicing update without KB metadata.",
+        )
+    )
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=atom,
+        generated_at_utc="2026-06-10T00:00:00+00:00",
+    )
+
+    event = next(
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history" and event["build"] == "26200.8462"
+    )
+    assert event["severity"] == "notice"
+    assert event["release"] == "25H2"
+    assert event["kb_article"] is None
+    assert event["affects_broad_target"] is True
+    assert event["affects_required_baseline"] is False
+    assert not any("unknown KB build 26200.8462" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_ignores_atom_build_older_than_release_history() -> None:
+    atom = _atom_feed_with_entries(
+        _atom_entry(
+            "KB5089000",
+            "May 1, 2026-KB5089000 (OS Build 26200.8000)",
+            published="2026-05-01T18:00:00Z",
+            updated="2026-05-01T18:00:00Z",
+            link="https://support.microsoft.com/help/5089000",
+        )
+    )
+    policy = generate_policy(release_health_html=_html(), atom_feed_xml=atom)
+
+    assert policy.source_diagnostics["drift"]["atom_newer_than_release_history"] == []
+    assert not any(
+        event["kind"] == "atom_newer_than_release_history"
+        for event in policy.source_diagnostics["events"]
+    )
 
 
 def test_source_diagnostic_id_is_stable_for_equivalent_input():
@@ -744,6 +930,27 @@ def test_source_diagnostics_warn_when_atom_has_newer_b_release_for_broad_target(
     assert event["affects_required_baseline"] is True
     assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", event["id"])
     assert any("newer non-preview build for the broad target" in warning for warning in policy.validation_warnings)
+
+
+def test_source_diagnostics_unresolved_after_24h_only_for_warning_drift() -> None:
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml=_atom_with_new_b_release(),
+        generated_at_utc="2026-06-11T18:00:00+00:00",
+    )
+    events = policy.source_diagnostics["events"]
+
+    assert policy.source_diagnostics["drift"]["generated_after_newest_source_hours"] == 48.0
+    assert any(
+        event["kind"] == "atom_newer_than_release_history"
+        and event["severity"] == "warning"
+        and event["affects_required_baseline"] is True
+        for event in events
+    )
+    unresolved = next(event for event in events if event["kind"] == "source_drift_unresolved_after_24h")
+    assert unresolved["severity"] == "warning"
+    assert unresolved["affects_broad_target"] is True
+    assert unresolved["affects_required_baseline"] is False
 
 
 def test_source_diagnostics_dedupes_duplicate_atom_events():
@@ -938,12 +1145,32 @@ def test_missing_atom_feed_still_generates_policy_with_warning():
 
 
 def test_atom_feed_parse_failure_is_structured_source_diagnostic():
-    policy = generate_policy(release_health_html=_html(), atom_feed_xml="<feed>")
+    policy = generate_policy(
+        release_health_html=_html(),
+        atom_feed_xml="<feed>",
+        generated_at_utc="2026-05-20T00:00:00+00:00",
+    )
 
     assert any("Atom feed could not be parsed" in warning for warning in policy.validation_warnings)
     event = next(event for event in policy.source_diagnostics["events"] if event["kind"] == "atom_feed_parse_failed")
     assert event["severity"] == "warning"
     assert "Atom feed could not be parsed" in event["message"]
+    assert not any(
+        event["kind"] == "source_drift_unresolved_after_24h"
+        for event in policy.source_diagnostics["events"]
+    )
+
+
+def test_generate_policy_fails_hard_when_release_health_tables_are_unusable():
+    with pytest.raises(PolicyParseError, match="release_history tables"):
+        generate_policy(release_health_html="<html><body>No release data</body></html>", atom_feed_xml=_atom())
+
+
+def test_publish_workflow_keeps_source_diagnostic_error_events_publish_relevant() -> None:
+    workflow = Path(".github/workflows/publish-policy.yml").read_text(encoding="utf-8")
+
+    assert 'event.get("severity") == "error"' in workflow
+    assert "source diagnostics error events block publish" in workflow
 
 
 def test_parse_atom_feed_extracts_kb_build_and_classification():
@@ -1011,8 +1238,14 @@ def test_generator_cli_does_not_accept_github_issue_mutation_flags():
 
 def test_generator_cli_merges_static_source_diagnostic_issue_status(tmp_path):
     output_dir = tmp_path / "site"
-    preview_policy = generate_policy(release_health_html=_html(), atom_feed_xml=_atom())
-    diagnostic_id = preview_policy.source_diagnostics["events"][0]["id"]
+    atom_feed = tmp_path / "windows11-atom-new-baseline.xml"
+    atom_feed.write_text(_atom_with_new_b_release(), encoding="utf-8")
+    preview_policy = generate_policy(release_health_html=_html(), atom_feed_xml=atom_feed.read_text(encoding="utf-8"))
+    diagnostic_id = next(
+        event["id"]
+        for event in preview_policy.source_diagnostics["events"]
+        if event.get("severity") in {"warning", "error"}
+    )
     issue_status = tmp_path / "issue-status.json"
     issue_status.write_text(
         json.dumps(
@@ -1033,7 +1266,7 @@ def test_generator_cli_merges_static_source_diagnostic_issue_status(tmp_path):
         "--release-health-html",
         str(FIXTURES / "windows11-release-health.html"),
         "--atom-feed",
-        str(FIXTURES / "windows11-atom.xml"),
+        str(atom_feed),
         "--output-dir",
         str(output_dir),
         "--write-index",
@@ -1049,6 +1282,87 @@ def test_generator_cli_merges_static_source_diagnostic_issue_status(tmp_path):
     index = (output_dir / "index.html").read_text(encoding="utf-8")
     assert "#Ticket 42" in index
     assert 'href="https://github.com/Avnsx/win11_release_guard/issues/42"' in index
+
+
+def test_policy_index_issue_status_links_only_real_warning_error_event_rows() -> None:
+    event = {
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8461",
+        "kb_article": "KB5089600",
+        "message": "Atom feed reports a newer baseline build.",
+    }
+    diagnostic_id = policy_generator_module._source_diagnostic_id_for_event(event)
+    event_index = policy_generator_module.render_policy_index(
+        ReleasePolicy(
+            source_diagnostics={
+                "event_counts": {"notice": 0, "warning": 1, "error": 0},
+                "events": [event],
+                "issue_status": {
+                    diagnostic_id: {
+                        "number": 42,
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                    }
+                },
+            }
+        ),
+        policy_bytes=None,
+        signature=None,
+    )
+
+    assert f'data-diagnostic-id="{diagnostic_id}"' in event_index
+    assert "#Ticket 42" in event_index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/issues/42"' in event_index
+
+    excluded_entry = ReleasePolicyEntry(
+        version="26H1",
+        build_family=26200,
+        latest_build="26200.1000",
+        reason="new devices only",
+    )
+    preview_policy = ReleasePolicy(
+        excluded_for_existing_devices=(excluded_entry,),
+        source_diagnostics={"event_counts": {"notice": 0, "warning": 0, "error": 0}},
+    )
+    clear_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._clear_source_diagnostic_row()
+    )
+    excluded_id = policy_generator_module._source_diagnostic_row_id(
+        policy_generator_module._excluded_release_diagnostic_rows(preview_policy)[0]
+    )
+    derived_index = policy_generator_module.render_policy_index(
+        ReleasePolicy(
+            excluded_for_existing_devices=(excluded_entry,),
+            source_diagnostics={
+                "event_counts": {"notice": 0, "warning": 0, "error": 0},
+                "issue_status": {
+                    clear_id: {
+                        "number": 70,
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/70",
+                    },
+                    excluded_id: {
+                        "number": 71,
+                        "state": "open",
+                        "url": "https://github.com/Avnsx/win11_release_guard/issues/71",
+                    },
+                },
+            },
+        ),
+        policy_bytes=None,
+        signature=None,
+    )
+
+    assert f'data-diagnostic-id="{clear_id}"' in derived_index
+    assert f'data-diagnostic-id="{excluded_id}"' in derived_index
+    assert "No source issues reported" in derived_index
+    assert "26H1 excluded for existing devices" in derived_index
+    assert "#Ticket 70" not in derived_index
+    assert "#Ticket 71" not in derived_index
+    assert '<a class="diag-ticket-link"' not in derived_index
 
 
 def test_generator_cli_strips_extra_source_diagnostic_issue_status_fields(tmp_path):
@@ -1067,7 +1381,7 @@ def test_generator_cli_strips_extra_source_diagnostic_issue_status_fields(tmp_pa
                         "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
                         "token": forbidden,
                         "body": "raw API body must not become public policy data",
-                        "labels": ["internals: notices"],
+                        "labels": ["internals: warning"],
                     }
                 }
             }
@@ -1249,7 +1563,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
         "wiki/index.html",
         "wiki/Quick-Start/index.html",
         "wiki/changelog/index.html",
-        "wiki/changelog/v0.3.1/index.html",
+        "wiki/changelog/v0.3.2/index.html",
     }
     actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()}
 
@@ -1327,10 +1641,10 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
 
     sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
     assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/" in sitemap
-    assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/" in sitemap
 
     changelog = (tmp_path / "wiki/changelog/index.html").read_text(encoding="utf-8")
-    changelog_version = (tmp_path / "wiki/changelog/v0.3.1/index.html").read_text(encoding="utf-8")
+    changelog_version = (tmp_path / "wiki/changelog/v0.3.2/index.html").read_text(encoding="utf-8")
     wiki_home = (tmp_path / "wiki/index.html").read_text(encoding="utf-8")
     wiki_quick_start = (tmp_path / "wiki/Quick-Start/index.html").read_text(encoding="utf-8")
     assert "<title>Changelog | Windows 11 Release Guard Wiki</title>" in changelog
@@ -1343,29 +1657,42 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "Windows 11 release compliance" in changelog
     assert "signed public policy feed" in changelog
     assert "RMM" in changelog
-    assert changelog.index("[Unreleased]") < changelog.index("v0.3.1 - 2026-06-05")
-    assert "Version 0.3.1 documents and hardens" in changelog
+    assert changelog.index("[Unreleased]") < changelog.index("v0.3.2 - 2026-06-10")
+    assert changelog.index("v0.3.2 - 2026-06-10") < changelog.index("v0.3.1 - 2026-06-05")
+    assert "Version 0.3.2 is the compatibility and documentation-alignment release" in changelog
     assert "Versions" in changelog
     assert ".changelog-content h2[id]" in changelog
     assert 'class="wiki-heading-icon wiki-icon-changelog"' in changelog
     assert 'class="wiki-heading-icon wiki-icon-release"' in changelog
     assert "white-space: nowrap;" in changelog
+    assert ">pre-release</a>" in changelog
+    assert 'class="changelog-pre-release-badge">pre-release</a>' in changelog
+    assert "border-color: #f0c74c;" in changelog
+    assert "margin-top: 4.75rem;" in changelog
+    assert "margin: -0.25rem 0 1.9rem 1.05rem;" in changelog
+    assert ".changelog-version-nav ol {" in changelog
+    assert "margin: 0.3rem 0 0 0.65rem;" in changelog
+    assert ".changelog-version-nav .version-meta a {" in changelog
+    assert "font-size: 0.76rem;" in changelog
     assert ">Changelog section</a>" in changelog
     assert ">Version page</a>" in changelog
     assert ">GitHub release</a>" in changelog
+    assert 'title="Open pre-release section" class="changelog-pre-release-badge">pre-release</a>' in changelog
     assert 'title="Open section on Pages changelog">Section</a>' in changelog
     assert 'title="Open version page">Version page</a>' in changelog
     assert 'title="Open GitHub release">GH release</a>' in changelog
-    assert 'href="#v0.3.1"' in changelog
-    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.1"' in changelog
-    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/"' in changelog
-    assert "<title>Changelog v0.3.1 | Windows 11 Release Guard Wiki</title>" in changelog_version
+    assert 'href="#v0.3.2"' in changelog
+    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.2"' in changelog
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/"' in changelog
+    assert "<title>Changelog v0.3.2 | Windows 11 Release Guard Wiki</title>" in changelog_version
     assert (
-        '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.1/">'
+        '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/">'
         in changelog_version
     )
-    assert "Windows 11 25H2 and 26H1 release targeting notes" in changelog_version
+    assert "extends declared and CI-tested Python support through 3.14" in changelog_version
     assert "<title>Windows 11 Release Guard Wiki</title>" in wiki_home
+    assert 'class="wiki-brand-icon"' in wiki_home
+    assert '<a class="wiki-brand" href="https://avnsx.github.io/win11_release_guard/">' in wiki_home
     assert 'id="wiki-content" class="wiki-content" tabindex="-1"' in wiki_home
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"' in wiki_home
     assert wiki_home.index('href="https://avnsx.github.io/win11_release_guard/wiki/changelog/"') < wiki_home.index(
@@ -1394,6 +1721,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
 
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "<title>Windows 11 Release Guard</title>" in index
+    assert '<link rel="icon" href="data:image/svg+xml,' in index
     assert "<h1>Windows 11 Release Guard</h1>" in index
     assert "Broad-fleet Windows 11 release and quality baseline dashboard." in index
     assert 'class="header-nav"' in index
@@ -1539,6 +1867,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "source diagnostics filter','root" in index
     assert "source diagnostics filter','status" in index
     assert 'id="source-diagnostics-empty" class="diag-filter-empty" hidden' in index
+    assert "This category currently contains no entries." in index
     assert '<article class="diag-row notice" data-diagnostic-severity="notice" hidden' not in index
     assert "<h2>Sources</h2>" not in index
     assert "sources-panel" not in index

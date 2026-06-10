@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "win11_release_guard"
-version = "0.3.1"
+version = "0.3.2"
 description = "Windows 11 broad-fleet release compliance guard."
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -17,6 +17,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.urls]
@@ -29,7 +31,7 @@ Changelog = "https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md
 "Pages Dashboard" = "https://avnsx.github.io/win11_release_guard/"
 
 [project.optional-dependencies]
-test = ["packaging>=24", "pytest>=8"]
+test = ["packaging>=24", "pytest>=8", "tomli>=2; python_version < '3.11'"]
 
 [project.scripts]
 win11_release_guard = "win11_release_guard.__main__:main"

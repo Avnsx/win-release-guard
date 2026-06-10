@@ -41,7 +41,7 @@ README is the quick entry. This wiki is the deep dive. Code, tests, workflows, a
 | [Source Diagnostics](Source-Diagnostics) | Parser/source drift events and publish gate semantics. |
 | [Anti-Static Freshness](Anti-Static-Freshness) | `generated_at_epoch_s`, `Date.now()`, 14/45-day gates. |
 | [Configuration](Configuration) | Recommended defaults, knobs, fallback behavior. |
-| [Release v0.3.1](Release-v0.3.1) | Release highlights, changed areas, verify commands. |
+| [Release v0.3.2](Release-v0.3.2) | Release highlights, changed areas, verify commands. |
 | [Safe Exports and Clean Archives](Safe-Exports-and-Clean-Archives) | Source ZIP rules and validation. |
 | [Troubleshooting](Troubleshooting) | Check/action tables for common failures. |
 | [FAQ](FAQ) | Short answers to common questions. |
@@ -79,7 +79,7 @@ python -m win11_release_guard --check-public-pages
 | Pages changelog | https://avnsx.github.io/win11_release_guard/wiki/changelog/ |
 | Public policy JSON | https://avnsx.github.io/win11_release_guard/windows-release-policy.json |
 | Releases | https://github.com/Avnsx/win11_release_guard/releases |
-| Release v0.3.1 | [Release v0.3.1](Release-v0.3.1) |
+| Release v0.3.2 | [Release v0.3.2](Release-v0.3.2) |
 | License | https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt |
 
 The local `wiki/` folder is source for the static Pages Wiki and source/staging for GitHub internal Wiki pages. The Pages workflow renders it to `/wiki/`; `.github/workflows/sync-wiki.yml` can mirror the same `wiki/*.md` Markdown into the live GitHub internal Wiki or produce a dry-run artifact for manual sync fallback.

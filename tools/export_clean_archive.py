@@ -15,6 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARCHIVE_PATH = Path("dist") / "win11_release_guard-source.zip"
 LEGACY_PROTOTYPE_NAME = "_".join(("windows", "releases", "info")) + ".py"
 ALLOWED_NORMALIZED_PYPI_URL = "https://pypi.org/project/win11-release-guard/"
+ALLOWED_NORMALIZED_PYPI_BADGE_ENDPOINTS = (
+    "https://img.shields.io/pypi/v/win11-release-guard",
+    "https://img.shields.io/pypi/pyversions/win11-release-guard",
+    "https://img.shields.io/pypi/dm/win11-release-guard",
+)
 REQUIRED_README_PUBLIC_SOURCES_STATEMENT = (
     "The production generator uses public Microsoft Release Health and Atom sources only; "
     "it does not use Microsoft "
@@ -125,7 +130,9 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "docs/tagged-release-lane.md",
     "docs/policy-signing.md",
     "docs/security-automation.md",
+    "docs/releases/v0.3.2.md",
     "wiki/Home.md",
+    "wiki/Release-v0.3.2.md",
     "wiki/Release-v0.3.1.md",
     "tests/test_github_wiki_sync.py",
     "tests/test_no_secret_material.py",
@@ -240,11 +247,18 @@ def _zip_text_entries(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
     return entries
 
 
+def _strip_allowed_normalized_pypi_references(text: str) -> str:
+    scan_text = text.replace(ALLOWED_NORMALIZED_PYPI_URL, "")
+    for endpoint in ALLOWED_NORMALIZED_PYPI_BADGE_ENDPOINTS:
+        scan_text = scan_text.replace(endpoint, "")
+    return scan_text
+
+
 def _validate_archive_content(archive_path: Path) -> None:
     findings: list[str] = []
     with zipfile.ZipFile(archive_path) as archive:
         for name, text in _zip_text_entries(archive):
-            identity_text = text.replace(ALLOWED_NORMALIZED_PYPI_URL, "")
+            identity_text = _strip_allowed_normalized_pypi_references(text)
             for pattern in FORBIDDEN_PACKAGE_IDENTITY_PATTERNS:
                 if pattern in identity_text:
                     findings.append(f"{name}: stale package identity {pattern!r}")

@@ -2,7 +2,7 @@
 
 Purpose: document the explicit GitHub Release path for clean source archives. These are distribution checkpoints for Windows 11 Release Guard source archives, separate from the twice-daily public policy feed publish workflow.
 
-Related links: [maintainer guide](maintainer-guide.md) | [v0.3.1 release notes](releases/v0.3.1.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
+Related links: [maintainer guide](maintainer-guide.md) | [v0.3.2 release notes](releases/v0.3.2.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
 
 ## Release Contract
 
@@ -42,7 +42,7 @@ release and Pages lanes keep their own status and permissions.
 | --- | --- |
 | Workflow | `.github/workflows/pypi-publish.yml`. |
 | Trigger | Manual `workflow_dispatch` without a tag runs build/twine/self-test only; manual dispatch with an existing `vX.Y.Z` tag or a published GitHub Release can publish. No normal push or pull request publishing. |
-| PyPI project | `https://pypi.org/project/win11_release_guard/`. |
+| PyPI project | `https://pypi.org/project/win11-release-guard/`. |
 | Environment | `pypi`, intended for manual approval. |
 | Permission | `id-token: write` only in the PyPI publish job. |
 | Credentials | No PyPI API token, Twine password, username, or credentialed repository URL. |

@@ -28,18 +28,18 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki dashboard](../wik
 The Pages Wiki renderer is first-party Python inside `win11_release_guard.policy_generator`. It keeps `wiki/*.md` compatible with GitHub's internal Wiki while rendering HTML for GitHub Pages:
 
 - `wiki/Home.md` becomes `site/wiki/index.html`.
-- Other `wiki/*.md` files become `site/wiki/<slug>/index.html`.
-- `_Sidebar.md` and `_Footer.md` are reused as static navigation/footer sources.
+- Other non-helper `wiki/*.md` files become `site/wiki/<slug>/index.html`.
+- `_Sidebar.md` and `_Footer.md` are reused as static navigation/footer sources only; they are not generated as standalone Pages Wiki HTML pages or sitemap URLs.
 - GitHub Wiki links such as `[[Home]]`, `[[Page Name]]`, and `[[Label|Page-Name]]` become Pages Wiki links.
 - Raw HTML in Markdown is escaped; no external JS, CSS, fonts, CDN, npm, or browser GitHub write path is used.
 - The renderer may add a small number of first-party inline SVG topic icons to article headings. These icons are generated from local Python code, marked `aria-hidden`, omitted from sidebar/TOC text, and do not change the source Markdown used by the GitHub internal Wiki.
 - Wiki pages use an inline SVG favicon data URL so browsers do not request an external favicon.
 - Broken internal Wiki links, missing `wiki/Home.md`, missing `_Sidebar.md` or `_Footer.md`, missing/empty Wiki sources, and empty Wiki pages are rendered as visible generator warnings instead of being silently dropped. If `wiki/Home.md` is missing, the generator writes a fallback `site/wiki/index.html` so the Pages Wiki root stays reachable while source Markdown is repaired.
-- Wiki and changelog pages mark the opened Wiki page in the generated `.wiki-sidebar` with `aria-current="page"` and a heavier link style. When `_Sidebar.md` groups related pages under a bold label such as `Architecture`, the group label is also strengthened for the current page. A small first-party, inline scroll helper only marks same-page hash links inside the sidebar; as readers scroll, the active section link becomes heavier and receives `aria-current="location"`. The helper aligns the sidebar to the current page/group on load and to active section links during content scrolling, while respecting reduced-motion preferences and recent manual sidebar scrolling. Without JavaScript, page navigation, group highlighting, and anchor links remain normal static HTML.
+- Wiki and changelog pages mark the opened Wiki page in the generated `.wiki-sidebar` with `aria-current="page"` and a heavier link style. When `_Sidebar.md` groups related pages under a bold label such as `Architecture`, the group label is also strengthened for the current page. A small first-party, inline scroll helper only marks same-page hash links inside the sidebar; as readers scroll, the active section link becomes heavier and receives `aria-current="location"`. The helper stores the sidebar scroll position for the current tab before sidebar navigation, restores that position on the destination page, then aligns from that position to the current page/group or active section. If no stored position exists, initial alignment is instant instead of animating from the top of the sidebar. It respects reduced-motion preferences and recent manual sidebar scrolling. Without JavaScript, page navigation, group highlighting, and anchor links remain normal static HTML.
 
 ## Static Pages Changelog
 
-`CHANGELOG.md` remains the manually maintained source of truth. The generator renders it into `/wiki/changelog/` and creates per-version pages such as `/wiki/changelog/v0.3.1/` for release sections with `vX.Y.Z` headers. `[Unreleased]` stays at the top when present; newer version sections are added above older version sections; historical sections remain visible for generated Pages changelog, release history, SEO, and auditability. Empty changelogs and h2 headings that do not match `[Unreleased]` or `vX.Y.Z` are kept in rendered HTML and surfaced as generator warnings; duplicate version headings receive duplicate-safe anchors.
+`CHANGELOG.md` remains the manually maintained source of truth. The generator renders it into `/wiki/changelog/` and creates per-version pages such as `/wiki/changelog/v0.3.2/` for release sections with `vX.Y.Z` headers. `[Unreleased]` stays at the top when present; newer version sections are added above older version sections; historical sections remain visible for generated Pages changelog, release history, SEO, and auditability. Empty changelogs and h2 headings that do not match `[Unreleased]` or `vX.Y.Z` are kept in rendered HTML and surfaced as generator warnings; duplicate version headings receive duplicate-safe anchors.
 
 ## Indexing Metadata
 
@@ -51,28 +51,70 @@ Generated HTML pages include a `<title>`, a concise `meta description`, a canoni
 | --- | --- |
 | Target summary | Broad target, baseline, latest observed build. |
 | Excluded releases | Data-driven 26H1 existing-device exclusion summary. |
-| Feed currency | Generated time, live age state, 14/45-day thresholds. |
+| Feed currency | Latest generated/compiled timestamp for the parsed policy results, live age state, 14/45-day thresholds. |
 | Source diagnostics | Keyboard-accessible severity filters, deterministic diagnostic IDs, counts, events, source health tiles, drift warnings. |
 | Programmatic API | Canonical and `/api/v1` endpoint links. |
+
+Source Diagnostics severities are source-health categories for maintainers, not
+device-compliance verdicts. Notices are informational, warnings are
+non-blocking source drift or enrichment problems, and errors are
+publish-blocking generator/source failures.
+
+Microsoft Release Health HTML and the public Atom/Update History feed can be
+temporarily out of step. Atom rows that are Preview, out-of-band,
+non-broad-target, unknown-family, or missing a KB/stable baseline marker remain
+normal notices. Missing KB metadata is uncertainty, not proof that the row is
+harmless forever. A warning is reserved for non-preview broad-target Atom drift
+with reliable required-baseline evidence. In the current generator that evidence
+is an extracted KB plus the build/release mapping. `source_drift_unresolved_after_24h`
+is reserved for warning/error drift that remains unresolved after the newest
+source timestamp, not for notice-only source lag.
+
+Small info icons beside dashboard section labels are static links to the related
+Pages Wiki sections. Their hover/focus panels contain a compact explanation plus
+the final action line `Click to navigate to related wiki page`; they do not
+fetch data, call GitHub APIs, or require browser credentials.
+
+Policy validation warnings render as a compact full-width banner at the top of
+the operations dashboard, before the `Policy Feed Currency` and `Source
+Diagnostics` panels. They must not appear as a late footer-like panel after the
+signature/API rows because warning state needs to be visible before readers scan
+the lower operational details.
 
 The Source Diagnostics count tiles for Notices, Warnings, and Errors are native
 buttons. Selecting one filters the event feed to that severity, updates
 `aria-pressed`, and reports the visible row count through the live status text.
-The `View all` button resets the filter and shows every diagnostic row again.
-The feed may include derived dashboard-only rows such as `No source issues
-reported`, existing-device exclusion notes, or freshness notices. Those rows are
-filterable and may carry deterministic DOM IDs, but they are not GitHub
-Issue-sync inputs.
+The `View all` button resets only the selected severity filter and shows the
+current diagnostic rows for all severities again. The copy button above the
+diagnostic feed exports the currently visible Source Diagnostics rows to the
+local clipboard as JSON. That JSON includes severity, deterministic diagnostic
+ID, title, source, message, tags, optional static issue URL, visible counts, the
+active filter, and a neutral context note for technical triage; it does not
+fetch GitHub, write to GitHub, or embed credentials. The separate `Expand View`
+button toggles the expanded diagnostic layout: while expanded, the Programmatic
+API panel is hidden, the Source Diagnostics panel spans the dashboard space
+where that panel normally sits, and the event feed gains additional vertical
+room. Clicking `Expand View` again restores the normal dashboard layout without
+changing the active severity filter. Without JavaScript, the dashboard stays in
+the normal layout with Programmatic API visible. Diagnostic rows render in
+severity order: errors first, then warnings, then notices, while preserving
+source order inside the same severity. The feed may include derived
+dashboard-only rows such as `No source issues reported`, existing-device
+exclusion notes, or freshness notices. Those rows are filterable and may carry
+deterministic DOM IDs, but they are not GitHub Issue-sync inputs.
 
 Optional source-diagnostic issue status must be static generated metadata, not
-browser-fetched data. When `source_diagnostics.issue_status` maps a deterministic
-ID for a real `source_diagnostics.events` entry to a GitHub issue number/state,
+browser-fetched data. Issue sync tracks warning and error events only; notice
+events remain dashboard-only. When `source_diagnostics.issue_status` maps a deterministic
+ID for a real synced `source_diagnostics.events` warning/error entry to a GitHub issue number/state,
 the dashboard may render a hover/focus-only `#Ticket <number>` link only to
 `https://github.com/Avnsx/win11_release_guard/issues/<number>`. Derived
 dashboard-only rows do not show ticket links without workflow-generated metadata
-for a real synced event. Invalid IDs, non-positive issue numbers, and
-non-canonical issue URLs are ignored. Browser JavaScript must not fetch GitHub
-issue state.
+for a real synced event. Real source diagnostic rows with generated issue state
+`closed` are suppressed from the dashboard entirely so resolved issue-backed
+events no longer occupy visual diagnostic space. Invalid IDs, non-positive issue
+numbers, and non-canonical issue URLs are ignored. Browser JavaScript must not
+fetch GitHub issue state.
 
 When the publish workflow cannot sync GitHub Issues, `source_diagnostics.issue_sync`
 may report `status: unavailable`. The dashboard must render that degraded state

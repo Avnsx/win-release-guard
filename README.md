@@ -1,23 +1,25 @@
-# Windows 11 Release Guard
-
 ![Windows 11 Release Guard dashboard preview](https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/windows-11-release-guard-hero-dashboard.png)
 
-<p>
-  <a href="https://pypi.org/project/win11-release-guard/" aria-label="Download win11_release_guard from PyPI">
-    <img src="https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/download_from_pypi.png" alt="Download from PyPI" width="96" height="96">
-  </a>
-</p>
+<a href="https://pypi.org/project/win11-release-guard/" aria-label="Download win11_release_guard from PyPI">
+  <img align="right"
+       src="https://raw.githubusercontent.com/Avnsx/win11_release_guard/main/assets/images/download_from_pypi.png"
+       alt="Download from PyPI"
+       width="96"
+       height="96">
+</a>
 
-[![PyPI](https://img.shields.io/pypi/v/win11_release_guard?logo=pypi&label=PyPI)](https://pypi.org/project/win11_release_guard/)
-[![Python](https://img.shields.io/pypi/pyversions/win11_release_guard?logo=python&label=Python)](https://pypi.org/project/win11_release_guard/)
-[![License](https://img.shields.io/pypi/l/win11_release_guard?label=license)](https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt)
-[![PyPI downloads](https://img.shields.io/pypi/dm/win11_release_guard?label=PyPI%20downloads)](https://pypi.org/project/win11_release_guard/)
+# Windows 11 Release Guard
+
+[![Python](https://img.shields.io/pypi/pyversions/win11-release-guard?logo=python&label=Python)](https://pypi.org/project/win11-release-guard/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/win11-release-guard?label=PyPI%20downloads)](https://pypi.org/project/win11-release-guard/)
 [![GitHub Release](https://img.shields.io/github/v/release/Avnsx/win11_release_guard?label=release)](https://github.com/Avnsx/win11_release_guard/releases)
+[![Stars](https://img.shields.io/github/stars/Avnsx/win11_release_guard?label=%E2%AD%90%20Stars&color=ffc83d)](https://github.com/Avnsx/win11_release_guard/stargazers)
 
 [![CI](https://github.com/Avnsx/win11_release_guard/actions/workflows/ci.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/ci.yml)
 [![Publish policy](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml)
 [![Publish Python package](https://github.com/Avnsx/win11_release_guard/actions/workflows/pypi-publish.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/pypi-publish.yml)
 [![CodeQL](https://github.com/Avnsx/win11_release_guard/actions/workflows/codeql.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/codeql.yml)
+
 [![Pylint](https://github.com/Avnsx/win11_release_guard/actions/workflows/pylint.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/pylint.yml)
 [![Dependency audit](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-audit.yml)
 [![Dependency freshness](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml/badge.svg)](https://github.com/Avnsx/win11_release_guard/actions/workflows/dependency-freshness.yml)
@@ -26,14 +28,17 @@ Windows release policy guard for broad-fleet Windows 11 version checks.
 
 Windows 11 Release Guard tells administrators whether an existing Windows 11 device is on the current fleet release and quality baseline, using a signed JSON feed, build-first local evidence, a static GitHub Pages dashboard/API, and a PyPI package for sysadmin/RMM automation. The repository, distribution package, installed console command, and Python import package use the same `win11_release_guard` name.
 
+> [!IMPORTANT]
+> Compliance trust comes from the signed public policy JSON plus detached signature, not from display labels or badge state. Start with [Policy Feed and Trust Model](https://avnsx.github.io/win11_release_guard/wiki/Policy-Feed-and-Trust-Model/) and [Local Windows Detection](https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/).
+
 | Fact | Value |
 | --- | --- |
 | Project / package | `win11_release_guard` |
-| Version | `0.3.1` |
+| Version | `0.3.2` |
 | Console script | `win11_release_guard` |
 | Python entry point | `python -m win11_release_guard` |
 | Repository | `https://github.com/Avnsx/win11_release_guard` |
-| PyPI | `https://pypi.org/project/win11_release_guard/` |
+| PyPI | `https://pypi.org/project/win11-release-guard/` |
 | Public feed | `https://avnsx.github.io/win11_release_guard/windows-release-policy.json` |
 
 ## What This Does
@@ -67,6 +72,9 @@ Production compliance jobs normally use:
 win11_release_guard --strict-production --json-pretty --no-wua
 ```
 
+> [!TIP]
+> RMM jobs normally want stable JSON and exit codes first; keep WUA as secondary read-only context unless you explicitly need local update-offer evidence. See [CLI and RMM Usage](https://avnsx.github.io/win11_release_guard/wiki/CLI-and-RMM-Usage/).
+
 Deep dive: [Quick Start](https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/), [CLI and RMM Usage](https://avnsx.github.io/win11_release_guard/wiki/CLI-and-RMM-Usage/), [Configuration](https://avnsx.github.io/win11_release_guard/wiki/Configuration/).
 
 ## Public Feed And Dashboard
@@ -83,9 +91,18 @@ Deep dive: [Quick Start](https://avnsx.github.io/win11_release_guard/wiki/Quick-
 | API v1 signature | https://avnsx.github.io/win11_release_guard/api/v1/policy.sig |
 | API v1 manifest | https://avnsx.github.io/win11_release_guard/api/v1/manifest.json |
 
-Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI. Source Diagnostics tiles filter Notices, Warnings, and Errors; `View all` resets the feed. Optional `#Ticket` links are hover/focus-only static links to repository issues when workflow-generated metadata exists.
+Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI. Source Diagnostics tiles filter Notices, Warnings, and Errors; `View all` resets the feed. Optional `#Ticket` links are hover/focus-only static links to repository issues when workflow-generated metadata exists for real warning/error source-diagnostic events.
+
+> [!NOTE]
+> `Policy Feed Currency` is the latest compilation timestamp for the parsed policy results. If it looks old, check the [publish-policy workflow](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml) and the [Anti-Static Freshness](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/) notes.
 
 Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/wiki/GitHub-Pages-Dashboard/), [Anti-Static Freshness](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/), [dashboard docs](https://github.com/Avnsx/win11_release_guard/blob/main/docs/dashboard-and-pages.md).
+
+## Support The Project
+
+If Windows 11 Release Guard saves you time or helps your fleet checks, please star the repository. Stars make the project easier for other Windows administrators to discover and help justify continued testing, documentation, release automation, and dashboard work.
+
+[![Stargazers repo roster for @Avnsx/win11_release_guard](https://reporoster.com/stars/dark/Avnsx/win11_release_guard)](https://github.com/Avnsx/win11_release_guard/stargazers)
 
 ## Common User Paths
 
@@ -106,7 +123,7 @@ Deep dive: [GitHub Pages Dashboard](https://avnsx.github.io/win11_release_guard/
 | Local detection | Build and signed policy evidence are the release truth. | [Local Windows Detection](https://avnsx.github.io/win11_release_guard/wiki/Local-Windows-Detection/) |
 | WUA role | Optional read-only explanation for offers/history. | [Troubleshooting](https://avnsx.github.io/win11_release_guard/wiki/Troubleshooting/) |
 | Release targeting | 25H2 is the existing-device target; 26H1 is excluded for existing devices. | [Architecture Insight](https://github.com/Avnsx/win11_release_guard/blob/main/docs/architecture-insight.md) |
-| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.1 notes](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.1.md) |
+| Versions | Package/program version is not `schema_version` or `api_version`. | [v0.3.2 notes](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.2.md) |
 | Source diagnostics | Notice/warning/error troubleshooting evidence stays visible; generator `error` events can block policy publishing, but diagnostics do not override runtime compliance verdicts. | [Source Diagnostics](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/) |
 
 ## Maintainer Commands
@@ -133,10 +150,13 @@ Deployment-affecting changes require the live Pages gate before handover. Use th
 - Runtime clients fetch public JSON plus `.sig`. Runtime clients do not authenticate to GitHub and do not need GitHub tokens, private repository access, or a paid signing certificate.
 - The private policy signing key lives only in the GitHub Actions secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`; public verification keys are committed.
 - The production generator uses public Microsoft Release Health and Atom sources only; it does not use token-authenticated Microsoft APIs.
-- Source Diagnostics issue sync runs only in GitHub Actions with the built-in `github.token` / `GITHUB_TOKEN` and minimal `issues: write`; no PAT or extra repository secret is required.
+- Source Diagnostics issue sync runs only for warning/error events in GitHub Actions with the built-in `github.token` / `GITHUB_TOKEN` and minimal `issues: write`; notices stay dashboard-only, and no PAT or extra repository secret is required.
 - PyPI publishing uses Trusted Publishing / GitHub OIDC in `.github/workflows/pypi-publish.yml`; no PyPI API token is required.
 - GitHub scheduled workflows are best-effort automation, not guaranteed cron. Badge status is a useful signal, not an operational proof.
 - Dependency freshness is checked by a scheduled workflow. `Dependency freshness` is a scheduled direct-dependency check over direct dependency specifiers; it is not an always-current dependency guarantee. The Pylint badge reports the workflow for the current `--fail-under=8.0` gate, not a permanent quality certificate.
+
+> [!WARNING]
+> Source Diagnostics explain parser/source health and can block publishing on generator `error` events, but they never override the signed runtime verdict. Review [Source Diagnostics](https://avnsx.github.io/win11_release_guard/wiki/Source-Diagnostics/) before treating a warning as fleet compliance evidence.
 
 Deep dive: [policy signing](https://github.com/Avnsx/win11_release_guard/blob/main/docs/policy-signing.md), [security automation](https://github.com/Avnsx/win11_release_guard/blob/main/docs/security-automation.md), [Tagged release lane](https://github.com/Avnsx/win11_release_guard/blob/main/docs/tagged-release-lane.md).
 
@@ -149,7 +169,7 @@ Deep dive: [policy signing](https://github.com/Avnsx/win11_release_guard/blob/ma
 | GitHub internal Wiki (Markdown mirror) | https://github.com/Avnsx/win11_release_guard/wiki |
 | Full architecture | [Architecture](https://avnsx.github.io/win11_release_guard/wiki/Architecture/) |
 | Maintainer guide | [docs/maintainer-guide.md](https://github.com/Avnsx/win11_release_guard/blob/main/docs/maintainer-guide.md) |
-| Release notes | [CHANGELOG.md](https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md) and [docs/releases/v0.3.1.md](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.1.md) |
+| Release notes | [CHANGELOG.md](https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md) and [docs/releases/v0.3.2.md](https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v0.3.2.md) |
 | Safe source archives | [Safe Exports and Clean Archives](https://avnsx.github.io/win11_release_guard/wiki/Safe-Exports-and-Clean-Archives/) |
 | FAQ | [FAQ](https://avnsx.github.io/win11_release_guard/wiki/FAQ/) |
 

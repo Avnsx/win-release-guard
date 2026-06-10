@@ -6,6 +6,17 @@ Use this when changing the generated static dashboard or public Pages endpoint c
 
 ## Dashboard Sections
 
+The dashboard is a static public control surface for humans and automation. The
+top cards summarize the signed policy target, the currency panel explains feed
+age, Source Diagnostics shows source/parser health, Signature confirms trust
+state, and Programmatic API links expose the canonical policy artifacts.
+
+The API section is intentionally boring and stable: scripts should use the
+published JSON, detached signature, manifest, or `/api/v1` aliases rather than
+scraping visual dashboard text. Browser code stays local and static; it can
+filter diagnostics and update feed age, but it does not write to GitHub, fetch
+private state, or decide signed policy semantics.
+
 | Section | Shows |
 | --- | --- |
 | Header | Product display name, program version, dashboard/wiki/repo links. |
@@ -36,17 +47,17 @@ Local `site/` is generated output for testing and must not be committed. The Pag
 
 ## Static Pages Wiki
 
-The same `wiki/*.md` files stay compatible with the GitHub internal Wiki and are rendered into GitHub Pages by first-party Python in `win11_release_guard.policy_generator`. `wiki/Home.md` becomes `wiki/index.html`; other pages become `wiki/<slug>/index.html`; `_Sidebar.md` and `_Footer.md` provide static navigation/footer content. GitHub Wiki links like `[[Home]]` and `[[Quick Start|Quick-Start]]` are converted to Pages Wiki links.
+The same `wiki/*.md` files stay compatible with the GitHub internal Wiki and are rendered into GitHub Pages by first-party Python in `win11_release_guard.policy_generator`. `wiki/Home.md` becomes `wiki/index.html`; non-helper pages become `wiki/<slug>/index.html`; `_Sidebar.md` and `_Footer.md` provide static navigation/footer content only and are not published as standalone Pages Wiki pages. GitHub Wiki links like `[[Home]]` and `[[Quick Start|Quick-Start]]` are converted to Pages Wiki links.
 
 The renderer escapes raw HTML from Markdown and uses no external JS, CSS, fonts, CDN, npm, or browser GitHub write path. It may add a small number of first-party inline SVG topic icons to article headings; those icons are generated from local Python code, marked `aria-hidden`, omitted from sidebar/TOC text, and never written back into the Markdown source used by the GitHub internal Wiki. Wiki pages also use an inline SVG favicon data URL so browsers do not request an external favicon.
 
-The opened Wiki page is marked in the generated `.wiki-sidebar` with `aria-current="page"` and a heavier link style; if `_Sidebar.md` groups the page under a bold label such as `Architecture`, that group label is strengthened too. A small first-party inline scroll helper marks only same-page hash links inside the sidebar; as readers scroll through Wiki or changelog sections, the active section link becomes heavier and receives `aria-current="location"`. The helper aligns the sidebar to the current page/group on load and to active section links during content scrolling, while respecting reduced-motion preferences and recent manual sidebar scrolling. No-JavaScript navigation remains normal static links.
+The opened Wiki page is marked in the generated `.wiki-sidebar` with `aria-current="page"` and a heavier link style; if `_Sidebar.md` groups the page under a bold label such as `Architecture`, that group label is strengthened too. A small first-party inline scroll helper marks only same-page hash links inside the sidebar; as readers scroll through Wiki or changelog sections, the active section link becomes heavier and receives `aria-current="location"`. The helper stores the sidebar scroll position for the current tab before sidebar navigation, restores that position on the destination page, then aligns from that position to the current page/group or active section. If no stored position exists, initial alignment is instant instead of animating from the top of the sidebar. It respects reduced-motion preferences and recent manual sidebar scrolling. No-JavaScript navigation remains normal static links.
 
 The renderer surfaces broken internal links, missing `wiki/Home.md`, missing `_Sidebar.md` or `_Footer.md`, missing/empty Wiki source sets, and empty Wiki pages as visible generator warnings. A missing `wiki/Home.md` produces a fallback `wiki/index.html` so the Pages Wiki root remains reachable while maintainers repair the Markdown source.
 
 ## Static Pages Changelog
 
-`CHANGELOG.md` remains manually maintained source of truth. The generator renders `/wiki/changelog/` plus per-version routes such as `/wiki/changelog/v0.3.1/`. `[Unreleased]` stays above release versions when present, newer versions are added above older versions, and historical sections remain visible for Pages changelog, release history, SEO, and auditability. Empty changelogs and non-standard h2 version headings stay visible in rendered HTML and are marked with generator warnings instead of being silently ignored.
+`CHANGELOG.md` remains manually maintained source of truth. The generator renders `/wiki/changelog/` plus per-version routes such as `/wiki/changelog/v0.3.2/`. `[Unreleased]` stays above release versions when present, newer versions are added above older versions, and historical sections remain visible for Pages changelog, release history, SEO, and auditability. Empty changelogs and non-standard h2 version headings stay visible in rendered HTML and are marked with generator warnings instead of being silently ignored.
 
 ## Indexing Metadata
 
@@ -58,7 +69,9 @@ The Notices, Warnings, and Errors count tiles are keyboard-accessible filters fo
 the Source Diagnostics feed. `View all` resets the filter. Rows can expose a
 small hover/focus-only `#Ticket <number>` link, but only when static
 workflow-generated issue metadata contains a canonical
-`https://github.com/Avnsx/win11_release_guard/issues/<number>` URL.
+`https://github.com/Avnsx/win11_release_guard/issues/<number>` URL for a real
+warning/error `source_diagnostics.events` row. Derived UI rows, clear-state
+rows, and Notice events remain visible and filterable without ticket links.
 
 The dashboard never creates GitHub Issues and never calls the GitHub Issues API
 from browser JavaScript. Issue creation, update, reopen, and close operations

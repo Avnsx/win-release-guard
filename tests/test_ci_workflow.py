@@ -19,15 +19,19 @@ def test_ci_workflow_exists_and_has_required_triggers() -> None:
     assert "workflow_dispatch:" in text
 
 
-def test_ci_workflow_runs_ubuntu_windows_and_python_312() -> None:
+def test_ci_workflow_runs_ubuntu_windows_and_supported_python_versions() -> None:
     text = _workflow_text()
 
     assert "ubuntu-latest" in text
     assert "windows-latest" in text
+    assert '"3.10"' in text
     assert '"3.11"' in text
     assert '"3.12"' in text
+    assert '"3.13"' in text
+    assert '"3.14"' in text
     assert "matrix.os" in text
     assert "matrix.python-version" in text
+    assert "continue-on-error" not in text
 
 
 def test_ci_workflow_uses_node24_ready_actions() -> None:
