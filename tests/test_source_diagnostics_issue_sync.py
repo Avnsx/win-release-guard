@@ -240,6 +240,8 @@ def test_issue_sync_ignores_atom_notice_sibling_but_keeps_warning_title_suffix()
             build="26100.8655",
             atom_entry_id="uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
             atom_support_article_id="968480",
+            support_article_validation_status="mismatch",
+            support_article_validation_reasons=["applies_to_mismatch"],
         ),
         _event(
             ATOM_SOURCE_DIAGNOSTIC_ID,
@@ -249,6 +251,7 @@ def test_issue_sync_ignores_atom_notice_sibling_but_keeps_warning_title_suffix()
             build="26200.8655",
             atom_entry_id="uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
             atom_support_article_id="968480",
+            support_article_validation_status="ok",
         ),
     ]
 

@@ -2,7 +2,14 @@
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Changed
+
+* Documented the split between Release Health `latest_build`, informational `latest_observed_build`, and signed `required_baseline_build`; Atom-linked Support article evidence can advance latest-observed context without changing the required fleet baseline.
+* Documented Source Diagnostics enrichment from Atom-linked Microsoft Support articles and unauthenticated MSRC CVRF data, including no `/help/<KB>` fallback when Atom lacks a support href, Atom-form diagnostic IDs, and GitHub Issue title suffixes such as `[id=968480]`.
+
+### Fixed
+
+* Validated Atom-linked Microsoft Support article URL, KB, build, and applicability evidence before using article facts for Source Diagnostics summaries or Support-derived security labels; mismatches now remain visible as compact validation metadata without trusting the mismatched article text.
 
 ## v0.3.2 - 2026-06-10
 

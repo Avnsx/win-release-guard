@@ -211,6 +211,80 @@ def _kb5094126_fixture_policy() -> ReleasePolicy:
     )
 
 
+def _support_article_html(
+    *,
+    kb_article: str = "KB5094126",
+    builds: tuple[str, ...] = ("26200.8655", "26100.8655"),
+    applies_to: str = "Windows 11, version 25H2; Windows 11, version 24H2",
+    security: bool = True,
+    labels: tuple[str, ...] = ("Secure Boot", "Virtualization"),
+) -> str:
+    build_label = ""
+    if builds:
+        build_word = "Build" if len(builds) == 1 else "Builds"
+        build_label = f" (OS {build_word} {' and '.join(builds)})"
+    label_items = "".join(f"<li>[{label}] Validated update note.</li>" for label in labels)
+    security_text = (
+        "<p>This update includes the latest security fixes and addresses security vulnerabilities.</p>"
+        if security
+        else "<p>This update improves reliability and quality for Windows components.</p>"
+    )
+    return f"""
+<!doctype html>
+<html>
+  <head>
+    <title>June 9, 2026-{kb_article}{build_label} - Microsoft Support</title>
+    <script>window.secret = "ignored";</script>
+  </head>
+  <body>
+    <main>
+      <h1>June 9, 2026-{kb_article}{build_label}</h1>
+      <p>Applies to: {applies_to}</p>
+      <h2>Highlights</h2>
+      <ul>{label_items}</ul>
+      {security_text}
+      <h2>Known issues in this update</h2>
+      <p>Microsoft is not currently aware of any issues in this update.</p>
+    </main>
+  </body>
+</html>
+"""
+
+
+def _kb5094126_policy_with_support_html(
+    html_text: str,
+    *,
+    msrc_payload: dict[str, object] | None = None,
+) -> ReleasePolicy:
+    def support_fetcher(url: str, timeout: float, max_bytes: int) -> str:
+        assert url == KB5094126_SUPPORT_URL
+        return html_text
+
+    msrc_fetcher = None
+    if msrc_payload is not None:
+        def msrc_fetcher(url: str, timeout: float, max_bytes: int) -> dict[str, object]:
+            assert url == "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jun"
+            return msrc_payload
+
+    return generate_policy(
+        release_health_html=_html_file("windows11-release-health-header-variants.html"),
+        atom_feed_xml=_kb5094126_atom_fixture(),
+        generated_at_utc="2026-06-11T00:00:00+00:00",
+        support_article_fetcher=support_fetcher,
+        msrc_cvrf_fetcher=msrc_fetcher,
+    )
+
+
+def _kb5094126_atom_event(policy: ReleasePolicy, build: str = "26200.8655") -> dict[str, object]:
+    return next(
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history"
+        and event["kb_article"] == "KB5094126"
+        and event["build"] == build
+    )
+
+
 @pytest.mark.parametrize(
     "diagnostic_id",
     (
@@ -1369,7 +1443,7 @@ def test_support_article_fact_extraction_for_kb5094126() -> None:
     assert facts["kb_article"] == "KB5094126"
     assert facts["builds"] == ["26200.8655", "26100.8655"]
     assert facts["release_date"] == "June 9, 2026"
-    assert facts["applies_to"] == "Windows 11, version 25H2"
+    assert facts["applies_to"] == "Windows 11, version 25H2; Windows 11, version 24H2"
     assert facts["known_issue_status"] == "not_currently_aware"
     assert facts["improvement_labels"] == [
         "Secure Boot",
@@ -1494,6 +1568,156 @@ def test_support_article_enrichment_adds_diagnostic_context_and_dashboard_summar
     assert event["user_message"] in index
     assert "Atom feed shows a newer non-preview build for the broad target" in index
     validate_policy_document(policy.to_dict())
+
+
+def test_support_article_kb_mismatch_does_not_contaminate_summary_or_security() -> None:
+    policy = _kb5094126_policy_with_support_html(
+        _support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True)
+    )
+
+    event = _kb5094126_atom_event(policy)
+    assert event["support_article_validation_status"] == "mismatch"
+    assert event["support_article_validation_reasons"] == ["kb_mismatch", "build_missing"]
+    assert event["support_article_expected_kb"] == "KB5094126"
+    assert event["support_article_expected_build"] == "26200.8655"
+    assert event["support_article_expected_release"] == "25H2"
+    assert event["kb_article"] == "KB5094126"
+    assert event["build"] == "26200.8655"
+    assert "support_article_kb_article" not in event
+    assert "support_article_title" not in event
+    assert event.get("user_message") is None
+    assert event["is_security"] is None
+    assert event["security_evidence_source"] == "unavailable"
+    assert event["support_article_status"] == "ok"
+    assert "Security patch" not in policy_generator_module._source_diagnostic_row_from_event(event)["tags"]
+
+    summaries = [
+        str(item.get("user_message") or item.get("notice_summary") or "")
+        for item in policy.source_diagnostics["events"]
+    ]
+    assert all("KB5000000" not in summary for summary in summaries)
+    mismatch = next(
+        item for item in policy.source_diagnostics["events"] if item["kind"] == "support_article_enrichment_mismatch"
+    )
+    assert mismatch["severity"] == "warning"
+    assert mismatch["support_article_validation_reasons"] == ["kb_mismatch", "build_missing"]
+    article = policy.source_diagnostics["support_articles"][KB5094126_SUPPORT_URL]
+    assert article["support_article_validation_status"] == "mismatch"
+    assert article["security_evidence_source"] == "unavailable"
+    assert "security_signals" not in article
+    validate_policy_document(policy.to_dict())
+
+
+def test_support_article_build_mismatch_is_not_validation_ok() -> None:
+    policy = _kb5094126_policy_with_support_html(
+        _support_article_html(kb_article="KB5094126", builds=("26200.1111",), security=True)
+    )
+
+    event = _kb5094126_atom_event(policy)
+    assert event["support_article_validation_status"] == "mismatch"
+    assert event["support_article_validation_reasons"] == ["build_missing"]
+    assert event["support_article_expected_build"] == "26200.8655"
+    assert "support_article_builds" not in event
+    assert event["is_security"] is None
+    assert event["security_evidence_source"] == "unavailable"
+    assert event.get("user_message") is None
+
+
+def test_support_article_incompatible_applies_to_is_visible_but_untrusted() -> None:
+    policy = _kb5094126_policy_with_support_html(
+        _support_article_html(
+            kb_article="KB5094126",
+            builds=("26200.8655",),
+            applies_to="Windows 10, version 22H2",
+            security=True,
+        )
+    )
+
+    event = _kb5094126_atom_event(policy)
+    assert event["support_article_validation_status"] == "mismatch"
+    assert event["support_article_validation_reasons"] == ["applies_to_mismatch"]
+    assert event["support_article_applies_to"] == "Windows 10, version 22H2"
+    assert event["support_article_expected_release"] == "25H2"
+    assert event["is_security"] is None
+    assert event["security_evidence_source"] == "unavailable"
+    assert event.get("user_message") is None
+
+
+def test_support_article_partial_compatible_article_is_degraded_atom_grounded_summary() -> None:
+    policy = _kb5094126_policy_with_support_html(
+        _support_article_html(
+            kb_article="KB5094126",
+            builds=(),
+            applies_to="Windows 11, version 25H2",
+            security=False,
+            labels=(),
+        )
+    )
+
+    event = _kb5094126_atom_event(policy)
+    assert event["support_article_validation_status"] == "degraded"
+    assert event["support_article_validation_reasons"] == ["builds_missing"]
+    assert event["support_article_expected_kb"] == "KB5094126"
+    assert event["support_article_expected_build"] == "26200.8655"
+    assert event["support_article_title"] == "June 9, 2026-KB5094126"
+    assert "support_article_builds" not in event
+    assert event["is_security"] is None
+    assert event["security_evidence_source"] == "unavailable"
+    assert event["user_message"] == (
+        "Windows Update June 2026: Windows 11 KB5094126 moves 25H2 to 26200.8655; "
+        "support article validation degraded: builds_missing."
+    )
+    assert "KB5000000" not in event["user_message"]
+    degraded = next(
+        item for item in policy.source_diagnostics["events"] if item["kind"] == "support_article_enrichment_degraded"
+    )
+    assert degraded["support_article_validation_reasons"] == ["builds_missing"]
+
+
+def test_msrc_exact_kb_security_survives_mismatched_support_article() -> None:
+    policy = _kb5094126_policy_with_support_html(
+        _support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True),
+        msrc_payload=FAKE_MSRC_CVRF_WITH_KB5094126,
+    )
+
+    event = _kb5094126_atom_event(policy)
+    assert event["support_article_validation_status"] == "mismatch"
+    assert event["security_evidence_source"] == "msrc_cvrf"
+    assert event["is_security"] is True
+    assert event["cves"] == ["CVE-2026-0001", "CVE-2026-0002"]
+    assert event["msrc_cvrf_status"] == "ok"
+    assert event.get("user_message") is None
+    assert "support_article_kb_article" not in event
+    assert "security_signals" not in event
+    assert "Security patch" in policy_generator_module._source_diagnostic_row_from_event(event)["tags"]
+
+
+def test_support_article_validation_renders_and_exports_without_raw_html(tmp_path: Path) -> None:
+    bad_html = _support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True)
+    policy = _kb5094126_policy_with_support_html(bad_html)
+    written = write_policy_outputs(policy, output_dir=tmp_path, write_index=True, write_manifest=True)
+    generated_policy = json.loads(written["policy"].read_text(encoding="utf-8"))
+    index = written["index"].read_text(encoding="utf-8")
+    policy_json = json.dumps(generated_policy, sort_keys=True)
+    event = _kb5094126_atom_event(policy)
+
+    validate_policy_document(generated_policy)
+    assert event["id"] in index
+    assert 'data-support-article-validation-status="mismatch"' in index
+    assert 'data-support-article-validation-reasons="kb_mismatch, build_missing"' in index
+    assert 'data-support-article-expected-kb="KB5094126"' in index
+    assert 'data-support-article-expected-build="26200.8655"' in index
+    assert 'data-support-article-expected-release="25H2"' in index
+    assert "addListAttr('data-support-article-validation-reasons','support_article_validation_reasons')" in index
+    assert "Support article mismatch" in index
+    assert "Validation reasons: kb_mismatch, build_missing." in index
+    assert "KB5000000 moves" not in index
+    assert "window.secret" not in index
+    assert "window.secret" not in policy_json
+    assert bad_html.strip() not in policy_json
+    visible_row = policy_generator_module._source_diagnostic_row_from_event(event)
+    assert visible_row["support_article_validation_status"] == "mismatch"
+    assert visible_row["support_article_validation_reasons"] == ["kb_mismatch", "build_missing"]
 
 
 def test_msrc_cvrf_marks_atom_diagnostic_as_security_and_uses_single_month_fetch() -> None:

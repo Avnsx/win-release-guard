@@ -876,9 +876,13 @@ def _extract_support_article_facts(url: str, html_text: str) -> dict[str, Any]:
     if match:
         release_date = match.group(0)
     applies_to = None
-    applies_match = re.search(r"\bApplies to\s*:?\s*([^.;]{1,180})", searchable, flags=re.IGNORECASE)
+    applies_match = re.search(
+        r"\bApplies to\s*:?\s*(.{1,240}?)(?:\b(?:Highlights|Improvements|Known issues|Summary|How to get this update)\b|$)",
+        searchable,
+        flags=re.IGNORECASE,
+    )
     if applies_match:
-        applies_to = _compact_article_text(applies_match.group(1))
+        applies_to = _compact_article_text(applies_match.group(1)).rstrip(" .;")
     known_issue_status = None
     if "not currently aware of any issues" in lower_searchable:
         known_issue_status = "not_currently_aware"
@@ -1506,6 +1510,138 @@ def _support_article_record_url(record: Mapping[str, Any]) -> str | None:
     return _safe_atom_support_article_url(str(record.get("support_url") or record.get("atom_feed_url") or "") or None)
 
 
+_SUPPORT_ARTICLE_VALIDATION_STATUSES = {"ok", "degraded", "mismatch", "unavailable", "skipped"}
+_SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT = 6
+
+
+def _support_article_canonical_url(value: Any) -> str | None:
+    safe_url = _safe_atom_support_article_url(str(value or "") or None)
+    if safe_url is None:
+        return None
+    parsed = urlparse(safe_url)
+    return parsed._replace(fragment="").geturl()
+
+
+def _support_article_expected_facts(record: Mapping[str, Any]) -> dict[str, str]:
+    expected: dict[str, str] = {}
+    kb_article = _extract_kb(str(record.get("kb_article") or ""))
+    build = str(record.get("build") or "").strip()
+    release = str(record.get("release") or "").strip()
+    if kb_article:
+        expected["kb"] = kb_article
+    if build:
+        expected["build"] = build
+    if release:
+        expected["release"] = release
+    return expected
+
+
+def _support_article_releases_from_applies_to(value: Any) -> tuple[str, ...] | None:
+    text = _compact_article_text(str(value or ""))
+    if not text:
+        return ()
+    normalized = text.lower()
+    if "windows" not in normalized:
+        return None
+    releases = tuple(
+        dict.fromkeys(
+            f"{match.group(1).upper()}H{match.group(2)}"
+            for match in re.finditer(r"\b(\d{2})\s*h\s*([12])\b", text, flags=re.IGNORECASE)
+        )
+    )
+    if releases:
+        return releases
+    if "windows 10" in normalized and "windows 11" not in normalized:
+        return ()
+    if "windows 11" in normalized:
+        return None
+    return ()
+
+
+def _support_article_validation_for_record(
+    record: Mapping[str, Any],
+    article: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    expected = _support_article_expected_facts(record)
+    validation: dict[str, Any] = {
+        "support_article_expected_kb": expected.get("kb"),
+        "support_article_expected_build": expected.get("build"),
+        "support_article_expected_release": expected.get("release"),
+    }
+    if not isinstance(article, Mapping):
+        validation["support_article_validation_status"] = "unavailable"
+        validation["support_article_validation_reasons"] = ["not_fetched"]
+        return {key: value for key, value in validation.items() if value not in (None, "", [], ())}
+
+    status = str(article.get("status") or "")
+    mismatch_reasons: list[str] = []
+    degraded_reasons: list[str] = []
+
+    if status == "skipped":
+        degraded_reasons.append(str(article.get("reason") or "skipped"))
+    elif status in {"error", "unavailable", "not_fetched"}:
+        degraded_reasons.append(str(article.get("reason") or article.get("error") or status or "unavailable"))
+    elif status == "degraded":
+        degraded_reasons.append(str(article.get("reason") or article.get("error") or "support_article_degraded"))
+
+    expected_url = _support_article_canonical_url(_support_article_record_url(record))
+    actual_url = _support_article_canonical_url(article.get("url"))
+    if expected_url and actual_url and expected_url != actual_url:
+        mismatch_reasons.append("url_mismatch")
+    elif expected_url and not actual_url:
+        degraded_reasons.append("url_unavailable")
+
+    expected_kb = expected.get("kb")
+    article_kb = _extract_kb(str(article.get("kb_article") or ""))
+    if expected_kb:
+        if article_kb and article_kb != expected_kb:
+            mismatch_reasons.append("kb_mismatch")
+        elif not article_kb and status == "ok":
+            degraded_reasons.append("kb_missing")
+
+    expected_build = expected.get("build")
+    article_builds = tuple(str(item) for item in _as_sequence(article.get("builds")) if str(item or "").strip())
+    if expected_build:
+        if article_builds and expected_build not in article_builds:
+            mismatch_reasons.append("build_missing")
+        elif not article_builds and status == "ok":
+            degraded_reasons.append("builds_missing")
+
+    expected_release = expected.get("release")
+    applies_to = article.get("applies_to")
+    if expected_release and applies_to not in (None, ""):
+        applies_releases = _support_article_releases_from_applies_to(applies_to)
+        if applies_releases is None:
+            degraded_reasons.append("applies_to_unparseable")
+        elif applies_releases and expected_release not in applies_releases:
+            mismatch_reasons.append("applies_to_mismatch")
+        elif not applies_releases:
+            mismatch_reasons.append("applies_to_mismatch")
+
+    if mismatch_reasons:
+        validation_status = "mismatch"
+        reasons = mismatch_reasons + degraded_reasons
+    elif status == "skipped":
+        validation_status = "skipped"
+        reasons = degraded_reasons or ["skipped"]
+    elif status in {"error", "unavailable", "not_fetched"}:
+        validation_status = "unavailable"
+        reasons = degraded_reasons or ["unavailable"]
+    elif degraded_reasons or status == "degraded":
+        validation_status = "degraded"
+        reasons = degraded_reasons or ["support_article_degraded"]
+    else:
+        validation_status = "ok"
+        reasons = []
+
+    validation["support_article_validation_status"] = validation_status
+    if reasons:
+        validation["support_article_validation_reasons"] = list(dict.fromkeys(reasons))[
+            :_SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT
+        ]
+    return {key: value for key, value in validation.items() if value not in (None, "", [], ())}
+
+
 def _records_for_support_article_enrichment(
     *,
     target: ReleasePolicyEntry | None,
@@ -1550,11 +1686,13 @@ def _support_article_enrichments(
         url = _support_article_record_url(record)
         if not url or url in enrichments:
             continue
-        enrichments[url] = _support_article_enrichment(
+        enrichment = _support_article_enrichment(
             url,
             fetcher=fetcher,
             timeout=timeout,
         )
+        enrichment.update(_support_article_validation_for_record(record, enrichment))
+        enrichments[url] = enrichment
     return enrichments
 
 
@@ -1564,9 +1702,15 @@ def _support_article_enrichment_event(
     target: ReleasePolicyEntry | None,
 ) -> dict[str, Any] | None:
     status = str(enrichment.get("status") or "")
-    if status == "not_fetched":
+    validation_status = str(enrichment.get("support_article_validation_status") or "")
+    validation_reasons = [
+        str(item)
+        for item in _as_sequence(enrichment.get("support_article_validation_reasons"))
+        if str(item or "").strip()
+    ][: _SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT]
+    if status == "not_fetched" and validation_status not in {"mismatch", "degraded", "unavailable", "skipped"}:
         return None
-    if status == "ok":
+    if status == "ok" and validation_status in {"", "ok"}:
         return None
     release = str(record.get("release") or "") or None
     build_family = record.get("build_family")
@@ -1577,12 +1721,20 @@ def _support_article_enrichment_event(
         and release == target.version
         and build_family == target.build_family
     )
-    kind = "support_article_enrichment_degraded" if status == "degraded" else "support_article_enrichment_unavailable"
+    if validation_status == "mismatch":
+        kind = "support_article_enrichment_mismatch"
+    elif validation_status == "degraded" or status == "degraded":
+        kind = "support_article_enrichment_degraded"
+    else:
+        kind = "support_article_enrichment_unavailable"
     url = str(enrichment.get("url") or record.get("support_url") or record.get("atom_feed_url") or "")
+    effective_status = validation_status or status or "unavailable"
     message = (
         f"Support article enrichment for {kb_article or 'unknown KB'} build {build or 'unknown'} "
-        f"is {status or 'unavailable'} at {url or 'unknown URL'}."
+        f"is {effective_status} at {url or 'unknown URL'}."
     )
+    if validation_reasons:
+        message += f" Validation reasons: {', '.join(validation_reasons)}."
     if enrichment.get("error"):
         message += f" {enrichment['error']}"
     event = {
@@ -1599,6 +1751,11 @@ def _support_article_enrichment_event(
         "support_article_status": status or "unavailable",
         "support_article_error": enrichment.get("error"),
         "support_article_reason": enrichment.get("reason"),
+        "support_article_validation_status": validation_status or None,
+        "support_article_validation_reasons": validation_reasons,
+        "support_article_expected_kb": enrichment.get("support_article_expected_kb"),
+        "support_article_expected_build": enrichment.get("support_article_expected_build"),
+        "support_article_expected_release": enrichment.get("support_article_expected_release"),
         "atom_entry_id": record.get("atom_entry_id"),
         "atom_support_article_id": record.get("atom_support_article_id"),
         "atom_feed_url": record.get("atom_feed_url"),
@@ -1740,9 +1897,13 @@ def _support_articles_with_security(
         if not url:
             continue
         article = dict(enriched.get(url) or {"url": url, "status": "not_fetched"})
+        article.update(_support_article_validation_for_record(record, article))
+        article_for_security = (
+            article if article.get("support_article_validation_status") == "ok" else None
+        )
         security = _security_result_for_record(
             record,
-            article,
+            article_for_security,
             msrc_payloads=msrc_payloads,
             msrc_statuses=msrc_statuses,
         )
@@ -1758,6 +1919,8 @@ def _support_articles_with_security(
             value = security.get(key)
             if value not in (None, ""):
                 article[key] = value
+        if article.get("support_article_validation_status") != "ok":
+            article.pop("security_signals", None)
         cleaned = {key: value for key, value in article.items() if value not in (None, "", [], ())}
         if "is_security" in article:
             cleaned["is_security"] = article["is_security"]
@@ -1917,9 +2080,16 @@ def _human_join(items: Sequence[str]) -> str:
 
 def _support_article_notice_summary(event: Mapping[str, Any], article: Mapping[str, Any]) -> str | None:
     status = str(article.get("status") or "")
+    validation_status = str(
+        event.get("support_article_validation_status")
+        or article.get("support_article_validation_status")
+        or ""
+    )
+    if validation_status in {"mismatch", "unavailable", "skipped"}:
+        return None
     if status not in {"ok", "degraded", "not_fetched"} and event.get("is_security") is not True:
         return None
-    kb_article = str(article.get("kb_article") or event.get("kb_article") or "unknown KB")
+    kb_article = str(event.get("kb_article") or article.get("kb_article") or "unknown KB")
     release = str(event.get("release") or "").strip()
     build = str(event.get("build") or "").strip()
     patch_type = "Security Patch" if event.get("is_security") is True else "Windows Update"
@@ -1938,6 +2108,17 @@ def _support_article_notice_summary(event: Mapping[str, Any], article: Mapping[s
     labels = [str(label) for label in article.get("improvement_labels") or ()][:4]
     if labels:
         summary += f"; public notes mention {_human_join(labels)}"
+    if validation_status == "degraded":
+        reasons = [
+            str(item)
+            for item in _as_sequence(
+                event.get("support_article_validation_reasons")
+                or article.get("support_article_validation_reasons")
+            )
+            if str(item or "").strip()
+        ][: _SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT]
+        if reasons:
+            summary += f"; support article validation degraded: {', '.join(reasons)}"
     return summary + "."
 
 
@@ -1947,6 +2128,15 @@ def _event_with_support_article(
 ) -> dict[str, Any]:
     if not isinstance(article, Mapping):
         return event
+    validation = _support_article_validation_for_record(event, article)
+    event.update(validation)
+    validation_status = str(validation.get("support_article_validation_status") or "")
+    expected = _support_article_expected_facts(event)
+    expected_kb = expected.get("kb")
+    expected_build = expected.get("build")
+    article_kb = _extract_kb(str(article.get("kb_article") or ""))
+    article_builds = tuple(str(item) for item in _as_sequence(article.get("builds")) if str(item or "").strip())
+    article_security_source = str(article.get("security_evidence_source") or "")
     for source_key, event_key in (
         ("status", "support_article_status"),
         ("url", "support_article_url"),
@@ -1971,12 +2161,43 @@ def _event_with_support_article(
         ("error", "support_article_error"),
     ):
         value = article.get(source_key)
+        if source_key in {
+            "title",
+            "release_date",
+            "known_issue_status",
+            "improvement_labels",
+        } and validation_status not in {"ok", "degraded"}:
+            continue
+        if source_key == "kb_article" and expected_kb and article_kb != expected_kb:
+            continue
+        if source_key == "builds" and expected_build and expected_build not in article_builds:
+            continue
+        if source_key == "security_signals" and validation_status != "ok":
+            continue
+        if (
+            source_key
+            in {
+                "is_security",
+                "security_evidence_source",
+                "cves",
+                "security_severities",
+                "security_products",
+            }
+            and validation_status != "ok"
+            and article_security_source != "msrc_cvrf"
+        ):
+            continue
         if source_key == "is_security" and source_key in article:
             event[event_key] = value
             continue
         if value not in (None, "", [], ()):
             event[event_key] = value
-    summary = _support_article_notice_summary(event, article)
+    if validation_status != "ok" and article_security_source != "msrc_cvrf":
+        event["is_security"] = None
+        event["security_evidence_source"] = "unavailable"
+    article_for_summary = dict(article)
+    article_for_summary.update(validation)
+    summary = _support_article_notice_summary(event, article_for_summary)
     if summary:
         event["notice_summary"] = summary
         event["user_message"] = summary
@@ -5259,6 +5480,9 @@ def _source_diagnostic_event_tags(event: Mapping[str, Any]) -> tuple[str, ...]:
         cves = event.get("cves")
         if isinstance(cves, Sequence) and not isinstance(cves, (str, bytes)) and cves:
             tags.append(f"CVEs {len(cves)}")
+    validation_status = str(event.get("support_article_validation_status") or "")
+    if validation_status in _SUPPORT_ARTICLE_VALIDATION_STATUSES and validation_status != "ok":
+        tags.append(f"Support article {validation_status}")
     build_family = event.get("build_family")
     if build_family not in (None, ""):
         tags.append(f"Family {build_family}")
@@ -5472,6 +5696,11 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
         "kb_update_bucket_confidence",
         "security_evidence_source",
         "support_article_url",
+        "support_article_validation_status",
+        "support_article_validation_reasons",
+        "support_article_expected_kb",
+        "support_article_expected_build",
+        "support_article_expected_release",
         "atom_entry_id",
         "atom_support_article_id",
     ):
@@ -5635,6 +5864,16 @@ def _source_diagnostic_text(value: Any, *, fallback: str = "") -> str:
         return fallback
     text = re.sub(r"\s+", " ", text).strip()
     return text or fallback
+
+
+def _source_diagnostic_attr_text(value: Any) -> str:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return ", ".join(
+            item
+            for item in (_source_diagnostic_text(part) for part in value)
+            if item
+        )
+    return _source_diagnostic_text(value)
 
 
 def _is_source_diagnostic_id(value: str) -> bool:
@@ -5880,10 +6119,15 @@ def _source_diagnostic_row_data_attrs(row: Mapping[str, Any]) -> str:
         ("kb_update_bucket_confidence", "data-kb-update-bucket-confidence"),
         ("security_evidence_source", "data-security-evidence-source"),
         ("support_article_url", "data-support-article-url"),
+        ("support_article_validation_status", "data-support-article-validation-status"),
+        ("support_article_validation_reasons", "data-support-article-validation-reasons"),
+        ("support_article_expected_kb", "data-support-article-expected-kb"),
+        ("support_article_expected_build", "data-support-article-expected-build"),
+        ("support_article_expected_release", "data-support-article-expected-release"),
         ("atom_entry_id", "data-atom-entry-id"),
         ("atom_support_article_id", "data-atom-support-article-id"),
     ):
-        value = _source_diagnostic_text(row.get(key))
+        value = _source_diagnostic_attr_text(row.get(key))
         if value:
             attrs.append(f' {attr}="{escape(value, quote=True)}"')
     is_security = row.get("is_security")
@@ -6805,11 +7049,17 @@ def render_policy_index(
         "              display_index:index+1\n"
         "            };\n"
         "            function addAttr(attr,key){var value=row.getAttribute(attr)||'';if(value){entry[key]=value;}}\n"
+        "            function addListAttr(attr,key){var value=row.getAttribute(attr)||'';if(value){entry[key]=value.split(',').map(function(item){return item.trim();}).filter(Boolean);}}\n"
         "            addAttr('data-user-message','user_message');\n"
         "            addAttr('data-kb-update-bucket','kb_update_bucket');\n"
         "            addAttr('data-kb-update-bucket-confidence','kb_update_bucket_confidence');\n"
         "            addAttr('data-security-evidence-source','security_evidence_source');\n"
         "            addAttr('data-support-article-url','support_article_url');\n"
+        "            addAttr('data-support-article-validation-status','support_article_validation_status');\n"
+        "            addListAttr('data-support-article-validation-reasons','support_article_validation_reasons');\n"
+        "            addAttr('data-support-article-expected-kb','support_article_expected_kb');\n"
+        "            addAttr('data-support-article-expected-build','support_article_expected_build');\n"
+        "            addAttr('data-support-article-expected-release','support_article_expected_release');\n"
         "            addAttr('data-atom-entry-id','atom_entry_id');\n"
         "            addAttr('data-atom-support-article-id','atom_support_article_id');\n"
         "            var isSecurity=row.getAttribute('data-is-security');\n"

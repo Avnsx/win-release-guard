@@ -71,14 +71,22 @@ informational until the signed baseline rules select it as
 
 Atom is discovery, not a KB resolver. If an Atom KB row lacks a usable Support
 article href, the generator records `atom_support_article_href_missing` evidence
-instead of fetching `/help/<KB>`. MSRC CVRF and explicit Support article wording
-provide higher-confidence security classification; Atom titles are kept as
-low-confidence update buckets only. Source Diagnostics and enrichment can
-explain observed builds and KB classification, but they do not override signed
-policy verdicts or required baseline semantics.
+instead of fetching `/help/<KB>`. MSRC CVRF and validated explicit Support
+article wording provide higher-confidence security classification; Atom titles
+are kept as low-confidence update buckets only. Source Diagnostics and
+enrichment can explain observed builds and KB classification, but they do not
+override signed policy verdicts or required baseline semantics.
 `source_drift_unresolved_after_24h` is reserved for warning/error drift that
 remains unresolved after the newest source timestamp, not for notice-only source
 lag.
+
+Support article enrichment is trusted only after the fetched article matches the
+Atom record's selected support URL, KB, expected build, and parseable
+applicability. Mismatched article KB/build/release evidence remains visible as
+Source Diagnostics validation metadata, but it is not used for administrator
+summaries, Support-derived security labels, or `Security patch` tags. If a
+partial article is compatible but incomplete, rows carry a compact degraded
+reason and stay grounded in Atom KB/build/release facts.
 
 Small info icons beside dashboard section labels are static links to the related
 Pages Wiki sections. Their hover/focus panels contain a compact explanation plus
@@ -104,8 +112,11 @@ ID, title, source, technical message, tags, optional static issue URL, visible
 counts, the active filter, and a neutral context note for technical triage. When
 present, it also adds fields such as `user_message`, `kb_update_bucket`,
 `is_security`, `security_evidence_source`, `support_article_url`,
-`atom_entry_id`, and `atom_support_article_id`. It does not fetch GitHub, write
-to GitHub, or embed credentials. The separate `Expand View`
+`support_article_validation_status`, `support_article_validation_reasons`,
+`support_article_expected_kb`, `support_article_expected_build`,
+`support_article_expected_release`, `atom_entry_id`, and
+`atom_support_article_id`. It does not fetch GitHub, write to GitHub, or embed
+credentials. The separate `Expand View`
 button toggles the expanded diagnostic layout: while expanded, the Programmatic
 API panel is hidden, the Source Diagnostics panel spans the dashboard space
 where that panel normally sits, and the event feed gains additional vertical
