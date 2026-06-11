@@ -3617,6 +3617,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
         "wiki/index.html",
         "wiki/Quick-Start/index.html",
         "wiki/changelog/index.html",
+        "wiki/changelog/v0.3.3/index.html",
         "wiki/changelog/v0.3.2/index.html",
     }
     actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()}
@@ -3695,10 +3696,12 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
 
     sitemap = (tmp_path / "sitemap.xml").read_text(encoding="utf-8")
     assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/" in sitemap
+    assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.3/" in sitemap
     assert "https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/" in sitemap
 
     changelog = (tmp_path / "wiki/changelog/index.html").read_text(encoding="utf-8")
-    changelog_version = (tmp_path / "wiki/changelog/v0.3.2/index.html").read_text(encoding="utf-8")
+    changelog_version = (tmp_path / "wiki/changelog/v0.3.3/index.html").read_text(encoding="utf-8")
+    changelog_version_032 = (tmp_path / "wiki/changelog/v0.3.2/index.html").read_text(encoding="utf-8")
     wiki_home = (tmp_path / "wiki/index.html").read_text(encoding="utf-8")
     wiki_quick_start = (tmp_path / "wiki/Quick-Start/index.html").read_text(encoding="utf-8")
     assert "<title>Changelog | Windows 11 Release Guard Wiki</title>" in changelog
@@ -3711,8 +3714,10 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "Windows 11 release compliance" in changelog
     assert "signed public policy feed" in changelog
     assert "RMM" in changelog
-    assert changelog.index("[Unreleased]") < changelog.index("v0.3.2 - 2026-06-10")
+    assert changelog.index("[Unreleased]") < changelog.index("v0.3.3 - 2026-06-11")
+    assert changelog.index("v0.3.3 - 2026-06-11") < changelog.index("v0.3.2 - 2026-06-10")
     assert changelog.index("v0.3.2 - 2026-06-10") < changelog.index("v0.3.1 - 2026-06-05")
+    assert "Version 0.3.3 is the corrective source-evidence hardening release" in changelog
     assert "Version 0.3.2 is the compatibility and documentation-alignment release" in changelog
     assert "Versions" in changelog
     assert ".changelog-content h2[id]" in changelog
@@ -3735,15 +3740,18 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert 'title="Open section on Pages changelog">Section</a>' in changelog
     assert 'title="Open version page">Version page</a>' in changelog
     assert 'title="Open GitHub release">GH release</a>' in changelog
-    assert 'href="#v0.3.2"' in changelog
-    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.2"' in changelog
+    assert 'href="#v0.3.3"' in changelog
+    assert 'href="https://github.com/Avnsx/win11_release_guard/releases/tag/v0.3.3"' in changelog
+    assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.3/"' in changelog
     assert 'href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/"' in changelog
-    assert "<title>Changelog v0.3.2 | Windows 11 Release Guard Wiki</title>" in changelog_version
+    assert "<title>Changelog v0.3.3 | Windows 11 Release Guard Wiki</title>" in changelog_version
     assert (
-        '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.2/">'
+        '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/changelog/v0.3.3/">'
         in changelog_version
     )
-    assert "extends declared and CI-tested Python support through 3.14" in changelog_version
+    assert "unique multi-build Atom diagnostic IDs" in changelog_version
+    assert "<title>Changelog v0.3.2 | Windows 11 Release Guard Wiki</title>" in changelog_version_032
+    assert "extends declared and CI-tested Python support through 3.14" in changelog_version_032
     assert "<title>Windows 11 Release Guard Wiki</title>" in wiki_home
     assert 'class="wiki-brand-icon"' in wiki_home
     assert '<a class="wiki-brand" href="https://avnsx.github.io/win11_release_guard/">' in wiki_home
@@ -3758,11 +3766,11 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "signed public JSON policy feed" in wiki_home
     assert '<meta property="og:site_name" content="Windows 11 Release Guard">' in wiki_home
     assert '<link rel="canonical" href="https://avnsx.github.io/win11_release_guard/wiki/Quick-Start/">' in wiki_quick_start
-    for generated_html in (wiki_home, wiki_quick_start, changelog, changelog_version):
+    for generated_html in (wiki_home, wiki_quick_start, changelog, changelog_version, changelog_version_032):
         _assert_local_fragment_links_resolve(generated_html)
         assert generated_html.count("<style>") == 1
         assert generated_html.count("</style>") == 1
-    for rendered_changelog in (changelog, changelog_version):
+    for rendered_changelog in (changelog, changelog_version, changelog_version_032):
         lower_changelog = rendered_changelog.lower()
         assert 'data-section-scrollspy="true"' in rendered_changelog
         assert ".wiki-sidebar a.is-active-section" in rendered_changelog

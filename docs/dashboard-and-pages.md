@@ -39,7 +39,7 @@ The Pages Wiki renderer is first-party Python inside `win11_release_guard.policy
 
 ## Static Pages Changelog
 
-`CHANGELOG.md` remains the manually maintained source of truth. The generator renders it into `/wiki/changelog/` and creates per-version pages such as `/wiki/changelog/v0.3.2/` for release sections with `vX.Y.Z` headers. `[Unreleased]` stays at the top when present; newer version sections are added above older version sections; historical sections remain visible for generated Pages changelog, release history, SEO, and auditability. Empty changelogs and h2 headings that do not match `[Unreleased]` or `vX.Y.Z` are kept in rendered HTML and surfaced as generator warnings; duplicate version headings receive duplicate-safe anchors.
+`CHANGELOG.md` remains the manually maintained source of truth. The generator renders it into `/wiki/changelog/` and creates per-version pages such as `/wiki/changelog/v0.3.3/` and historical `/wiki/changelog/v0.3.2/` for release sections with `vX.Y.Z` headers. `[Unreleased]` stays at the top when present; newer version sections are added above older version sections; historical sections remain visible for generated Pages changelog, release history, SEO, and auditability. Empty changelogs and h2 headings that do not match `[Unreleased]` or `vX.Y.Z` are kept in rendered HTML and surfaced as generator warnings; duplicate version headings receive duplicate-safe anchors.
 
 ## Indexing Metadata
 

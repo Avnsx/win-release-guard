@@ -57,7 +57,7 @@ The renderer surfaces broken internal links, missing `wiki/Home.md`, missing `_S
 
 ## Static Pages Changelog
 
-`CHANGELOG.md` remains manually maintained source of truth. The generator renders `/wiki/changelog/` plus per-version routes such as `/wiki/changelog/v0.3.2/`. `[Unreleased]` stays above release versions when present, newer versions are added above older versions, and historical sections remain visible for Pages changelog, release history, SEO, and auditability. Empty changelogs and non-standard h2 version headings stay visible in rendered HTML and are marked with generator warnings instead of being silently ignored.
+`CHANGELOG.md` remains manually maintained source of truth. The generator renders `/wiki/changelog/` plus per-version routes such as `/wiki/changelog/v0.3.3/` and historical `/wiki/changelog/v0.3.2/`. `[Unreleased]` stays above release versions when present, newer versions are added above older versions, and historical sections remain visible for Pages changelog, release history, SEO, and auditability. Empty changelogs and non-standard h2 version headings stay visible in rendered HTML and are marked with generator warnings instead of being silently ignored.
 
 ## Indexing Metadata
 

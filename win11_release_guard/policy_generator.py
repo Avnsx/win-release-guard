@@ -3269,6 +3269,7 @@ _WIKI_PAGE_ICON_BY_SLUG = {
     "anti-static-freshness": "freshness",
     "build-test-and-release": "build",
     "safe-exports-and-clean-archives": "archive",
+    "release-v0.3.3": "release",
     "release-v0.3.2": "release",
     "release-v0.3.1": "release",
     "tagged-release-lane": "tag",
