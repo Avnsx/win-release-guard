@@ -48,6 +48,9 @@ from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
 DEFAULT_MAX_SUPPORT_ARTICLE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_MSRC_CVRF_BYTES = 16 * 1024 * 1024
+MSRC_CVRF_CVE_LIMIT = 12
+MSRC_CVRF_SEVERITY_LIMIT = 8
+MSRC_CVRF_PRODUCT_LIMIT = 16
 MSRC_CVRF_API_BASE_URL = "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf"
 GITHUB_RELEASES_BASE_URL = "https://github.com/Avnsx/win11_release_guard/releases/tag"
 GITHUB_LICENSE_URL = "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"
@@ -714,11 +717,12 @@ def _safe_atom_support_article_url(value: str | None) -> str | None:
     if parsed.scheme.lower() != "https" or host != "support.microsoft.com":
         return None
     try:
-        if parsed.port is not None:
+        port = parsed.port
+        if port not in (None, 443):
             return None
     except ValueError:
         return None
-    if parsed.username or parsed.password or parsed.fragment:
+    if parsed.username or parsed.password:
         return None
     if not path.startswith("/") or path == "/" or len(path) > _MAX_SUPPORT_ARTICLE_PATH_LENGTH:
         return None
@@ -748,6 +752,7 @@ def _safe_atom_support_article_url(value: str | None) -> str | None:
 
 class _SupportArticleTextExtractor(HTMLParser):
     _SKIP_TAGS = {"script", "style", "noscript", "svg"}
+    _CAPTURE_BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "dt", "dd"}
     _BLOCK_TAGS = {
         "article",
         "aside",
@@ -781,6 +786,10 @@ class _SupportArticleTextExtractor(HTMLParser):
         self._title_parts: list[str] = []
         self._h1_parts: list[str] = []
         self._text_parts: list[str] = []
+        self._block_tag: str | None = None
+        self._block_depth = 0
+        self._block_parts: list[str] = []
+        self._blocks: list[tuple[str, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         normalized = tag.lower()
@@ -793,6 +802,13 @@ class _SupportArticleTextExtractor(HTMLParser):
             self._capture_title = True
         elif normalized == "h1":
             self._capture_h1 = True
+        if normalized in self._CAPTURE_BLOCK_TAGS:
+            if self._block_tag is None:
+                self._block_tag = normalized
+                self._block_depth = 0
+                self._block_parts = []
+            elif normalized == self._block_tag:
+                self._block_depth += 1
         if normalized in self._BLOCK_TAGS:
             self._text_parts.append(" ")
 
@@ -807,6 +823,15 @@ class _SupportArticleTextExtractor(HTMLParser):
             self._capture_title = False
         elif normalized == "h1":
             self._capture_h1 = False
+        if normalized == self._block_tag:
+            if self._block_depth:
+                self._block_depth -= 1
+            else:
+                block_text = _compact_article_text(" ".join(self._block_parts))
+                if block_text:
+                    self._blocks.append((normalized, block_text))
+                self._block_tag = None
+                self._block_parts = []
         if normalized in self._BLOCK_TAGS:
             self._text_parts.append(" ")
 
@@ -820,6 +845,8 @@ class _SupportArticleTextExtractor(HTMLParser):
             self._title_parts.append(text)
         if self._capture_h1:
             self._h1_parts.append(text)
+        if self._block_tag is not None:
+            self._block_parts.append(text)
         self._text_parts.append(text)
 
     @property
@@ -830,6 +857,10 @@ class _SupportArticleTextExtractor(HTMLParser):
     @property
     def text(self) -> str:
         return _compact_article_text(" ".join(self._text_parts))
+
+    @property
+    def blocks(self) -> tuple[tuple[str, str], ...]:
+        return tuple(self._blocks)
 
 
 _SECURITY_ARTICLE_PHRASES = (
@@ -878,9 +909,94 @@ _MONTH_ABBREVIATIONS = (
     "Dec",
 )
 
+_SUPPORT_ARTICLE_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+_SUPPORT_ARTICLE_APPLIES_STOP_HEADINGS = {
+    "highlights",
+    "improvements",
+    "known issues",
+    "known issues in this update",
+    "summary",
+    "how to get this update",
+    "prerequisites",
+    "release channel",
+    "file information",
+    "references",
+}
+_SUPPORT_ARTICLE_APPLIES_TO_MAX_LENGTH = 240
+
 
 def _compact_article_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _support_article_heading_key(value: str | None) -> str:
+    return _compact_article_text(value).strip(" :").lower()
+
+
+def _support_article_is_applies_to_heading(value: str | None) -> bool:
+    return _support_article_heading_key(value) == "applies to"
+
+
+def _support_article_is_applies_stop_heading(value: str | None) -> bool:
+    key = _support_article_heading_key(value)
+    return any(key == stop or key.startswith(f"{stop} ") for stop in _SUPPORT_ARTICLE_APPLIES_STOP_HEADINGS)
+
+
+def _clean_support_article_applies_to(value: str | None) -> str | None:
+    text = _compact_article_text(value).rstrip(" .;")
+    if not text:
+        return None
+    if len(text) <= _SUPPORT_ARTICLE_APPLIES_TO_MAX_LENGTH:
+        return text
+    truncated = text[:_SUPPORT_ARTICLE_APPLIES_TO_MAX_LENGTH].rsplit(" ", 1)[0].rstrip(" .;")
+    return truncated or text[:_SUPPORT_ARTICLE_APPLIES_TO_MAX_LENGTH].rstrip(" .;")
+
+
+def _bounded_support_article_applies_to_text(value: str | None) -> str | None:
+    text = _compact_article_text(value)
+    if not text:
+        return None
+    stop_pattern = "|".join(
+        re.escape(item)
+        for item in sorted(_SUPPORT_ARTICLE_APPLIES_STOP_HEADINGS, key=len, reverse=True)
+    )
+    match = re.search(rf"\b(?:{stop_pattern})\b", text, flags=re.IGNORECASE)
+    if match:
+        text = text[: match.start()]
+    return _clean_support_article_applies_to(text)
+
+
+def _extract_support_article_applies_to(
+    blocks: Sequence[tuple[str, str]],
+    searchable: str,
+) -> str | None:
+    for index, (tag, text) in enumerate(blocks):
+        if tag not in _SUPPORT_ARTICLE_HEADING_TAGS or not _support_article_is_applies_to_heading(text):
+            continue
+        values: list[str] = []
+        for next_tag, next_text in blocks[index + 1 :]:
+            if next_tag in _SUPPORT_ARTICLE_HEADING_TAGS:
+                break
+            if _support_article_is_applies_stop_heading(next_text):
+                break
+            compact = _bounded_support_article_applies_to_text(next_text)
+            if compact:
+                values.append(compact)
+        return _clean_support_article_applies_to("; ".join(values))
+
+    for tag, text in blocks:
+        if tag in _SUPPORT_ARTICLE_HEADING_TAGS:
+            continue
+        match = re.search(r"\bApplies to\s*:?\s*(.+)", text, flags=re.IGNORECASE)
+        if match:
+            applies_to = _bounded_support_article_applies_to_text(match.group(1))
+            if applies_to:
+                return applies_to
+
+    match = re.search(r"\bApplies to\s*:?\s*(.{1,480})", searchable, flags=re.IGNORECASE)
+    if match:
+        return _bounded_support_article_applies_to_text(match.group(1))
+    return None
 
 
 def _atom_title_bucket(title: Any) -> dict[str, str]:
@@ -923,14 +1039,10 @@ def _extract_support_article_facts(url: str, html_text: str) -> dict[str, Any]:
     match = re.search(rf"\b({month_pattern})\s+\d{{1,2}},\s+20\d{{2}}\b", searchable)
     if match:
         release_date = match.group(0)
-    applies_to = None
-    applies_match = re.search(
-        r"\bApplies to\s*:?\s*(.{1,240}?)(?:\b(?:Highlights|Improvements|Known issues|Summary|How to get this update)\b|$)",
-        searchable,
-        flags=re.IGNORECASE,
+    applies_to = _extract_support_article_applies_to(parser.blocks, searchable)
+    applies_to_releases = (
+        list(_support_article_releases_from_applies_to(applies_to) or ()) if applies_to else []
     )
-    if applies_match:
-        applies_to = _compact_article_text(applies_match.group(1)).rstrip(" .;")
     known_issue_status = None
     if "not currently aware of any issues" in lower_searchable:
         known_issue_status = "not_currently_aware"
@@ -942,6 +1054,7 @@ def _extract_support_article_facts(url: str, html_text: str) -> dict[str, Any]:
         "builds": list(_extract_builds(searchable)[:8]),
         "release_date": release_date,
         "applies_to": applies_to,
+        "applies_to_releases": applies_to_releases,
         "known_issue_status": known_issue_status,
         "improvement_labels": improvement_labels,
         "is_security": True if security_signals else False,
@@ -1161,6 +1274,7 @@ def _cvrf_kb_join(cvrf: Mapping[str, Any], kb_article: str | None) -> dict[str, 
     cves: list[str] = []
     severities: list[str] = []
     products: list[str] = []
+    matched_kb = False
     for vulnerability in _cvrf_vulnerabilities(cvrf):
         matching_remediations = []
         for remediation in _cvrf_remediations(vulnerability):
@@ -1169,6 +1283,7 @@ def _cvrf_kb_join(cvrf: Mapping[str, Any], kb_article: str | None) -> dict[str, 
                 matching_remediations.append(remediation)
         if not matching_remediations:
             continue
+        matched_kb = True
         cve = str(_dict_value(vulnerability, "CVE", "Cve", "cve") or "").strip()
         if not cve:
             match = re.search(r"\bCVE-\d{4}-\d{4,}\b", " ".join(_nested_text_values(vulnerability)))
@@ -1178,12 +1293,15 @@ def _cvrf_kb_join(cvrf: Mapping[str, Any], kb_article: str | None) -> dict[str, 
         severities.extend(_cvrf_vulnerability_severities(vulnerability))
         for remediation in matching_remediations:
             products.extend(_cvrf_product_ids(remediation))
+    deduped_cves = sorted(dict.fromkeys(cves))[:MSRC_CVRF_CVE_LIMIT]
+    deduped_severities = sorted(dict.fromkeys(severities))[:MSRC_CVRF_SEVERITY_LIMIT]
+    deduped_products = sorted(dict.fromkeys(products))[:MSRC_CVRF_PRODUCT_LIMIT]
     return {
-        "is_security": bool(cves or severities or products),
-        "cves": sorted(dict.fromkeys(cves)),
-        "severities": sorted(dict.fromkeys(severities)),
-        "products": sorted(dict.fromkeys(products)),
-        "evidence_source": "msrc_cvrf" if cves or severities or products else "none",
+        "is_security": matched_kb,
+        "cves": deduped_cves,
+        "severities": deduped_severities,
+        "products": deduped_products,
+        "evidence_source": "msrc_cvrf" if matched_kb else "none",
     }
 
 
@@ -1588,6 +1706,8 @@ def _support_article_record_url(record: Mapping[str, Any]) -> str | None:
 
 _SUPPORT_ARTICLE_VALIDATION_STATUSES = {"ok", "degraded", "mismatch", "unavailable", "skipped"}
 _SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT = 6
+_BASELINE_UPDATE_NOTICE_SCHEMA = "win11_release_guard.baseline_update_notice.v1"
+_BASELINE_UPDATE_NOTICE_WINDOW_DAYS = 21
 
 
 def _support_article_canonical_url(value: Any) -> str | None:
@@ -1612,6 +1732,254 @@ def _support_article_expected_facts(record: Mapping[str, Any]) -> dict[str, str]
     return expected
 
 
+def _datetime_utc_z(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _source_timestamp_utc_z(value: Any) -> str | None:
+    parsed = _parse_source_timestamp(str(value or "") or None)
+    return _datetime_utc_z(parsed) if parsed else None
+
+
+def _baseline_notice_source_url(row: ReleaseHistoryEntry) -> str | None:
+    metadata_url = row.metadata.get("atom_feed_url") if isinstance(row.metadata, Mapping) else None
+    return _safe_atom_support_article_url(str(metadata_url or "") or None)
+
+
+def _required_baseline_history_row(
+    target: ReleasePolicyEntry | None,
+    release_history: tuple[ReleaseHistoryEntry, ...],
+) -> ReleaseHistoryEntry | None:
+    if target is None or not target.required_baseline_build:
+        return None
+    candidates = [
+        row
+        for row in release_history
+        if row.release == target.version
+        and row.build_family == target.build_family
+        and row.build == target.required_baseline_build
+        and row.update_type_letter == "B"
+        and not row.preview
+        and not row.out_of_band
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_history_sort_key)
+
+
+def _baseline_update_notice_record(
+    target: ReleasePolicyEntry | None,
+    row: ReleaseHistoryEntry | None,
+) -> dict[str, Any] | None:
+    if (
+        target is None
+        or row is None
+        or not target.required_baseline_build
+        or target.required_baseline_build != target.latest_observed_build
+    ):
+        return None
+    source_url = _baseline_notice_source_url(row)
+    metadata = row.metadata if isinstance(row.metadata, Mapping) else {}
+    record = {
+        "release": row.release,
+        "build_family": row.build_family,
+        "build": row.build,
+        "kb_article": row.kb_article,
+        "update_type": row.update_type,
+        "update_type_letter": row.update_type_letter,
+        "quality_policy": target.quality_policy.value,
+        "availability_date": row.availability_date,
+        "support_url": source_url,
+        "atom_feed_url": source_url,
+        "source_url": source_url,
+        "published": metadata.get("atom_published"),
+        "updated": metadata.get("atom_updated"),
+        "atom_entry_id": metadata.get("atom_entry_id"),
+        "atom_support_article_id": metadata.get("atom_support_article_id"),
+        "diagnostic_id_hint": metadata.get("diagnostic_id_hint"),
+        "baseline_update_notice": True,
+        "preview": row.preview,
+        "out_of_band": row.out_of_band,
+    }
+    return {key: value for key, value in record.items() if value not in (None, "", [], ())}
+
+
+def _baseline_notice_visibility_window(
+    row: ReleaseHistoryEntry,
+) -> tuple[str, str, str, str] | None:
+    official_date = str(row.availability_date or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", official_date):
+        return None
+    visible_from = datetime.fromisoformat(official_date).replace(tzinfo=timezone.utc)
+    visible_until = visible_from + timedelta(days=_BASELINE_UPDATE_NOTICE_WINDOW_DAYS)
+    return official_date, "date", _datetime_utc_z(visible_from), _datetime_utc_z(visible_until)
+
+
+def _baseline_notice_security_evidence_status(
+    is_security: Any,
+    evidence_source: str,
+) -> str:
+    if is_security is True and evidence_source in {"msrc_cvrf", "support_article"}:
+        return "trusted"
+    if is_security is False:
+        return "not_security"
+    return "unknown"
+
+
+def _baseline_notice_summary(
+    *,
+    release: str,
+    build: str,
+    kb_article: str | None,
+    update_type: str | None,
+    official_release_date: str,
+    first_spotted_atom_published_utc: str | None,
+    is_security: Any,
+    security_evidence_status: str,
+) -> str:
+    baseline_kind = "security baseline" if is_security is True else "required baseline"
+    kb_text = kb_article or "The selected KB"
+    update_text = update_type or "B-release"
+    summary = (
+        f"New required baseline: Windows 11 {release} build {build} now matches the latest "
+        f"observed Microsoft build. {kb_text} is the {update_text} {baseline_kind}"
+    )
+    details: list[str] = []
+    if first_spotted_atom_published_utc:
+        details.append(f"Atom first spotted it at {first_spotted_atom_published_utc}")
+    details.append(f"Release Health lists the baseline date as {official_release_date}")
+    if is_security is not True:
+        details.append(f"security evidence is {security_evidence_status}")
+    return f"{summary}; {', and '.join(details)}."
+
+
+def _baseline_update_notice_payload(
+    *,
+    target: ReleasePolicyEntry | None,
+    row: ReleaseHistoryEntry | None,
+    baseline_record: Mapping[str, Any] | None,
+    support_articles: Mapping[str, Mapping[str, Any]],
+    generated_at_utc: str,
+) -> dict[str, Any] | None:
+    if target is None or row is None or baseline_record is None:
+        return None
+    visibility = _baseline_notice_visibility_window(row)
+    if visibility is None:
+        return None
+    official_release_date, official_release_precision, visible_from_utc, visible_until_utc = visibility
+    generated_dt = _parse_source_timestamp(generated_at_utc)
+    visible_from_dt = _parse_source_timestamp(visible_from_utc)
+    visible_until_dt = _parse_source_timestamp(visible_until_utc)
+    active = bool(
+        generated_dt
+        and visible_from_dt
+        and visible_until_dt
+        and visible_from_dt <= generated_dt < visible_until_dt
+    )
+    source_url = str(baseline_record.get("support_url") or baseline_record.get("atom_feed_url") or "") or None
+    article = support_articles.get(source_url or "") if source_url else None
+    if not isinstance(article, Mapping):
+        article = {}
+    is_security = article.get("is_security") if "is_security" in article else None
+    security_evidence_source = str(article.get("security_evidence_source") or "unavailable")
+    security_evidence_status = _baseline_notice_security_evidence_status(
+        is_security,
+        security_evidence_source,
+    )
+    validation_status = str(article.get("support_article_validation_status") or "unavailable")
+    validation_reasons = [
+        str(item)
+        for item in _as_sequence(article.get("support_article_validation_reasons"))
+        if str(item or "").strip()
+    ][: _SUPPORT_ARTICLE_VALIDATION_REASON_LIMIT]
+    cves = [
+        str(item)
+        for item in _as_sequence(article.get("cves"))
+        if str(item or "").strip()
+    ][:MSRC_CVRF_CVE_LIMIT]
+    first_spotted = _source_timestamp_utc_z(baseline_record.get("published"))
+    updated = _source_timestamp_utc_z(baseline_record.get("updated"))
+    release_health_revision = str(target.metadata.get("latest_revision_date") or "") or None
+    kb_article = _extract_kb(str(row.kb_article or ""))
+    summary = _baseline_notice_summary(
+        release=target.version,
+        build=row.build,
+        kb_article=kb_article,
+        update_type=row.update_type,
+        official_release_date=official_release_date,
+        first_spotted_atom_published_utc=first_spotted,
+        is_security=is_security,
+        security_evidence_status=security_evidence_status,
+    )
+    technical_summary = (
+        f"Release Health B-release row {row.update_type or 'unknown update type'} selected "
+        f"{target.version}/{target.build_family} build {row.build}; support validation "
+        f"{validation_status}; security evidence {security_evidence_status} via {security_evidence_source}."
+    )
+    payload: dict[str, Any] = {
+        "schema": _BASELINE_UPDATE_NOTICE_SCHEMA,
+        "active": active,
+        "release": target.version,
+        "build_family": target.build_family,
+        "build": row.build,
+        "kb_article": kb_article,
+        "update_type": row.update_type,
+        "quality_policy": target.quality_policy.value,
+        "summary": summary,
+        "technical_summary": technical_summary,
+        "source_url": source_url,
+        "atom_entry_id": baseline_record.get("atom_entry_id"),
+        "atom_support_article_id": baseline_record.get("atom_support_article_id"),
+        "first_spotted_atom_published_utc": first_spotted,
+        "support_article_updated_utc": updated,
+        "official_release_date": official_release_date,
+        "official_release_precision": official_release_precision,
+        "release_health_latest_revision_date": release_health_revision,
+        "visible_from_utc": visible_from_utc,
+        "visible_until_utc": visible_until_utc,
+        "policy_generated_at_utc": generated_at_utc,
+        "is_security": is_security,
+        "security_evidence_source": security_evidence_source,
+        "security_evidence_status": security_evidence_status,
+        "support_article_validation_status": validation_status,
+        "support_article_validation_reasons": validation_reasons,
+    }
+    if is_security is True:
+        payload["cve_count"] = len(cves)
+        if cves:
+            payload["cves"] = cves
+    return {key: value for key, value in payload.items() if value not in (None, "", [], {})}
+
+
+def _baseline_update_notice_event(notice: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(notice, Mapping) or notice.get("active") is not True:
+        return None
+    event: dict[str, Any] = {
+        "severity": "notice",
+        "kind": "required_baseline_matched_latest_observed",
+        "release": notice.get("release"),
+        "build_family": notice.get("build_family"),
+        "build": notice.get("build"),
+        "kb_article": notice.get("kb_article"),
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "message": notice.get("technical_summary") or notice.get("summary"),
+        "user_message": notice.get("summary"),
+        "source_url": notice.get("source_url"),
+        "atom_entry_id": notice.get("atom_entry_id"),
+        "atom_support_article_id": notice.get("atom_support_article_id"),
+        "published": notice.get("first_spotted_atom_published_utc"),
+        "updated": notice.get("support_article_updated_utc"),
+        "support_article_url": notice.get("source_url"),
+        "support_article_validation_status": notice.get("support_article_validation_status"),
+        "support_article_validation_reasons": notice.get("support_article_validation_reasons"),
+        "security_evidence_source": notice.get("security_evidence_source"),
+        "is_security": notice.get("is_security"),
+        "cves": notice.get("cves"),
+    }
+    return {key: value for key, value in event.items() if value not in (None, "", [], {})}
+
+
 def _support_article_releases_from_applies_to(value: Any) -> tuple[str, ...] | None:
     text = _compact_article_text(str(value or ""))
     if not text:
@@ -1634,26 +2002,38 @@ def _support_article_releases_from_applies_to(value: Any) -> tuple[str, ...] | N
     return ()
 
 
+def _normalized_support_article_release_values(value: Any) -> tuple[str, ...]:
+    releases: list[str] = []
+    for item in _as_sequence(value):
+        text = str(item or "").strip().upper()
+        match = re.fullmatch(r"(\d{2})\s*H\s*([12])", text, flags=re.IGNORECASE)
+        if match:
+            releases.append(f"{match.group(1).upper()}H{match.group(2)}")
+    return tuple(dict.fromkeys(releases))
+
+
 def _support_article_applies_to_compatibility(
     value: Any,
     *,
     release: str | None,
     build_family: Any = None,
+    applies_to_releases: Any = None,
 ) -> str:
     del build_family
     text = _compact_article_text(str(value or ""))
-    if not text:
+    explicit_releases = _normalized_support_article_release_values(applies_to_releases)
+    if not text and not explicit_releases:
         return "unknown"
     normalized = text.lower()
-    if "windows" not in normalized:
+    if text and "windows" not in normalized and not explicit_releases:
         return "unknown"
-    releases = _support_article_releases_from_applies_to(text)
+    if text and "windows 10" in normalized and "windows 11" not in normalized:
+        return "incompatible"
+    releases = explicit_releases or _support_article_releases_from_applies_to(text)
     expected_release = str(release or "").strip().upper()
     if expected_release and releases:
-        return "compatible" if expected_release in releases else "incompatible"
-    if "windows 10" in normalized and "windows 11" not in normalized:
-        return "incompatible"
-    if "windows 11" in normalized:
+        return "compatible" if expected_release in releases else "release_unmatched"
+    if text and "windows 11" in normalized:
         return "unknown"
     return "incompatible"
 
@@ -1714,9 +2094,12 @@ def _support_article_validation_for_record(
             applies_to,
             release=expected_release,
             build_family=record.get("build_family"),
+            applies_to_releases=article.get("applies_to_releases"),
         )
         if applies_compatibility == "incompatible":
             mismatch_reasons.append("applies_to_mismatch")
+        elif applies_compatibility == "release_unmatched":
+            degraded_reasons.append("applies_to_release_unmatched")
         elif applies_compatibility == "unknown" and status == "ok":
             degraded_reasons.append("applies_to_missing" if applies_to in (None, "") else "applies_to_unknown")
 
@@ -1750,6 +2133,7 @@ def _records_for_support_article_enrichment(
     atom_entries: tuple[AtomFeedEntry, ...],
     release_history: tuple[ReleaseHistoryEntry, ...],
     observed_record: Mapping[str, Any] | None,
+    baseline_update_record: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     if target is None:
         return ()
@@ -1758,6 +2142,10 @@ def _records_for_support_article_enrichment(
         url = _support_article_record_url(observed_record)
         if url:
             records_by_url[url] = dict(observed_record)
+    if baseline_update_record is not None:
+        url = _support_article_record_url(baseline_update_record)
+        if url and url not in records_by_url:
+            records_by_url[url] = dict(baseline_update_record)
 
     for record in _atom_newer_than_history(atom_entries, release_history):
         url = _support_article_record_url(record)
@@ -1872,6 +2260,8 @@ def _support_article_enrichment_events(
 ) -> tuple[dict[str, Any], ...]:
     events: list[dict[str, Any]] = []
     for record in records:
+        if record.get("baseline_update_notice"):
+            continue
         url = _support_article_record_url(record)
         if not url:
             continue
@@ -2247,6 +2637,7 @@ def _event_with_support_article(
         ("builds", "support_article_builds"),
         ("release_date", "support_article_release_date"),
         ("applies_to", "support_article_applies_to"),
+        ("applies_to_releases", "support_article_applies_to_releases"),
         ("known_issue_status", "support_article_known_issue_status"),
         ("improvement_labels", "support_article_improvement_labels"),
         ("is_security", "is_security"),
@@ -2464,6 +2855,7 @@ def _source_diagnostics(
     atom_entries: tuple[AtomFeedEntry, ...],
     support_articles: Mapping[str, Mapping[str, Any]] | None = None,
     msrc_cvrf_statuses: Mapping[str, Mapping[str, Any]] | None = None,
+    baseline_update_notice: Mapping[str, Any] | None = None,
     broad_target: ReleasePolicyEntry | None,
     parser_diagnostics: tuple[Mapping[str, Any], ...] = (),
     source_input_events: tuple[Mapping[str, Any], ...] = (),
@@ -2496,10 +2888,12 @@ def _source_diagnostics(
     effective_support_articles = support_articles or {}
     effective_msrc_cvrf_statuses = msrc_cvrf_statuses or {}
     current_stale = _current_version_latest_older_than_history(current_versions, release_history)
+    baseline_notice_event = _baseline_update_notice_event(baseline_update_notice)
     events = _dedupe_source_events(
         [
             *(dict(item) for item in parser_diagnostics),
             *(dict(item) for item in source_input_events),
+            *(dict(item) for item in ((baseline_notice_event,) if baseline_notice_event else ())),
             *(_atom_newer_event(item, broad_target, support_articles=effective_support_articles) for item in atom_newer),
             *(_current_versions_lag_event(item, broad_target) for item in current_stale),
         ]
@@ -2566,7 +2960,7 @@ def _source_diagnostics(
     warnings = list(dict.fromkeys(_source_diagnostic_messages(events, minimum="warning")))
     notices = list(dict.fromkeys(_source_diagnostic_notices(events)))
 
-    return {
+    diagnostics: dict[str, Any] = {
         "release_health_html": {
             "source_url": release_health_status.get("url"),
             "fetched_at_utc": release_health_status.get("fetched_at_utc"),
@@ -2606,6 +3000,9 @@ def _source_diagnostics(
         "notices": notices,
         "warnings": warnings,
     }
+    if baseline_update_notice is not None:
+        diagnostics["baseline_update_notice"] = dict(baseline_update_notice)
+    return diagnostics
 
 
 def _known_notes(policy: ReleasePolicy) -> tuple[dict[str, Any], ...]:
@@ -2727,11 +3124,14 @@ def _policy_with_enrichment(
     else:
         observed_record = None
 
+    baseline_update_row = _required_baseline_history_row(target, release_history)
+    baseline_update_record = _baseline_update_notice_record(target, baseline_update_row)
     support_article_records = _records_for_support_article_enrichment(
         target=target,
         atom_entries=atom_entries,
         release_history=release_history,
         observed_record=observed_record,
+        baseline_update_record=baseline_update_record,
     )
     support_articles = _support_article_enrichments(
         support_article_records,
@@ -2754,6 +3154,13 @@ def _policy_with_enrichment(
         *_support_article_enrichment_events(support_article_records, support_articles, target),
         *_msrc_cvrf_events(support_article_records, msrc_cvrf_statuses, target),
     )
+    baseline_update_notice = _baseline_update_notice_payload(
+        target=target,
+        row=baseline_update_row,
+        baseline_record=baseline_update_record,
+        support_articles=support_articles,
+        generated_at_utc=generated_at_utc,
+    )
 
     metadata = dict(base_policy.metadata)
     metadata["signature_status"] = signature_status
@@ -2771,6 +3178,7 @@ def _policy_with_enrichment(
         atom_entries=atom_entries,
         support_articles=support_articles,
         msrc_cvrf_statuses=msrc_cvrf_statuses,
+        baseline_update_notice=baseline_update_notice,
         broad_target=target,
         parser_diagnostics=parser_diagnostics,
         source_input_events=source_input_events,
@@ -5804,6 +6212,7 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
         "support_article_expected_kb",
         "support_article_expected_build",
         "support_article_expected_release",
+        "support_article_applies_to_releases",
         "atom_entry_id",
         "atom_support_article_id",
     ):
@@ -6227,6 +6636,7 @@ def _source_diagnostic_row_data_attrs(row: Mapping[str, Any]) -> str:
         ("support_article_expected_kb", "data-support-article-expected-kb"),
         ("support_article_expected_build", "data-support-article-expected-build"),
         ("support_article_expected_release", "data-support-article-expected-release"),
+        ("support_article_applies_to_releases", "data-support-article-applies-to-releases"),
         ("atom_entry_id", "data-atom-entry-id"),
         ("atom_support_article_id", "data-atom-support-article-id"),
     ):
@@ -6456,6 +6866,105 @@ def _render_source_diagnostics_panel(
         "<div id=\"source-diagnostics-empty\" class=\"diag-filter-empty\" hidden>"
         "This category currently contains no entries.</div>"
         f"{details}</div>{_render_source_tiles(policy, generated_at_utc=generated_at_utc)}</section>\n"
+    )
+
+
+def _baseline_update_notice_for_policy(policy: ReleasePolicy) -> Mapping[str, Any] | None:
+    source_diagnostics = _source_diagnostics_for_policy(policy)
+    notice = source_diagnostics.get("baseline_update_notice")
+    if isinstance(notice, Mapping) and notice.get("active") is True:
+        return notice
+    return None
+
+
+def _baseline_update_security_label(notice: Mapping[str, Any]) -> str:
+    source = str(notice.get("security_evidence_source") or "").strip().lower()
+    if notice.get("is_security") is True:
+        if source == "msrc_cvrf":
+            return "Security confirmed by MSRC"
+        if source == "support_article":
+            return "Security confirmed by validated Support article"
+        return "Security confirmed"
+    if notice.get("is_security") is False:
+        return "Non-security according to trusted evidence"
+    return "Security evidence unknown"
+
+
+def _baseline_update_chip_html(label: str, value: Any, *, extra_class: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    class_attr = "baseline-chip" + (f" {extra_class}" if extra_class else "")
+    content = f"{label} {text}".strip()
+    return f'<span class="{escape(class_attr, quote=True)}">{escape(content)}</span>'
+
+
+def _render_baseline_update_notice(policy: ReleasePolicy) -> str:
+    notice = _baseline_update_notice_for_policy(policy)
+    if notice is None:
+        return ""
+    release = str(notice.get("release") or "unknown").strip()
+    build_family = str(notice.get("build_family") or "unknown").strip()
+    build = str(notice.get("build") or "unknown").strip()
+    kb_article = str(notice.get("kb_article") or "").strip()
+    update_type = str(notice.get("update_type") or "").strip()
+    summary_bits = [
+        (
+            f"Windows 11 {release} build {build} now matches both latest observed Microsoft evidence "
+            "and the signed required baseline."
+        )
+    ]
+    if kb_article and update_type:
+        summary_bits.append(f"{kb_article} is the {update_type} baseline source.")
+    elif kb_article:
+        summary_bits.append(f"{kb_article} is the baseline source.")
+    summary = _source_diagnostic_text(" ".join(summary_bits))
+    official_date = str(notice.get("official_release_date") or "").strip()
+    precision = str(notice.get("official_release_precision") or "").strip().lower()
+    official_label = ""
+    if official_date:
+        precision_text = " (Release Health date-only)" if precision == "date" else ""
+        official_label = f"{official_date}{precision_text}"
+    visible_until = str(notice.get("visible_until_utc") or "").strip()
+    source_url = _safe_atom_support_article_url(str(notice.get("source_url") or "") or None)
+    data_attrs = [
+        f'data-baseline-notice-build="{escape(build, quote=True)}"',
+        f'data-baseline-notice-kb="{escape(kb_article, quote=True)}"',
+        f'data-baseline-notice-visible-until="{escape(visible_until, quote=True)}"',
+    ]
+    if source_url:
+        data_attrs.append(f'data-baseline-notice-source-url="{escape(source_url, quote=True)}"')
+    chips = [
+        _baseline_update_chip_html("Release", release),
+        _baseline_update_chip_html("Family", build_family),
+        _baseline_update_chip_html("Build", build),
+        _baseline_update_chip_html("", kb_article),
+        _baseline_update_chip_html("Update", update_type),
+        _baseline_update_chip_html("", _baseline_update_security_label(notice), extra_class="security"),
+        _baseline_update_chip_html("Atom first spotted", notice.get("first_spotted_atom_published_utc")),
+        _baseline_update_chip_html("Support updated", notice.get("support_article_updated_utc")),
+        _baseline_update_chip_html("Official baseline date:", official_label, extra_class="official-date"),
+        _baseline_update_chip_html("Visible until", visible_until, extra_class="expiry"),
+    ]
+    source_link = (
+        f'<a class="baseline-chip baseline-source-link" href="{escape(source_url, quote=True)}" '
+        'rel="noopener noreferrer">Microsoft Support source</a>'
+        if source_url
+        else ""
+    )
+    chip_html = "".join(item for item in (*chips, source_link) if item)
+    return (
+        f'      <section class="panel span-12 baseline-update-notice" role="status" aria-live="polite" '
+        f'data-baseline-notice="active" {" ".join(data_attrs)}>'
+        f'<div class="baseline-notice-icon" aria-hidden="true">{_ui_icon_html("shield-check", class_name="ui-icon")}</div>'
+        '<div class="baseline-notice-body">'
+        '<div class="baseline-notice-head">'
+        '<span class="baseline-notice-pill">Notice</span>'
+        f'<h2 class="baseline-title">New required baseline: {escape(release)} build {escape(build)}</h2>'
+        '</div>'
+        f'<p>{escape(summary)}</p>'
+        f'<div class="baseline-chip-list" aria-label="Baseline notice metadata">{chip_html}</div>'
+        '</div></section>'
     )
 
 
@@ -6802,13 +7311,19 @@ def render_policy_index(
         **freshness_thresholds(generated_at_utc),
         "freshness_policy": freshness_policy_metadata(),
     }
+    baseline_notice_block = _render_baseline_update_notice(policy)
     warning_items = "\n".join(f"<li>{escape(warning)}</li>" for warning in policy.validation_warnings)
     warning_block = (
         f"      <section class=\"panel span-12 dashboard-warning-panel\"><h2>Warnings</h2><ul class=\"warnings\">{warning_items}</ul></section>"
         if warning_items
         else ""
     )
-    dashboard_grid_class = "grid dashboard-grid" + (" has-validation-warnings" if warning_items else "")
+    dashboard_grid_classes = ["grid", "dashboard-grid"]
+    if baseline_notice_block:
+        dashboard_grid_classes.append("has-baseline-notice")
+    if warning_items:
+        dashboard_grid_classes.append("has-validation-warnings")
+    dashboard_grid_class = " ".join(dashboard_grid_classes)
     target_release = target.version if target else "unknown"
     target_family = str(target.build_family) if target else "unknown"
     target_latest_observed = target.latest_observed_build if target else None
@@ -6843,6 +7358,7 @@ def render_policy_index(
         "    .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.kpi-grid{gap:20px;margin-bottom:22px}.dashboard-grid{align-items:stretch}.panel{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(248,252,255,.9));border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0;box-shadow:0 10px 30px rgba(31,79,143,.08)}.panel *{min-width:0}.panel p,.panel span,.panel dd,.panel strong{overflow-wrap:anywhere}.panel.status-card{display:grid;gap:18px;padding:22px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(247,252,255,.9));border-color:#c6d9ee;box-shadow:0 18px 38px rgba(31,79,143,.12),inset 0 1px 0 rgba(255,255,255,.88)}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:span 12}\n"
         "    .ui-icon{display:block;flex:0 0 auto}.kpi-card{position:relative;display:grid;align-content:start;gap:14px;min-height:188px;padding:24px;border-color:rgba(167,204,242,.82);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(246,251,255,.78));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.92);overflow:visible}.kpi-card:before{content:'';position:absolute;inset:0 0 auto;height:1px;background:rgba(255,255,255,.96)}.kpi-card>*{position:relative}.kpi-head{display:flex;align-items:center;gap:14px;margin-bottom:8px}.kpi-head h2{margin:0;color:#4b5d78;font-size:13px;font-weight:740;line-height:1.15;text-transform:uppercase;letter-spacing:0}.icon-bubble{display:inline-grid;place-items:center;width:54px;height:54px;border:1px solid #c9e3ff;border-radius:999px;background:linear-gradient(135deg,#e5f3ff,#f7fbff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 10px 22px rgba(31,79,143,.1)}.kpi-icon{width:27px;height:27px}.kpi-target .icon-bubble{color:#005bd3;background:linear-gradient(135deg,#dff0ff,#f8fcff)}.kpi-family .icon-bubble,.kpi-observed .icon-bubble,.kpi-baseline .icon-bubble{color:#0b69d1}.status-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:650;line-height:1;color:var(--unknown);background:var(--unknown-soft);white-space:nowrap}.kpi-head .status-pill{margin-left:auto}.status-pill.current{color:var(--ok);border-color:#a9ddb7;background:linear-gradient(180deg,var(--ok-soft),#f7fff8)}\n"
         "    h2{font-size:12px;font-weight:720;text-transform:uppercase;letter-spacing:0;color:var(--muted);margin:0 0 12px}.metric{font-size:31px;font-weight:680;line-height:1;color:#102a43}.kpi-card .metric{font-size:54px;font-weight:720;letter-spacing:0;color:#071632}.metric.blue,.kpi-card .metric.blue{color:#005bd3}.label{display:block;color:var(--muted);font-size:13px;margin-top:6px}.kpi-card .label{font-size:17px;color:#50627e;margin-top:0;line-height:1.25}.mono{font-family:Consolas,Menlo,monospace;color:var(--code);overflow-wrap:anywhere;word-break:break-word}.panel-heading-icon{width:16px;height:16px;color:var(--blue-strong)}.kpi-head h2,.freshness-head h2,.source-diagnostics>.panel-head h2,.signature-head h2,.programmatic-api>h2{display:inline-flex;align-items:center;gap:6px;min-width:0}.dashboard-info-link{position:relative;z-index:4;display:inline-grid;place-items:center;width:17px;height:17px;flex:0 0 auto;border:1px solid rgba(142,188,236,.95);border-radius:999px;background:linear-gradient(180deg,#fff,#eaf5ff);box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 5px 12px rgba(31,79,143,.1);color:#0067c0;text-decoration:none;line-height:0}.dashboard-info-link:hover,.dashboard-info-link:focus-visible{border-color:#7bb8f0;background:#fff;text-decoration:none;color:#005bd3}.dashboard-info-link:focus-visible{outline:3px solid rgba(0,120,212,.26);outline-offset:2px}.dashboard-info-icon{width:11px;height:11px;stroke-width:2.2}.dashboard-info-link:after{content:attr(data-help);position:absolute;left:50%;top:calc(100% + 9px);width:max-content;max-width:min(280px,70vw);white-space:normal;text-align:left;border:1px solid rgba(174,203,235,.96);border-radius:10px;background:rgba(255,255,255,.98);box-shadow:0 14px 30px rgba(31,79,143,.16),inset 0 1px 0 rgba(255,255,255,.92);padding:9px 10px;color:#233152;font-size:12px;font-weight:600;line-height:1.35;text-transform:none;letter-spacing:0;opacity:0;pointer-events:none;transform:translate(-50%,-2px);transition:opacity .14s ease,transform .14s ease}.dashboard-info-link:before{content:'';position:absolute;left:50%;top:calc(100% + 4px);width:9px;height:9px;border-left:1px solid rgba(174,203,235,.96);border-top:1px solid rgba(174,203,235,.96);background:#fff;opacity:0;pointer-events:none;transform:translate(-50%,-2px) rotate(45deg);transition:opacity .14s ease,transform .14s ease}.dashboard-info-link:hover:after,.dashboard-info-link:focus-visible:after,.dashboard-info-link:hover:before,.dashboard-info-link:focus-visible:before{opacity:1;transform:translate(-50%,0) rotate(0deg)}.dashboard-info-link:hover:before,.dashboard-info-link:focus-visible:before{transform:translate(-50%,0) rotate(45deg)}\n"
+        "    .baseline-update-notice{position:relative;overflow:hidden;display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:start;border-color:rgba(88,166,255,.82);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(232,243,255,.94) 58%,rgba(217,236,255,.9));box-shadow:0 20px 42px rgba(0,91,216,.14),inset 0 1px 0 rgba(255,255,255,.94);padding:18px 20px}.baseline-update-notice:before{content:'';position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,#0078d4,#5ab7ff,#cfe9ff)}.baseline-notice-icon{position:relative;display:grid;place-items:center;width:48px;height:48px;border:1px solid #9cccf6;border-radius:16px;background:linear-gradient(180deg,#fff,#e7f3ff);color:#005bd3;box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 10px 22px rgba(0,91,216,.12)}.baseline-notice-icon .ui-icon{width:27px;height:27px}.baseline-notice-body{position:relative;display:grid;gap:10px}.baseline-notice-head{display:flex;flex-wrap:wrap;align-items:center;gap:9px 12px}.baseline-notice-pill{display:inline-flex;align-items:center;border:1px solid #9cccf6;border-radius:999px;background:linear-gradient(180deg,#fff,#eaf5ff);padding:4px 10px;color:#005bd3;font-size:12px;font-weight:760;line-height:1}.baseline-title{margin:0;color:#071632;font-size:21px;font-weight:760;line-height:1.2;text-transform:none}.baseline-update-notice p{margin:0;color:#263858;font-size:14px;line-height:1.42}.baseline-chip-list{display:flex;flex-wrap:wrap;gap:7px}.baseline-chip{display:inline-flex;align-items:center;max-width:100%;border:1px solid #bfdbfe;border-radius:999px;background:rgba(255,255,255,.78);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:5px 9px;color:#16427c;font-size:12px;font-weight:650;line-height:1.2;text-decoration:none}.baseline-chip.security{border-color:#93c5fd;background:linear-gradient(180deg,#fff,#e8f3ff);color:#005bd3}.baseline-chip.official-date,.baseline-chip.expiry{color:#334155}.baseline-source-link:hover,.baseline-source-link:focus-visible{border-color:#7bb8f0;background:#fff;color:#005bd3;text-decoration:none}.baseline-source-link:focus-visible{outline:3px solid rgba(0,120,212,.26);outline-offset:2px}.baseline-update-notice[hidden]{display:none!important}\n"
         "    .dashboard-info-link:after{display:none}.dashboard-info-tooltip{position:absolute;left:50%;top:calc(100% + 9px);width:max-content;max-width:min(310px,70vw);white-space:normal;text-align:left;border:1px solid rgba(174,203,235,.96);border-radius:10px;background:rgba(255,255,255,.98);box-shadow:0 14px 30px rgba(31,79,143,.16),inset 0 1px 0 rgba(255,255,255,.92);padding:9px 10px;color:#233152;font-size:12px;font-weight:600;line-height:1.35;text-transform:none;letter-spacing:0;opacity:0;pointer-events:none;transform:translate(-50%,-2px);transition:opacity .14s ease,transform .14s ease}.dashboard-info-tooltip span{display:block}.dashboard-info-tooltip-action{margin-top:7px;color:#0067c0;font-weight:760}.dashboard-info-link:hover .dashboard-info-tooltip,.dashboard-info-link:focus-visible .dashboard-info-tooltip{opacity:1;transform:translate(-50%,0)}\n"
         "    .kv{display:grid;grid-template-columns:minmax(126px,160px) 1fr;gap:9px 14px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:600;overflow-wrap:anywhere}.kv dd span{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-weight:500}.compact-kv{grid-template-columns:1fr;gap:4px}.compact-kv dt{font-size:12px}.compact-kv dd{margin:0 0 8px}.metadata{border-top:1px solid var(--line);padding-top:12px}.refresh{border-left:3px solid var(--blue);background:linear-gradient(90deg,var(--blue-soft),rgba(255,255,255,0));padding-left:12px}.time-copy{display:inline-flex!important;align-items:center;gap:6px;max-width:100%;min-width:0;color:inherit;font-size:inherit}.time-copy time{overflow-wrap:anywhere}.time-copy.unavailable{color:var(--muted);font-size:13px}.epoch-copy{display:inline-grid;place-items:center;width:24px;height:24px;min-width:24px;border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,.86);color:#64748b;cursor:pointer;padding:0;box-shadow:0 1px 1px rgba(15,23,42,.04)}.epoch-copy:hover{border-color:#9cccf6;color:var(--blue-strong);background:#fff}.epoch-copy:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.epoch-copy[data-copy-state=\"copied\"]{border-color:#b9e6c4;color:var(--ok);background:var(--ok-soft)}.epoch-copy[data-copy-state=\"failed\"]{border-color:#f6b7ad;color:var(--err);background:var(--err-soft)}.epoch-copy svg{width:14px;height:14px;display:block;pointer-events:none}\n"
         "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.freshness-head h2{margin:0;color:#0f1f3d}.freshness-state{display:inline-flex;align-items:center;border-radius:999px;border:1px solid var(--line);padding:6px 12px;font-size:13px;font-weight:650;line-height:1;color:var(--unknown);background:var(--unknown-soft);white-space:nowrap}.freshness-state.current{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.freshness-state.refresh-due{color:var(--warn);background:var(--warn-soft);border-color:#f6d493}.freshness-state.stale{color:var(--err);background:var(--err-soft);border-color:#f6b7ad}.freshness-state.unknown{color:var(--unknown);background:var(--unknown-soft);border-color:var(--line)}.freshness-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(176px,190px);gap:14px;align-items:center}.freshness-primary{display:grid;gap:16px}.freshness-hero{display:flex;align-items:center;gap:16px}.freshness-ring{display:inline-grid;place-items:center;width:120px;height:120px;flex:0 0 auto;border:3px solid var(--ok);border-radius:999px;background:radial-gradient(circle,#f8fff9 0,#e9f8ec 72%,#def4e4 100%);color:var(--ok);box-shadow:0 18px 34px rgba(16,124,16,.18),0 0 0 14px rgba(16,124,16,.08),inset 0 1px 0 rgba(255,255,255,.9)}.freshness-ring.refresh-due{border-color:var(--warn);color:var(--warn);background:linear-gradient(180deg,var(--warn-soft),#fffaf0);box-shadow:0 18px 34px rgba(180,83,9,.14),0 0 0 14px rgba(180,83,9,.08)}.freshness-ring.stale{border-color:var(--err);color:var(--err);background:linear-gradient(180deg,var(--err-soft),#fff8f6);box-shadow:0 18px 34px rgba(180,35,24,.14),0 0 0 14px rgba(180,35,24,.08)}.freshness-ring.unknown{border-color:#b8c5d6;color:var(--unknown);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff);box-shadow:0 18px 34px rgba(100,116,139,.12),0 0 0 14px rgba(100,116,139,.06)}.freshness-ring-icon{width:64px;height:64px}.freshness-metric{font-size:46px;font-weight:720;line-height:1;color:#071632;letter-spacing:0;white-space:nowrap}.freshness-detail{color:#334155;font-size:14px}.freshness-callout{display:flex;align-items:center;gap:10px;margin:0;border:1px solid #cfe5d4;border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(247,255,249,.84));padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86)}.freshness-callout.refresh-due{border-color:#f6d493;background:linear-gradient(180deg,var(--warn-soft),#fffaf0)}.freshness-callout.stale{border-color:#f6b7ad;background:linear-gradient(180deg,var(--err-soft),#fff8f6)}.freshness-callout.unknown{border-color:var(--line);background:linear-gradient(180deg,var(--unknown-soft),#fbfdff)}.freshness-callout-icon{width:22px;height:22px;flex:0 0 auto;color:var(--ok)}.freshness-callout.refresh-due .freshness-callout-icon{color:var(--warn)}.freshness-callout.stale .freshness-callout-icon{color:var(--err)}.freshness-callout.unknown .freshness-callout-icon{color:var(--unknown)}.thresholds{display:grid;grid-template-columns:1fr;gap:10px}.threshold-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#f8fbff,#f2f7ff);padding:11px}.threshold-icon{display:inline-grid;place-items:center;width:34px;height:34px;border:1px solid #c9e3ff;border-radius:10px;background:#fff;color:var(--blue-strong)}.threshold-icon svg{width:20px;height:20px}.thresholds strong{display:block;font-size:17px;font-weight:640}.thresholds span{display:block;color:var(--muted);font-size:12px}.freshness-meta-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);padding-top:16px}.freshness-meta-item{display:flex;align-items:center;justify-content:center;gap:10px;color:#24344f;font-size:15px;line-height:1.2;min-width:0;white-space:nowrap}.freshness-meta-item+.freshness-meta-item{border-left:1px solid var(--line)}.freshness-meta-icon{width:25px;height:25px;flex:0 0 auto;color:#005bd3}.freshness-metadata{border:0;padding-top:0}.freshness-metadata dl{margin:0}.freshness-metadata dt{font-size:12px}.freshness-metadata dd{font-size:13px}\n"
@@ -6852,7 +7368,7 @@ def render_policy_index(
         "    .diag-row{position:relative}.diag-ticket-link{position:absolute;right:10px;top:10px;z-index:2;display:inline-flex;align-items:center;gap:5px;max-width:calc(100% - 20px);border:1px solid rgba(197,216,236,.95);border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.12),inset 0 1px 0 rgba(255,255,255,.9);padding:4px 8px;color:#075985;font-size:11px;font-weight:700;line-height:1;text-decoration:none;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}.diag-ticket-link:hover{text-decoration:none}.diag-row:hover .diag-ticket-link,.diag-row:focus-within .diag-ticket-link{opacity:1;pointer-events:auto;transform:translateY(0)}.diag-ticket-link-icon{width:12px;height:12px}.diag-ticket-link .github-icon{width:12px;height:12px}\n"
         "    .programmatic-api{display:flex;flex-direction:column;justify-content:flex-start}.api-endpoints{display:grid;gap:9px}.api-endpoint-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;background:linear-gradient(180deg,#f8fafc,#f3f6fa);padding:10px 11px;color:inherit;text-decoration:none}.api-row-icon{width:18px;height:18px;color:var(--blue-strong)}.api-endpoint-row:hover{border-color:#b8c9dd;background:#ffffff;text-decoration:none}.api-endpoint-row:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:3px}.api-endpoint-row strong{display:block;color:#172033;font-size:13px;font-weight:640;line-height:1.25}.api-endpoint-row em{display:block;margin-top:2px;color:var(--muted);font-size:12px;font-style:italic;font-weight:500;line-height:1.35}.api-endpoint-row code{font-family:Consolas,Menlo,monospace;font-size:12px;color:var(--code);white-space:normal;text-align:right;overflow-wrap:anywhere}.api-note{margin-bottom:12px}.warnings{margin:0;padding-left:18px;color:var(--warn)}footer{position:relative;display:grid;gap:8px;justify-items:center;margin-top:34px;padding:20px 12px 4px;color:var(--muted);font-size:12px;line-height:1.45;text-align:center;background:linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.42));border-radius:14px 14px 0 0}footer:before{content:'';width:min(640px,100%);height:1px;margin-bottom:8px;background:linear-gradient(90deg,rgba(194,213,235,0),rgba(148,163,184,.55),rgba(194,213,235,0));box-shadow:0 -12px 28px rgba(31,79,143,.08)}.footer-note{max-width:900px;margin:0}.footer-disclaimer,.footer-owner{color:#64748b}.footer-source{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 6px;margin-top:2px}.footer-github{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.82);padding:2px 8px;color:#075985;font-weight:600;white-space:nowrap;box-shadow:0 3px 10px rgba(31,79,143,.06)}.footer-license-basic{color:#075985;font-weight:600;text-decoration:none}.footer-license-basic:hover,.footer-license-basic:focus-visible{text-decoration:underline}.github-icon{width:13px;height:13px;display:block;flex:0 0 auto}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}.signature-kv div:hover{transform:none!important}}\n"
         "    @media(max-width:1400px){main{margin:28px auto;padding:28px;border-radius:28px}.brand{gap:24px}.winmark{width:104px;height:104px;gap:7px}.title-line h1{font-size:48px}.subtitle{font-size:19px}.eyebrow{font-size:16px}.title-version-link{padding:11px 16px;font-size:14px}.kpi-card .metric{font-size:40px}.freshness-layout{grid-template-columns:1fr}.freshness-ring{width:104px;height:104px}.freshness-ring-icon{width:56px;height:56px}.freshness-metric{font-size:40px}.thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
-        "    @media(min-width:901px){#live-freshness-panel{grid-column:1/span 5;grid-row:1/span 2}.source-diagnostics{grid-column:6/span 7;grid-row:1/span 2}.signature-panel{grid-column:1/span 5;grid-row:3}.programmatic-api{grid-column:6/span 7;grid-row:3}.dashboard-grid.has-validation-warnings .dashboard-warning-panel{grid-column:1/-1;grid-row:1}.dashboard-grid.has-validation-warnings #live-freshness-panel{grid-row:2/span 2}.dashboard-grid.has-validation-warnings .source-diagnostics{grid-row:2/span 2}.dashboard-grid.has-validation-warnings .signature-panel{grid-row:4}.dashboard-grid.has-validation-warnings .programmatic-api{grid-row:4}}\n"
+        "    @media(min-width:901px){#live-freshness-panel{grid-column:1/span 5;grid-row:1/span 2}.source-diagnostics{grid-column:6/span 7;grid-row:1/span 2}.signature-panel{grid-column:1/span 5;grid-row:3}.programmatic-api{grid-column:6/span 7;grid-row:3}.dashboard-grid.has-baseline-notice .baseline-update-notice{grid-column:1/-1;grid-row:1}.dashboard-grid.has-baseline-notice #live-freshness-panel{grid-row:2/span 2}.dashboard-grid.has-baseline-notice .source-diagnostics{grid-row:2/span 2}.dashboard-grid.has-baseline-notice .signature-panel{grid-row:4}.dashboard-grid.has-baseline-notice .programmatic-api{grid-row:4}.dashboard-grid.has-validation-warnings .dashboard-warning-panel{grid-column:1/-1;grid-row:1}.dashboard-grid.has-validation-warnings #live-freshness-panel{grid-row:2/span 2}.dashboard-grid.has-validation-warnings .source-diagnostics{grid-row:2/span 2}.dashboard-grid.has-validation-warnings .signature-panel{grid-row:4}.dashboard-grid.has-validation-warnings .programmatic-api{grid-row:4}.dashboard-grid.has-baseline-notice.has-validation-warnings .dashboard-warning-panel{grid-row:2}.dashboard-grid.has-baseline-notice.has-validation-warnings #live-freshness-panel{grid-row:3/span 2}.dashboard-grid.has-baseline-notice.has-validation-warnings .source-diagnostics{grid-row:3/span 2}.dashboard-grid.has-baseline-notice.has-validation-warnings .signature-panel{grid-row:5}.dashboard-grid.has-baseline-notice.has-validation-warnings .programmatic-api{grid-row:5}}\n"
         "    @media(max-width:900px){main{width:calc(100% - 24px);margin:18px auto;padding:24px;border-radius:24px}.grid{grid-template-columns:repeat(6,minmax(0,1fr))}.span-3,.span-4{grid-column:span 3}.span-5,.span-6,.span-7,.span-8,.span-12{grid-column:span 6}.source-health-grid{grid-template-columns:1fr}.brand-layout{grid-template-columns:1fr}.header-actions{align-items:flex-start}.header-nav{--item-size:37px}.nav-hover-label{display:none}.title-version-link{margin-left:0}.masthead{margin-bottom:20px}}\n"
         "    @media(min-width:741px) and (max-width:900px){.signature-panel{grid-column:span 3}.programmatic-api{grid-column:span 3}.api-endpoint-row{grid-template-columns:auto 1fr}.api-endpoint-row code{grid-column:2;text-align:left}}\n"
         "    @media(max-width:740px){.signature-panel,.programmatic-api{grid-column:1/-1}.signature-head{display:grid}.signature-kv div{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto 1fr}.api-endpoint-row code{grid-column:2;text-align:left}}\n"
@@ -6865,10 +7381,10 @@ def render_policy_index(
         "    @media(max-width:1500px){.freshness-panel .freshness-layout{grid-template-columns:1fr;gap:22px}.freshness-panel .thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
         "    @media(max-width:640px){main{width:calc(100% - 20px);padding:14px 10px}.kpi-head{flex-wrap:wrap;align-items:flex-start}.kpi-head .status-pill{margin-left:0}.subtitle{max-width:250px;overflow-wrap:break-word;word-break:normal}.freshness-panel .panel-head{align-items:flex-start;flex-direction:column}.freshness-state{align-self:flex-start}.diag-feed{overflow-x:hidden}.diag-row{grid-template-columns:4px 28px minmax(0,1fr);gap:7px}.diag-row-icon{width:18px;height:18px}.diag-row-head,.diag-row p,.diag-tags{min-width:0}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{max-width:100%}.source-tile a{overflow-wrap:anywhere}.time-copy{flex-wrap:wrap}.freshness-panel .thresholds{grid-template-columns:1fr}}\n"
         "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{margin:0;color:#172033}.panel-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.panel-action{appearance:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(197,216,236,.9);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:7px 13px;color:#0b4fb3;font-family:inherit;font-size:13px;font-weight:650;line-height:1;text-decoration:none;white-space:nowrap;cursor:pointer}.panel-action:hover{border-color:#9cccf6;background:#fff;text-decoration:none}.panel-action:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.panel-action[aria-pressed=\"true\"]{border-color:#9cccf6;background:#fff}.source-diagnostics{gap:14px;padding:22px;border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.source-diagnostics>.panel-head{flex:0 0 auto}.diag-feed-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px 0 -8px;min-height:22px}.diag-feed-bar .diag-filter-status{flex:1 1 auto;margin:0}.diag-export-copy{align-self:center;width:22px;height:22px;min-width:22px;margin-right:1px;border-color:transparent;border-radius:5px;background:transparent;box-shadow:none;color:#64748b}.diag-export-copy:hover{border-color:transparent;background:transparent;box-shadow:none;color:var(--blue-strong)}.diag-export-copy[data-copy-state=\"copied\"]{border-color:transparent;background:transparent;color:var(--ok)}.diag-export-copy[data-copy-state=\"failed\"]{border-color:transparent;background:transparent;color:var(--err)}.diag-export-copy svg{width:16px;height:16px}.diag-summary{gap:10px}.diag-tile{grid-template-columns:auto minmax(0,1fr) auto;min-height:64px;border-radius:13px;padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.diag-tile strong{font-size:25px;font-weight:720}.diag-tile span{font-size:13px}.diag-tile-icon{box-sizing:content-box;width:23px;height:23px;padding:8px;border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-tile.notice .diag-tile-icon{border:1px solid #bfdbfe;background:linear-gradient(180deg,#fff,#eaf5ff)}.diag-tile.warning .diag-tile-icon{border:1px solid #fed7aa;background:linear-gradient(180deg,#fff,#fff3e4)}.diag-tile.error .diag-tile-icon{border:1px solid #fecaca;background:linear-gradient(180deg,#fff,#fff0ed)}.diag-feed{height:340px;min-height:340px;max-height:340px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68));padding:14px;box-shadow:inset 0 1px 2px rgba(31,79,143,.05);scrollbar-color:#8eb7df rgba(232,243,255,.68)}.diag-feed::-webkit-scrollbar{width:8px}.diag-feed::-webkit-scrollbar-track{background:rgba(232,243,255,.64);border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#8eb7df;border:2px solid rgba(232,243,255,.84);border-radius:999px}.diag-events{gap:10px;padding:2px 4px 12px 2px}.diag-row{grid-template-columns:5px 50px minmax(0,1fr);gap:12px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(250,253,255,.88));padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row.warning{background:linear-gradient(90deg,#fffaf0,#fff)}.diag-row.error{background:linear-gradient(90deg,#fff8f6,#fff)}.diag-row>div{min-width:0}.diag-stripe{width:5px}.diag-row-icon{display:grid;place-items:center;justify-self:center;align-self:start;width:42px;height:46px;margin-top:0;border:1px solid #bfdbfe;border-radius:14px;background:linear-gradient(180deg,#fff,#eaf5ff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row-icon.warning{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:var(--warn)}.diag-row-icon.error{border-color:#fecaca;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.diag-row-icon .ui-icon{width:25px;height:25px}.diag-row-head{gap:6px}.diag-row-head strong{font-size:14px}.diag-row p{font-size:13px;color:#40516a;overflow-wrap:anywhere}.diag-row .diag-user-message{margin-top:6px;color:#1f2f49;font-weight:650}.diag-row .diag-technical-message{margin-top:5px}.source-chip.src-diagnostics{color:#005bd3;background:var(--blue-soft);border-color:#bfdbfe}.source-chip.src-atom-feed{color:#005bd3;background:linear-gradient(180deg,#eef7ff,#f8fbff);border-color:#bfdbfe}.source-chip.src-release-policy,.source-chip.src-policy{color:#1d4ed8;background:linear-gradient(180deg,#edf4ff,#f8fbff);border-color:#c7d2fe}.source-chip.src-release-health{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.source-chip.src-freshness{color:#075985;background:#e0f2fe;border-color:#bae6fd}.source-chip.src-parser{color:var(--warn);background:var(--warn-soft);border-color:#fed7aa}.source-chip.src-signature{color:#5b21b6;background:#f3e8ff;border-color:#d8b4fe}.source-chip.src-source{color:#475569;background:#f8fafc;border-color:#cbd5e1}.diag-tags span,.diag-tags a{overflow-wrap:anywhere}.source-diagnostics #source-health{margin-top:0;padding-top:12px;border-top-color:rgba(174,203,235,.72)}\n"
-        "    @media(max-width:640px){.source-diagnostics{padding:18px 14px;gap:12px}.source-diagnostics>.panel-head{align-items:flex-start;flex-direction:column}.panel-action{padding:6px 11px}.diag-summary{grid-template-columns:1fr}.diag-feed{height:320px;min-height:320px;max-height:320px;padding:12px}.diag-row{grid-template-columns:5px 40px minmax(0,1fr);gap:9px;padding:10px}.diag-row-icon{width:36px;height:40px}.diag-row-icon .ui-icon{width:21px;height:21px}.diag-row-head strong{font-size:13px}}\n"
+        "    @media(max-width:640px){.baseline-update-notice{grid-template-columns:1fr;padding:16px 14px}.baseline-notice-icon{width:42px;height:42px;border-radius:14px}.baseline-notice-icon .ui-icon{width:24px;height:24px}.baseline-title{font-size:18px}.baseline-chip-list{gap:6px}.baseline-chip{border-radius:10px}.source-diagnostics{padding:18px 14px;gap:12px}.source-diagnostics>.panel-head{align-items:flex-start;flex-direction:column}.panel-action{padding:6px 11px}.diag-summary{grid-template-columns:1fr}.diag-feed{height:320px;min-height:320px;max-height:320px;padding:12px}.diag-row{grid-template-columns:5px 40px minmax(0,1fr);gap:9px;padding:10px}.diag-row-icon{width:36px;height:40px}.diag-row-icon .ui-icon{width:21px;height:21px}.diag-row-head strong{font-size:13px}}\n"
         "    .diag-row{grid-template-columns:5px 38px minmax(0,1fr)}.diag-row-icon{width:32px;height:34px;margin-top:1px;border:0;border-radius:0;background:transparent;box-shadow:none}.diag-row-icon.warning,.diag-row-icon.error{border-color:transparent;background:transparent}.diag-row-icon .ui-icon{width:28px;height:28px;stroke-width:2}.diag-row-head{align-items:center;column-gap:7px;row-gap:4px}.diag-row-head .source-chip{font-size:10px;line-height:1.05;padding:2px 7px;font-weight:650;color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc;box-shadow:inset 0 1px 0 rgba(255,255,255,.88);transform:translateY(-.5px)}.diag-row-head .source-chip.src-diagnostics,.diag-row-head .source-chip.src-atom-feed,.diag-row-head .source-chip.src-release-policy,.diag-row-head .source-chip.src-policy{color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc}\n"
         "    @media(max-width:640px){.diag-row{grid-template-columns:5px 34px minmax(0,1fr)}.diag-row-icon{width:28px;height:30px;margin-top:0}.diag-row-icon .ui-icon{width:24px;height:24px}.diag-row-head .source-chip{font-size:10px;padding:2px 6px}}\n"
-        "    .source-diagnostics[data-diagnostics-expanded=\"true\"]{align-self:stretch}.source-diagnostics[data-diagnostics-expanded=\"true\"] .diag-feed{height:min(700px,64vh);min-height:520px;max-height:none;flex:1 1 auto}.source-diagnostics[data-diagnostics-expanded=\"true\"] .diag-more[open]{border-color:rgba(142,188,236,.9);background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(239,248,255,.74))}@media(min-width:901px){.dashboard-grid.diagnostics-expanded .source-diagnostics{grid-row:1/span 3;align-self:stretch}.dashboard-grid.has-validation-warnings.diagnostics-expanded .source-diagnostics{grid-row:2/span 3}.dashboard-grid.diagnostics-expanded .programmatic-api{display:none!important}.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(680px,82vh,900px);min-height:680px;max-height:none;flex:1 1 auto}}@media(max-width:900px){.dashboard-grid.diagnostics-expanded .programmatic-api{display:none!important}.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(440px,68vh,720px);min-height:440px;max-height:none}}@media(max-width:640px){.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(380px,66vh,620px);min-height:380px}}\n"
+        "    .source-diagnostics[data-diagnostics-expanded=\"true\"]{align-self:stretch}.source-diagnostics[data-diagnostics-expanded=\"true\"] .diag-feed{height:min(700px,64vh);min-height:520px;max-height:none;flex:1 1 auto}.source-diagnostics[data-diagnostics-expanded=\"true\"] .diag-more[open]{border-color:rgba(142,188,236,.9);background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(239,248,255,.74))}@media(min-width:901px){.dashboard-grid.diagnostics-expanded .source-diagnostics{grid-row:1/span 3;align-self:stretch}.dashboard-grid.has-validation-warnings.diagnostics-expanded .source-diagnostics{grid-row:2/span 3}.dashboard-grid.has-baseline-notice.diagnostics-expanded .source-diagnostics{grid-row:2/span 3}.dashboard-grid.has-baseline-notice.has-validation-warnings.diagnostics-expanded .source-diagnostics{grid-row:3/span 3}.dashboard-grid.diagnostics-expanded .programmatic-api{display:none!important}.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(680px,82vh,900px);min-height:680px;max-height:none;flex:1 1 auto}}@media(max-width:900px){.dashboard-grid.diagnostics-expanded .programmatic-api{display:none!important}.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(440px,68vh,720px);min-height:440px;max-height:none}}@media(max-width:640px){.dashboard-grid.diagnostics-expanded .source-diagnostics .diag-feed{height:clamp(380px,66vh,620px);min-height:380px}}\n"
         "    .icon-bubble{width:62px;height:62px;border-color:#bfdcff;background:linear-gradient(135deg,#dceeff,#f8fcff);box-shadow:inset 0 1px 0 rgba(255,255,255,.94),0 12px 24px rgba(31,79,143,.13)}.kpi-icon{width:31px;height:31px;stroke-width:2}.kpi-target .kpi-icon{width:34px;height:34px}.kpi-head{gap:16px}.kpi-target .icon-bubble{background:linear-gradient(135deg,#d9edff,#f8fcff);color:#005be5}.kpi-family .icon-bubble,.kpi-observed .icon-bubble,.kpi-baseline .icon-bubble{color:#075fe0}\n"
         "    @media(max-width:640px){.icon-bubble{width:54px;height:54px}.kpi-icon{width:28px;height:28px}.kpi-target .kpi-icon{width:30px;height:30px}.kpi-head{gap:13px}}\n"
         "    .threshold-card{grid-template-columns:46px minmax(0,1fr);align-items:stretch}.threshold-icon{position:relative;align-self:center;justify-self:center;display:block;line-height:0;transform:none}.threshold-icon svg{position:absolute;left:50%;top:50%;display:block;margin:0;transform:translate(-50%,calc(-50% + 2px));transform-box:fill-box;transform-origin:center}.threshold-card>div{align-self:center;display:grid;gap:3px;line-height:1.15}.thresholds strong{line-height:1.08}.thresholds span{line-height:1.22}\n"
@@ -6905,6 +7421,7 @@ def render_policy_index(
         f"<div class=\"metric\">{escape(target_baseline or 'unknown')}</div><span class=\"label\">{escape(policy.quality_policy.value)} floor</span></article>\n"
         "    </section>\n"
         f"    <section class=\"{dashboard_grid_class}\" aria-label=\"Policy operations dashboard\">\n"
+        f"{baseline_notice_block}\n"
         f"{warning_block}\n"
         "      <section class=\"panel span-5 status-card freshness-panel\" id=\"live-freshness-panel\" aria-label=\"Policy feed currency\">"
         f"<div class=\"panel-head freshness-head\"><h2><span>Policy Feed Currency</span>{_dashboard_info_topic_html('policy-feed-currency', base_url=base_url)}</h2><span id=\"live-freshness-state\" class=\"freshness-state unknown\" aria-live=\"polite\" aria-label=\"Published policy feed currency: Unknown\">Unknown</span></div>"
@@ -7090,6 +7607,23 @@ def render_policy_index(
         "          copyText(epoch).then(function(){markCopyButton(button,'copied','Copied epoch millisecond timestamp '+epoch);}).catch(function(){markCopyButton(button,'failed','Could not copy epoch millisecond timestamp');});\n"
         "        });});\n"
         "      });\n"
+        "      function initBaselineUpdateNotice(){\n"
+        "        var notice=document.querySelector('[data-baseline-notice=\"active\"]');\n"
+        "        if(!notice){return;}\n"
+        "        if(!notice.isConnected){reportMissingNode('baseline update notice expiry','notice');return;}\n"
+        "        var until=notice.getAttribute('data-baseline-notice-visible-until')||'';\n"
+        "        if(!until){reportMissingNode('baseline update notice expiry','visible until');return;}\n"
+        "        var expiry=Date.parse(until);\n"
+        "        if(!Number.isFinite(expiry)){return;}\n"
+        "        function updateBaselineNoticeVisibility(){\n"
+        "          if(!uiActive||!notice.isConnected){return;}\n"
+        "          var remaining=expiry-Date.now();\n"
+        "          if(remaining<=0){notice.hidden=true;notice.setAttribute('aria-hidden','true');return;}\n"
+        "          safeSetTimeout(updateBaselineNoticeVisibility,Math.min(Math.max(remaining+1000,1000),3600000));\n"
+        "        }\n"
+        "        updateBaselineNoticeVisibility();\n"
+        "      }\n"
+        "      guard('baseline update notice expiry',initBaselineUpdateNotice);\n"
         "      function initDiagnosticFilters(){\n"
         "        var root=document.querySelector('[data-diagnostic-filter-root]');\n"
         "        if(!root||!root.isConnected){reportMissingNode('source diagnostics filter','root');return;}\n"
@@ -7163,6 +7697,7 @@ def render_policy_index(
         "            addAttr('data-support-article-expected-kb','support_article_expected_kb');\n"
         "            addAttr('data-support-article-expected-build','support_article_expected_build');\n"
         "            addAttr('data-support-article-expected-release','support_article_expected_release');\n"
+        "            addListAttr('data-support-article-applies-to-releases','support_article_applies_to_releases');\n"
         "            addAttr('data-atom-entry-id','atom_entry_id');\n"
         "            addAttr('data-atom-support-article-id','atom_support_article_id');\n"
         "            var isSecurity=row.getAttribute('data-is-security');\n"

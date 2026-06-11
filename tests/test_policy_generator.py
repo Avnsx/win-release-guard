@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+from dataclasses import replace
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -251,12 +253,53 @@ def _release_health_caught_up_to_kb5094126() -> str:
     return html.replace(current_old, current_new, 1).replace(history_old, history_new, 1)
 
 
+def _release_health_caught_up_to_kb5094126_with_update_type(update_type: str) -> str:
+    html = _html_file("windows11-release-health-current-d-26h1.html")
+    current_old = """      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>2025-09-30</td>
+        <td>2027-10-12</td>
+        <td>2028-10-10</td>
+        <td>2026-05-27</td>
+        <td>26200.8524</td>
+      </tr>"""
+    current_new = """      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>2025-09-30</td>
+        <td>2027-10-12</td>
+        <td>2028-10-10</td>
+        <td>2026-06-09</td>
+        <td>26200.8655</td>
+      </tr>"""
+    history_old = """      <tr>
+        <td>General Availability Channel</td>
+        <td>2026-05 B</td>
+        <td>2026-05-12</td>
+        <td>26200.8457</td>
+        <td>KB5089549</td>
+      </tr>"""
+    history_extra = f"""      <tr>
+        <td>General Availability Channel</td>
+        <td>{update_type}</td>
+        <td>2026-06-09</td>
+        <td>26200.8655</td>
+        <td>KB5094126</td>
+      </tr>
+{history_old}"""
+    assert current_old in html
+    assert history_old in html
+    return html.replace(current_old, current_new, 1).replace(history_old, history_extra, 1)
+
+
 def _kb5094126_generated_fixture_policy(
     release_health_html: str,
     *,
     support_html: str | None = None,
     msrc_payload: object | None = None,
     msrc_error: Exception | None = None,
+    generated_at_utc: str = "2026-06-11T18:00:00+00:00",
 ) -> ReleasePolicy:
     def support_fetcher(url: str, timeout: float, max_bytes: int) -> str:
         assert url == KB5094126_SUPPORT_URL
@@ -271,7 +314,7 @@ def _kb5094126_generated_fixture_policy(
     return generate_policy(
         release_health_html=release_health_html,
         atom_feed_xml=_kb5094126_atom_fixture(),
-        generated_at_utc="2026-06-11T18:00:00+00:00",
+        generated_at_utc=generated_at_utc,
         support_article_fetcher=support_fetcher,
         msrc_cvrf_fetcher=msrc_fetcher,
     )
@@ -652,6 +695,18 @@ def test_atom_unsafe_links_create_missing_href_without_latest_observed_advanceme
             f"{KB5094126_SUPPORT_URL}?utm_source=feed&ocid=tracking",
             KB5094126_SUPPORT_URL,
         ),
+        (
+            "https://support.microsoft.com:443/en-us/topic/kb5094126",
+            "https://support.microsoft.com/en-us/topic/kb5094126",
+        ),
+        (
+            "https://support.microsoft.com/en-us/topic/kb5094126#knownissues",
+            "https://support.microsoft.com/en-us/topic/kb5094126",
+        ),
+        (
+            "https://support.microsoft.com/en-us/topic/kb5094126?utm_source=feed&ocid=tracking#knownissues",
+            "https://support.microsoft.com/en-us/topic/kb5094126",
+        ),
         ("https://SUPPORT.MICROSOFT.COM/help/5094126?utm_source=feed", "https://support.microsoft.com/help/5094126"),
         ("https://support.microsoft.com/en-us/help/5094126", "https://support.microsoft.com/en-us/help/5094126"),
     ),
@@ -666,7 +721,8 @@ def test_safe_atom_support_article_url_accepts_articles_and_strips_queries(url: 
         "https://evil.example/en-us/topic/kb5094126",
         "http://support.microsoft.com/en-us/topic/kb5094126",
         "https://user@support.microsoft.com/en-us/topic/kb5094126",
-        f"{KB5094126_SUPPORT_URL}#section",
+        "https://support.microsoft.com:444/en-us/topic/kb5094126",
+        "https://support.microsoft.com:bad/en-us/topic/kb5094126",
         "https://support.microsoft.com/",
         "https://support.microsoft.com/en-us/feed/atom/example",
         "https://support.microsoft.com/en-us/api/article/5094126",
@@ -1762,7 +1818,55 @@ def test_support_article_applies_to_extraction_preserves_multi_release_and_serve
     )
 
     assert multi_release["applies_to"] == "Windows 11, version 25H2; Windows 11, version 24H2"
+    assert multi_release["applies_to_releases"] == ["25H2", "24H2"]
     assert server["applies_to"] == "Windows Server 2025"
+
+
+def test_support_article_heading_list_applies_to_stops_before_following_sections() -> None:
+    facts = policy_generator_module._extract_support_article_facts(
+        KB5094126_SUPPORT_URL,
+        """
+        <html><head><title>June 9, 2026-KB5094126 (OS Build 26200.8655)</title></head><body>
+          <main>
+            <h1>June 9, 2026-KB5094126 (OS Build 26200.8655)</h1>
+            <h2>Applies to</h2>
+            <ul>
+              <li>Windows 11, version 25H2</li>
+              <li>Windows 11, version 24H2</li>
+            </ul>
+            <h2>Prerequisites</h2>
+            <p>[Secure Boot] Enable the prerequisite before installing.</p>
+            <h2>Highlights</h2>
+            <p>This update improves reliability.</p>
+          </main>
+        </body></html>
+        """,
+    )
+
+    assert facts["applies_to"] == "Windows 11, version 25H2; Windows 11, version 24H2"
+    assert facts["applies_to_releases"] == ["25H2", "24H2"]
+    assert "Prerequisites" not in facts["applies_to"]
+    assert "Secure Boot" not in facts["applies_to"]
+
+
+def test_support_article_heading_paragraph_applies_to_extraction() -> None:
+    facts = policy_generator_module._extract_support_article_facts(
+        KB5094126_SUPPORT_URL,
+        """
+        <html><head><title>June 9, 2026-KB5094126 (OS Build 26200.8655)</title></head><body>
+          <main>
+            <h1>June 9, 2026-KB5094126 (OS Build 26200.8655)</h1>
+            <h2>Applies to</h2>
+            <p>Windows 11, version 25H2</p>
+            <h2>How to get this update</h2>
+            <p>Install from Windows Update.</p>
+          </main>
+        </body></html>
+        """,
+    )
+
+    assert facts["applies_to"] == "Windows 11, version 25H2"
+    assert facts["applies_to_releases"] == ["25H2"]
 
 
 @pytest.mark.parametrize(
@@ -1770,6 +1874,7 @@ def test_support_article_applies_to_extraction_preserves_multi_release_and_serve
     (
         ("Windows 11, version 25H2", "25H2", "compatible"),
         ("Windows 11, version 25H2; Windows 11, version 24H2", "24H2", "compatible"),
+        ("Windows 11, version 24H2", "25H2", "release_unmatched"),
         ("Windows 10, version 22H2", "25H2", "incompatible"),
         ("", "25H2", "unknown"),
         ("Windows 11", "25H2", "unknown"),
@@ -1805,6 +1910,29 @@ def test_support_article_missing_applies_to_is_degraded_not_mismatch() -> None:
 
     assert validation["support_article_validation_status"] == "degraded"
     assert validation["support_article_validation_reasons"] == ["applies_to_missing"]
+
+
+def test_support_article_applies_to_release_miss_degrades_windows11_event() -> None:
+    validation = policy_generator_module._support_article_validation_for_record(
+        {
+            "kb_article": "KB5094126",
+            "build": "26200.8655",
+            "release": "25H2",
+            "build_family": 26200,
+            "support_url": KB5094126_SUPPORT_URL,
+        },
+        {
+            "url": KB5094126_SUPPORT_URL,
+            "status": "ok",
+            "kb_article": "KB5094126",
+            "builds": ["26200.8655"],
+            "applies_to": "Windows 11, version 24H2",
+            "applies_to_releases": ["24H2"],
+        },
+    )
+
+    assert validation["support_article_validation_status"] == "degraded"
+    assert validation["support_article_validation_reasons"] == ["applies_to_release_unmatched"]
 
 
 @pytest.mark.parametrize(
@@ -1852,6 +1980,54 @@ def test_msrc_cvrf_kb_join_collects_cves_severities_and_products() -> None:
     }
 
 
+def test_msrc_cvrf_kb_join_minimal_exact_kb_remediation_is_security() -> None:
+    result = policy_generator_module._cvrf_kb_join(
+        {
+            "Vulnerability": [
+                {
+                    "Remediations": [
+                        {"Description": {"Value": "Security Update for KB5094126"}},
+                    ],
+                }
+            ]
+        },
+        "KB5094126",
+    )
+
+    assert result == {
+        "is_security": True,
+        "cves": [],
+        "severities": [],
+        "products": [],
+        "evidence_source": "msrc_cvrf",
+    }
+
+
+def test_msrc_cvrf_kb_join_caps_large_context_lists_deterministically() -> None:
+    vulnerabilities = []
+    for index in range(20, 0, -1):
+        vulnerabilities.append(
+            {
+                "CVE": f"CVE-2026-{index:04d}",
+                "Threats": [{"Type": "Severity", "Description": {"Value": f"Severity {index:02d}"}}],
+                "Remediations": [
+                    {
+                        "Description": {"Value": "Security Update for KB5094126"},
+                        "ProductID": [f"P{index:03d}", f"P{index + 100:03d}"],
+                    }
+                ],
+            }
+        )
+
+    result = policy_generator_module._cvrf_kb_join({"Vulnerability": vulnerabilities}, "KB5094126")
+
+    assert result["is_security"] is True
+    assert result["evidence_source"] == "msrc_cvrf"
+    assert result["cves"] == [f"CVE-2026-{index:04d}" for index in range(1, 13)]
+    assert result["severities"] == [f"Severity {index:02d}" for index in range(1, 9)]
+    assert result["products"] == [f"P{index:03d}" for index in range(1, 17)]
+
+
 def _fake_cvrf_with_remediation_text(text: str) -> dict[str, object]:
     return {
         "Vulnerability": [
@@ -1883,10 +2059,12 @@ def test_msrc_cvrf_kb_join_matches_exact_kb_tokens(text: str) -> None:
 @pytest.mark.parametrize(
     "text",
     (
+        "Security Update for KB15094126",
         "Security Update for KB50941260",
         "Security Update for 15094126",
         "Security Update for 5094126a",
         "https://catalog.update.microsoft.com/Search.aspx?q=KB50941260",
+        "https://catalog.update.microsoft.com/Search.aspx?q=KB5094127",
     ),
 )
 def test_msrc_cvrf_kb_join_rejects_substring_false_positives(text: str) -> None:
@@ -2402,6 +2580,230 @@ def test_kb5094126_generated_output_when_release_health_has_caught_up(tmp_path: 
         for event in events
     )
     assert "Atom feed shows a newer non-preview build for the broad target" not in index
+
+
+def test_caught_up_kb5094126_creates_active_baseline_update_notice(tmp_path: Path) -> None:
+    policy = _kb5094126_generated_fixture_policy(_release_health_caught_up_to_kb5094126())
+    outputs = _generated_output_bundle(policy, tmp_path)
+    data = outputs["policy"]
+    index = str(outputs["index"])
+    assert isinstance(data, dict)
+    source_diagnostics = data["source_diagnostics"]
+    assert isinstance(source_diagnostics, dict)
+
+    notice = source_diagnostics["baseline_update_notice"]
+    assert notice == {
+        "schema": "win11_release_guard.baseline_update_notice.v1",
+        "active": True,
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8655",
+        "kb_article": "KB5094126",
+        "update_type": "2026-06 B",
+        "quality_policy": "b_release_only",
+        "summary": (
+            "New required baseline: Windows 11 25H2 build 26200.8655 now matches the latest observed "
+            "Microsoft build. KB5094126 is the 2026-06 B security baseline; Atom first spotted it at "
+            "2026-06-09T17:04:01Z, and Release Health lists the baseline date as 2026-06-09."
+        ),
+        "technical_summary": (
+            "Release Health B-release row 2026-06 B selected 25H2/26200 build 26200.8655; support "
+            "validation ok; security evidence trusted via msrc_cvrf."
+        ),
+        "source_url": KB5094126_SUPPORT_URL,
+        "atom_entry_id": ATOM_ENTRY_ID,
+        "atom_support_article_id": ATOM_SUPPORT_ARTICLE_ID,
+        "first_spotted_atom_published_utc": "2026-06-09T17:04:01Z",
+        "support_article_updated_utc": "2026-06-10T17:20:31Z",
+        "official_release_date": "2026-06-09",
+        "official_release_precision": "date",
+        "release_health_latest_revision_date": "2026-06-09",
+        "visible_from_utc": "2026-06-09T00:00:00Z",
+        "visible_until_utc": "2026-06-30T00:00:00Z",
+        "policy_generated_at_utc": "2026-06-11T18:00:00+00:00",
+        "is_security": True,
+        "security_evidence_source": "msrc_cvrf",
+        "security_evidence_status": "trusted",
+        "support_article_validation_status": "ok",
+        "cve_count": 2,
+        "cves": ["CVE-2026-0001", "CVE-2026-0002"],
+    }
+    event = next(
+        event
+        for event in source_diagnostics["events"]
+        if event["kind"] == "required_baseline_matched_latest_observed"
+    )
+    assert event["severity"] == "notice"
+    assert event["release"] == "25H2"
+    assert event["build"] == "26200.8655"
+    assert event["kb_article"] == "KB5094126"
+    assert event["is_security"] is True
+    assert event["security_evidence_source"] == "msrc_cvrf"
+    assert "New required baseline" in index
+
+    from tools import sync_source_diagnostics_issues as sync_tool
+
+    assert sync_tool.diagnostics_from_policy({"source_diagnostics": {"events": [event]}}) == []
+
+
+def test_caught_up_kb5094126_renders_baseline_update_notice_before_operational_panels(tmp_path: Path) -> None:
+    policy = _kb5094126_generated_fixture_policy(_release_health_caught_up_to_kb5094126())
+    outputs = _generated_output_bundle(policy, tmp_path)
+    index = str(outputs["index"])
+    data = outputs["policy"]
+    assert isinstance(data, dict)
+    HTMLParser().feed(index)
+
+    notice_marker = 'class="panel span-12 baseline-update-notice"'
+    freshness_marker = 'id="live-freshness-panel"'
+    diagnostics_marker = 'class="panel span-7 source-diagnostics"'
+    assert notice_marker in index
+    assert index.index(notice_marker) < index.index(freshness_marker)
+    assert index.index(notice_marker) < index.index(diagnostics_marker)
+    assert 'class="grid dashboard-grid has-baseline-notice"' in index
+    assert 'role="status" aria-live="polite" data-baseline-notice="active"' in index
+    assert 'data-baseline-notice-build="26200.8655"' in index
+    assert 'data-baseline-notice-kb="KB5094126"' in index
+    assert 'data-baseline-notice-visible-until="2026-06-30T00:00:00Z"' in index
+    assert f'data-baseline-notice-source-url="{KB5094126_SUPPORT_URL}"' in index
+    assert "New required baseline: 25H2 build 26200.8655" in index
+    assert "KB5094126" in index
+    assert "2026-06 B" in index
+    assert "Security confirmed by MSRC" in index
+    assert "Atom first spotted 2026-06-09T17:04:01Z" in index
+    assert "Support updated 2026-06-10T17:20:31Z" in index
+    assert "Official baseline date: 2026-06-09 (Release Health date-only)" in index
+    assert "Visible until 2026-06-30T00:00:00Z" in index
+    assert "baseline update notice expiry" in index
+    assert "Date.parse(until)" in index
+    assert ".baseline-update-notice{position:relative" in index
+    assert ".dashboard-grid.has-baseline-notice .baseline-update-notice{grid-column:1/-1;grid-row:1}" in index
+    assert ".dashboard-grid.has-baseline-notice #live-freshness-panel{grid-row:2/span 2}" in index
+    assert ".dashboard-grid.has-baseline-notice .source-diagnostics{grid-row:2/span 2}" in index
+    assert ".dashboard-grid.has-baseline-notice.diagnostics-expanded .source-diagnostics{grid-row:2/span 3}" in index
+    assert "script src" not in index.lower()
+    assert "rel=\"stylesheet\"" not in index.lower()
+    assert "github_token" not in index.lower()
+    assert "function visibleDiagnosticEntries()" in index
+    _assert_no_raw_support_article_leakage(outputs, _kb5094126_support_fixture())
+    validate_policy_document(data)
+
+
+def test_not_caught_up_kb5094126_does_not_create_baseline_update_notice() -> None:
+    policy = _kb5094126_generated_fixture_policy(_html_file("windows11-release-health-current-d-26h1.html"))
+
+    target = policy.broad_target_existing_devices
+    assert target is not None
+    assert target.required_baseline_build == "26200.8457"
+    assert target.latest_observed_build == "26200.8655"
+    assert "baseline_update_notice" not in policy.source_diagnostics
+    assert not any(
+        event["kind"] == "required_baseline_matched_latest_observed"
+        for event in policy.source_diagnostics["events"]
+    )
+    index = policy_generator_module.render_policy_index(policy, policy_bytes=None, signature=None)
+    assert 'class="panel span-12 baseline-update-notice"' not in index
+    assert "New required baseline:" not in index
+
+
+def test_caught_up_baseline_update_notice_expires_after_visibility_window() -> None:
+    policy = _kb5094126_generated_fixture_policy(
+        _release_health_caught_up_to_kb5094126(),
+        generated_at_utc="2026-07-01T00:00:00+00:00",
+    )
+
+    notice = policy.source_diagnostics["baseline_update_notice"]
+    assert notice["active"] is False
+    assert notice["visible_from_utc"] == "2026-06-09T00:00:00Z"
+    assert notice["visible_until_utc"] == "2026-06-30T00:00:00Z"
+    assert not any(
+        event["kind"] == "required_baseline_matched_latest_observed"
+        for event in policy.source_diagnostics["events"]
+    )
+    index = policy_generator_module.render_policy_index(policy, policy_bytes=None, signature=None)
+    assert 'class="panel span-12 baseline-update-notice"' not in index
+    assert "New required baseline:" not in index
+
+
+def test_baseline_update_notice_and_warnings_panel_use_separate_grid_rows() -> None:
+    policy = _kb5094126_generated_fixture_policy(_release_health_caught_up_to_kb5094126())
+    warning_policy = replace(
+        policy,
+        validation_warnings=("Manual validation warning for grid placement.",),
+    )
+
+    index = policy_generator_module.render_policy_index(warning_policy, policy_bytes=None, signature=None)
+
+    assert 'class="grid dashboard-grid has-baseline-notice has-validation-warnings"' in index
+    assert index.index('class="panel span-12 baseline-update-notice"') < index.index(
+        'class="panel span-12 dashboard-warning-panel"'
+    )
+    assert index.index('class="panel span-12 dashboard-warning-panel"') < index.index(
+        'id="live-freshness-panel"'
+    )
+    assert index.index('class="panel span-12 dashboard-warning-panel"') < index.index(
+        'class="panel span-7 source-diagnostics"'
+    )
+    assert ".dashboard-grid.has-baseline-notice.has-validation-warnings .dashboard-warning-panel{grid-row:2}" in index
+    assert ".dashboard-grid.has-baseline-notice.has-validation-warnings #live-freshness-panel{grid-row:3/span 2}" in index
+    assert ".dashboard-grid.has-baseline-notice.has-validation-warnings .source-diagnostics{grid-row:3/span 2}" in index
+    assert ".dashboard-grid.has-baseline-notice.has-validation-warnings .signature-panel{grid-row:5}" in index
+    assert ".dashboard-grid.has-baseline-notice.has-validation-warnings.diagnostics-expanded .source-diagnostics{grid-row:3/span 3}" in index
+
+
+@pytest.mark.parametrize("update_type", ("2026-06 D Preview", "2026-06 OOB"))
+def test_preview_or_oob_baseline_like_rows_do_not_create_baseline_update_notice(update_type: str) -> None:
+    policy = _kb5094126_generated_fixture_policy(
+        _release_health_caught_up_to_kb5094126_with_update_type(update_type)
+    )
+
+    assert "baseline_update_notice" not in policy.source_diagnostics
+    assert not any(
+        event["kind"] == "required_baseline_matched_latest_observed"
+        for event in policy.source_diagnostics["events"]
+    )
+
+
+def test_baseline_update_notice_keeps_release_health_facts_when_support_article_mismatches() -> None:
+    policy = _kb5094126_generated_fixture_policy(
+        _release_health_caught_up_to_kb5094126(),
+        support_html=_support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True),
+        msrc_payload=FAKE_MSRC_CVRF_WITH_KB5094126,
+    )
+
+    notice = policy.source_diagnostics["baseline_update_notice"]
+    assert notice["active"] is True
+    assert notice["kb_article"] == "KB5094126"
+    assert notice["build"] == "26200.8655"
+    assert notice["support_article_validation_status"] == "mismatch"
+    assert notice["support_article_validation_reasons"] == ["kb_mismatch", "build_missing"]
+    assert notice["is_security"] is True
+    assert notice["security_evidence_source"] == "msrc_cvrf"
+    assert "KB5000000" not in notice["summary"]
+    assert "26200.1111" not in notice["summary"]
+    assert "security baseline" in notice["summary"]
+
+
+def test_baseline_update_notice_uses_unknown_security_when_msrc_and_article_are_untrusted() -> None:
+    policy = _kb5094126_generated_fixture_policy(
+        _release_health_caught_up_to_kb5094126(),
+        support_html=_support_article_html(security=False, labels=()),
+        msrc_error=PolicyFetchError("MSRC unavailable"),
+    )
+
+    notice = policy.source_diagnostics["baseline_update_notice"]
+    assert notice["active"] is True
+    assert notice["security_evidence_source"] == "unavailable"
+    assert notice["security_evidence_status"] == "unknown"
+    assert "is_security" not in notice
+    assert "security baseline" not in notice["summary"]
+    assert "security evidence is unknown" in notice["summary"]
+    event = next(
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "required_baseline_matched_latest_observed"
+    )
+    assert "Security patch" not in policy_generator_module._source_diagnostic_row_from_event(event)["tags"]
 
 
 def test_generated_output_surfaces_support_article_mismatch_and_degraded_states(tmp_path: Path) -> None:
