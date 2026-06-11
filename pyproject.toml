@@ -39,7 +39,7 @@ win11_release_guard = "win11_release_guard.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["win11_release_guard*"]
-exclude = ["tests*", "WindowsOSBuild*", "WUView*", "release_checker*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 win11_release_guard = ["data/*.json", "data/*.sig"]
