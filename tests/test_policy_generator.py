@@ -3895,6 +3895,12 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "Policy Feed Currency" in index
     assert "Published feed age" in index
     assert "days at render-time fallback" in index
+    assert "Full feed metadata" not in index
+    assert '<details class="freshness-metadata"' not in index
+    assert '<summary>Full feed metadata</summary>' not in index
+    assert '<div class="freshness-metadata"><dl class="kv metadata">' in index
+    assert ".freshness-metadata summary" not in index
+    assert ".freshness-metadata[open]" not in index
     assert "Browser recalculates published policy feed age from the GitHub Actions generated timestamp" in index
     assert "Date.now" in index
     assert "Current" in index

@@ -161,6 +161,12 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert "Browser recalculates published policy feed age from the GitHub Actions generated timestamp" in index
     assert "Date.now" in index
     assert "Published policy feed currency: Unknown" in index
+    assert "Full feed metadata" not in index
+    assert '<details class="freshness-metadata"' not in index
+    assert '<summary>Full feed metadata</summary>' not in index
+    assert '<div class="freshness-metadata"><dl class="kv metadata">' in index
+    assert ".freshness-metadata summary" not in index
+    assert ".freshness-metadata[open]" not in index
     assert ".freshness-state.current{color:var(--ok)" in index
     assert ".freshness-state.refresh-due{color:var(--warn)" in index
     assert ".freshness-state.stale{color:var(--err)" in index
