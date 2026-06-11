@@ -11,6 +11,7 @@
 
 * Validated Atom-linked Microsoft Support article URL, KB, build, and applicability evidence before using article facts for Source Diagnostics summaries or Support-derived security labels; mismatches now remain visible as compact validation metadata without trusting the mismatched article text.
 * Hardened Microsoft source matching so Atom enrichment uses only safe alternate Support article links, Support URLs reject unsafe hosts/paths/fragments/traversal and strip tracking queries, MSRC CVRF joins require exact KB tokens, and unknown applies-to evidence degrades instead of silently passing.
+* Added generated-output regressions for KB5094126 latest-observed behavior, caught-up Release Health behavior, diagnostic ID uniqueness, Support article mismatch/degraded states, MSRC unavailable/malformed states, API aliases, manifests, and raw Support HTML leakage.
 
 ## v0.3.2 - 2026-06-10
 

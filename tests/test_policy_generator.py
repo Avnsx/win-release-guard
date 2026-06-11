@@ -31,6 +31,7 @@ from win11_release_guard.policy_generator import (
     render_robots_txt,
     write_policy_outputs,
 )
+from win11_release_guard.remote_policy import load_policy_text
 from win11_release_guard.policy_schema import GENERATOR_VERSION, is_source_diagnostic_id, validate_policy_document
 
 
@@ -209,6 +210,137 @@ def _kb5094126_fixture_policy() -> ReleasePolicy:
         support_article_fetcher=support_fetcher,
         msrc_cvrf_fetcher=msrc_fetcher,
     )
+
+
+def _release_health_caught_up_to_kb5094126() -> str:
+    html = _html_file("windows11-release-health-current-d-26h1.html")
+    current_old = """      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>2025-09-30</td>
+        <td>2027-10-12</td>
+        <td>2028-10-10</td>
+        <td>2026-05-27</td>
+        <td>26200.8524</td>
+      </tr>"""
+    current_new = """      <tr>
+        <td>25H2</td>
+        <td>General Availability Channel</td>
+        <td>2025-09-30</td>
+        <td>2027-10-12</td>
+        <td>2028-10-10</td>
+        <td>2026-06-09</td>
+        <td>26200.8655</td>
+      </tr>"""
+    history_old = """      <tr>
+        <td>General Availability Channel</td>
+        <td>2026-05 B</td>
+        <td>2026-05-12</td>
+        <td>26200.8457</td>
+        <td>KB5089549</td>
+      </tr>"""
+    history_new = """      <tr>
+        <td>General Availability Channel</td>
+        <td>2026-06 B</td>
+        <td>2026-06-09</td>
+        <td>26200.8655</td>
+        <td>KB5094126</td>
+      </tr>"""
+    assert current_old in html
+    assert history_old in html
+    return html.replace(current_old, current_new, 1).replace(history_old, history_new, 1)
+
+
+def _kb5094126_generated_fixture_policy(
+    release_health_html: str,
+    *,
+    support_html: str | None = None,
+    msrc_payload: object | None = None,
+    msrc_error: Exception | None = None,
+) -> ReleasePolicy:
+    def support_fetcher(url: str, timeout: float, max_bytes: int) -> str:
+        assert url == KB5094126_SUPPORT_URL
+        return support_html if support_html is not None else _kb5094126_support_fixture()
+
+    def msrc_fetcher(url: str, timeout: float, max_bytes: int) -> object:
+        assert url == "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jun"
+        if msrc_error is not None:
+            raise msrc_error
+        return msrc_payload if msrc_payload is not None else _kb5094126_msrc_fixture()
+
+    return generate_policy(
+        release_health_html=release_health_html,
+        atom_feed_xml=_kb5094126_atom_fixture(),
+        generated_at_utc="2026-06-11T18:00:00+00:00",
+        support_article_fetcher=support_fetcher,
+        msrc_cvrf_fetcher=msrc_fetcher,
+    )
+
+
+def _generated_output_bundle(policy: ReleasePolicy, output_dir: Path) -> dict[str, object]:
+    write_policy_outputs(
+        policy,
+        output_dir=output_dir,
+        write_index=True,
+        write_manifest=True,
+    )
+    policy_path = output_dir / "windows-release-policy.json"
+    manifest_path = output_dir / "policy-manifest.json"
+    index_path = output_dir / "index.html"
+    api_policy_path = output_dir / "api" / "v1" / "policy.json"
+    api_manifest_path = output_dir / "api" / "v1" / "manifest.json"
+    assert api_policy_path.read_bytes() == policy_path.read_bytes()
+    assert api_manifest_path.read_bytes() == manifest_path.read_bytes()
+    policy_data = json.loads(policy_path.read_text(encoding="utf-8"))
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    api_policy_data = json.loads(api_policy_path.read_text(encoding="utf-8"))
+    api_manifest_data = json.loads(api_manifest_path.read_text(encoding="utf-8"))
+    assert api_policy_data == policy_data
+    assert api_manifest_data == manifest_data
+    validate_policy_document(policy_data)
+    parsed = load_policy_text(json.dumps(policy_data), source_url=DEFAULT_POLICY_URL)
+    assert parsed.broad_target_existing_devices is not None
+    return {
+        "policy": policy_data,
+        "manifest": manifest_data,
+        "index": index_path.read_text(encoding="utf-8"),
+        "policy_text": policy_path.read_text(encoding="utf-8"),
+        "manifest_text": manifest_path.read_text(encoding="utf-8"),
+    }
+
+
+def _rendered_diagnostic_ids(index: str) -> list[str]:
+    return re.findall(
+        r'data-diagnostic-id="(wrg-source-diagnostic-v1:(?:[0-9a-f]{16}|uuid:[0-9a-f-]{36};id=[1-9][0-9]*))"',
+        index,
+    )
+
+
+def _assert_unique_source_diagnostic_ids(policy_data: dict[str, object], index: str) -> None:
+    source_diagnostics = policy_data["source_diagnostics"]
+    assert isinstance(source_diagnostics, dict)
+    events = source_diagnostics["events"]
+    assert isinstance(events, list)
+    event_ids = [str(event["id"]) for event in events if isinstance(event, dict)]
+    row_ids = _rendered_diagnostic_ids(index)
+    assert event_ids
+    assert len(event_ids) == len(set(event_ids))
+    assert row_ids
+    assert len(row_ids) == len(set(row_ids))
+    assert set(event_ids) <= set(row_ids)
+    assert "function visibleDiagnosticEntries()" in index
+    assert "diagnostic_id:row.getAttribute('data-diagnostic-id')||''" in index
+
+
+def _assert_no_raw_support_article_leakage(outputs: dict[str, object], support_html: str) -> None:
+    combined = "\n".join(
+        str(outputs[key])
+        for key in ("policy_text", "manifest_text", "index")
+    )
+    assert support_html.strip() not in combined
+    assert "window.secret" not in combined
+    assert "Updates hardening for startup components." not in combined
+    assert "https://support.microsoft.com/help/5094126" not in combined
 
 
 def _support_article_html(
@@ -2193,6 +2325,172 @@ def test_kb5094126_fixture_end_to_end_policy_dashboard_manifest_and_issue_title(
     assert "Updates hardening for startup components." not in policy_json
     assert _kb5094126_support_fixture().strip() not in policy_json
     assert len(support_record_json) < 2500
+
+
+def test_kb5094126_generated_output_when_release_health_has_not_caught_up(tmp_path: Path) -> None:
+    policy = _kb5094126_generated_fixture_policy(_html_file("windows11-release-health-current-d-26h1.html"))
+    outputs = _generated_output_bundle(policy, tmp_path)
+    data = outputs["policy"]
+    manifest = outputs["manifest"]
+    index = str(outputs["index"])
+    assert isinstance(data, dict)
+    assert isinstance(manifest, dict)
+    _assert_unique_source_diagnostic_ids(data, index)
+    _assert_no_raw_support_article_leakage(outputs, _kb5094126_support_fixture())
+
+    target = data["broad_target_existing_devices"]
+    assert isinstance(target, dict)
+    assert target["version"] == "25H2"
+    assert target["latest_build"] == "26200.8524"
+    assert target["latest_observed_build"] == "26200.8655"
+    assert target["required_baseline_build"] == "26200.8457"
+    assert target["metadata"]["latest_observed_source"] == "atom_support_article"
+    assert target["metadata"]["latest_observed_source_url"] == KB5094126_SUPPORT_URL
+    assert manifest["broad_target_existing_devices"]["latest_build"] == "26200.8524"
+    assert manifest["broad_target_existing_devices"]["latest_observed_build"] == "26200.8655"
+    assert manifest["broad_target_existing_devices"]["required_baseline_build"] == "26200.8457"
+    assert manifest["latest_observed_evidence"]["latest_observed_source"] == "atom_support_article"
+
+    events = data["source_diagnostics"]["events"]
+    atom_events = [
+        event
+        for event in events
+        if event["kind"] == "atom_newer_than_release_history"
+        and event["kb_article"] == "KB5094126"
+        and event["build"] in {"26100.8655", "26200.8655"}
+    ]
+    assert [(event["severity"], event["release"], event["build"]) for event in atom_events] == [
+        ("notice", "24H2", "26100.8655"),
+        ("warning", "25H2", "26200.8655"),
+    ]
+    notice = next(event for event in atom_events if event["release"] == "24H2")
+    warning = next(event for event in atom_events if event["release"] == "25H2")
+    assert warning["id"] == ATOM_SOURCE_DIAGNOSTIC_ID
+    assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", notice["id"])
+    assert notice["id"] != warning["id"]
+    assert warning["support_article_validation_status"] == "ok"
+    assert notice["support_article_validation_status"] == "ok"
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in _rendered_diagnostic_ids(index)
+    assert "https://support.microsoft.com/help/5094126" not in index
+
+
+def test_kb5094126_generated_output_when_release_health_has_caught_up(tmp_path: Path) -> None:
+    policy = _kb5094126_generated_fixture_policy(_release_health_caught_up_to_kb5094126())
+    outputs = _generated_output_bundle(policy, tmp_path)
+    data = outputs["policy"]
+    manifest = outputs["manifest"]
+    index = str(outputs["index"])
+    assert isinstance(data, dict)
+    assert isinstance(manifest, dict)
+    _assert_unique_source_diagnostic_ids(data, index)
+    _assert_no_raw_support_article_leakage(outputs, _kb5094126_support_fixture())
+
+    target = data["broad_target_existing_devices"]
+    assert isinstance(target, dict)
+    assert target["latest_build"] == "26200.8655"
+    assert target["latest_observed_build"] == "26200.8655"
+    assert target["required_baseline_build"] == "26200.8655"
+    assert manifest["broad_target_existing_devices"]["latest_build"] == "26200.8655"
+    assert manifest["broad_target_existing_devices"]["latest_observed_build"] == "26200.8655"
+    assert manifest["broad_target_existing_devices"]["required_baseline_build"] == "26200.8655"
+
+    events = data["source_diagnostics"]["events"]
+    assert not any(
+        event["kind"] == "atom_newer_than_release_history"
+        and event.get("release") == "25H2"
+        and event.get("build") == "26200.8655"
+        for event in events
+    )
+    assert "Atom feed shows a newer non-preview build for the broad target" not in index
+
+
+def test_generated_output_surfaces_support_article_mismatch_and_degraded_states(tmp_path: Path) -> None:
+    mismatch_policy = _kb5094126_generated_fixture_policy(
+        _html_file("windows11-release-health-current-d-26h1.html"),
+        support_html=_support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True),
+    )
+    mismatch_outputs = _generated_output_bundle(mismatch_policy, tmp_path / "mismatch")
+    mismatch_data = mismatch_outputs["policy"]
+    mismatch_index = str(mismatch_outputs["index"])
+    assert isinstance(mismatch_data, dict)
+    mismatch_event = _kb5094126_atom_event(mismatch_policy)
+    assert mismatch_event["support_article_validation_status"] == "mismatch"
+    assert "support_article_kb_article" not in mismatch_event
+    assert "support_article_title" not in mismatch_event
+    assert any(
+        event["kind"] == "support_article_enrichment_mismatch"
+        and event["support_article_validation_reasons"] == ["kb_mismatch", "build_missing"]
+        for event in mismatch_data["source_diagnostics"]["events"]
+    )
+    assert "Support article mismatch" in mismatch_index
+    assert "KB5000000 moves" not in mismatch_index
+    _assert_no_raw_support_article_leakage(
+        mismatch_outputs,
+        _support_article_html(kb_article="KB5000000", builds=("26200.1111",), security=True),
+    )
+
+    degraded_policy = _kb5094126_generated_fixture_policy(
+        _html_file("windows11-release-health-current-d-26h1.html"),
+        support_html=_support_article_html(
+            kb_article="KB5094126",
+            builds=(),
+            applies_to="Windows 11, version 25H2",
+            security=False,
+            labels=(),
+        ),
+        msrc_payload=FAKE_MSRC_CVRF_WITHOUT_KB5094126,
+    )
+    degraded_outputs = _generated_output_bundle(degraded_policy, tmp_path / "degraded")
+    degraded_data = degraded_outputs["policy"]
+    degraded_index = str(degraded_outputs["index"])
+    assert isinstance(degraded_data, dict)
+    assert any(
+        event["kind"] == "support_article_enrichment_degraded"
+        and event["support_article_validation_reasons"] == ["builds_missing"]
+        for event in degraded_data["source_diagnostics"]["events"]
+    )
+    assert "Support article degraded" in degraded_index
+    assert "support article validation degraded: builds_missing" in degraded_index
+
+
+def test_generated_output_surfaces_msrc_unavailable_and_malformed_as_unknown(tmp_path: Path) -> None:
+    unavailable_policy = _kb5094126_generated_fixture_policy(
+        _html_file("windows11-release-health-current-d-26h1.html"),
+        msrc_error=PolicyFetchError("MSRC unavailable"),
+    )
+    unavailable_outputs = _generated_output_bundle(unavailable_policy, tmp_path / "unavailable")
+    unavailable_data = unavailable_outputs["policy"]
+    unavailable_index = str(unavailable_outputs["index"])
+    assert isinstance(unavailable_data, dict)
+    unavailable_event = _kb5094126_atom_event(unavailable_policy)
+    assert unavailable_event["msrc_cvrf_status"] == "error"
+    assert unavailable_event["security_evidence_source"] == "support_article"
+    assert unavailable_event["is_security"] is True
+    assert any(
+        event["kind"] == "msrc_cvrf_enrichment_unavailable"
+        for event in unavailable_data["source_diagnostics"]["events"]
+    )
+    assert "MSRC CVRF enrichment for 2026-Jun is error" in unavailable_index
+
+    malformed_policy = _kb5094126_generated_fixture_policy(
+        _html_file("windows11-release-health-current-d-26h1.html"),
+        support_html=KB5094126_SUPPORT_HTML_NO_SECURITY,
+        msrc_payload=["not", "a", "cvrf", "object"],
+    )
+    malformed_outputs = _generated_output_bundle(malformed_policy, tmp_path / "malformed")
+    malformed_data = malformed_outputs["policy"]
+    malformed_index = str(malformed_outputs["index"])
+    assert isinstance(malformed_data, dict)
+    malformed_event = _kb5094126_atom_event(malformed_policy)
+    assert malformed_event["msrc_cvrf_status"] == "degraded"
+    assert malformed_event["is_security"] is None
+    assert malformed_event["security_evidence_source"] == "unavailable"
+    assert any(
+        event["kind"] == "msrc_cvrf_enrichment_unavailable"
+        for event in malformed_data["source_diagnostics"]["events"]
+    )
+    assert "Security patch" not in policy_generator_module._source_diagnostic_row_from_event(malformed_event)["tags"]
+    assert "MSRC CVRF enrichment for 2026-Jun is degraded" in malformed_index
 
 
 def test_msrc_cvrf_absent_kb_keeps_generic_os_build_non_security() -> None:
