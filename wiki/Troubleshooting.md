@@ -70,9 +70,9 @@ python -m win11_release_guard --json-pretty --wua --include-raw-local-diagnostic
 | Headers | Compare Release Health table headings with fixtures. |
 | 26H1 note | Confirm special/new-devices-only text is still detected. |
 | B baseline | Confirm broad target has a B-release baseline. |
-| Atom support href | Use only safe Atom `alternate` links to `https://support.microsoft.com` article paths. If an Atom KB row lacks a safe Support article href, keep the Source Diagnostic evidence; do not add a `/help/<KB>` fallback resolver. |
-| Support article mismatch | If Support article KB, build, URL, or parseable `Applies to` evidence disagrees with Atom, trust Atom KB/build/release and exact MSRC KB evidence; treat Support-derived summary/security wording as untrusted. |
-| Security classification | Use exact MSRC CVRF KB-token evidence or validated explicit Support article wording; do not infer security status from generic Atom title text or KB substrings embedded in larger tokens. |
+| Atom support href | Use only safe Atom `alternate` links to `https://support.microsoft.com` article paths. Safe `:443`, query, or fragment variants canonicalize to scheme/host/path; unsafe ports, feed/API/search/download/static/traversal paths, and non-support hosts reject. If an Atom KB row lacks a safe Support article href, keep the Source Diagnostic evidence; do not add a `/help/<KB>` fallback resolver. |
+| Support article mismatch | If Support article KB, build, URL, or parseable `Applies to` evidence disagrees with Atom, trust Atom KB/build/release and exact MSRC KB evidence; treat Support-derived summary/security wording as untrusted. Use `applies_to_releases` when present to see which release values were parsed. |
+| Security classification | Use exact MSRC CVRF KB-token evidence or validated explicit Support article wording; do not infer security status from generic Atom title text or KB substrings embedded in larger tokens. Exact-KB remediations count even when optional CVE/severity/product fields are absent. |
 
 ```powershell
 pytest -q tests/test_remote_policy.py tests/test_policy_generator.py
@@ -91,6 +91,20 @@ normal fleet baseline. It does not make the device noncompliant and does not
 raise the required baseline unless the policy baseline rules select that build.
 When Release Health has caught up and the baseline rules select that same
 build, all three fields can legitimately show the same build number.
+
+## Baseline Update Notice Appears
+
+| Check | What to do |
+| --- | --- |
+| Required baseline source | Confirm the row is a real non-preview, non-OOB Release Health B-release. |
+| Notice timing | Check `official_release_date`, `official_release_precision`, `visible_from_utc`, and `visible_until_utc`; date-only Microsoft evidence is intentionally labeled date-only. |
+| Evidence status | If Support or MSRC evidence is degraded/unknown, keep the notice but do not treat Support text as security proof. |
+| Issue sync | Leave it dashboard-only; the `required_baseline_matched_latest_observed` notice must not create or reopen GitHub Issues. |
+
+The notice explains that the compliance floor has caught up to already observed
+public Microsoft evidence. It is informational UI generated from local policy
+facts and validated public evidence; it does not change signed verdicts,
+required-baseline selection, runtime client behavior, or `/api/v1` aliases.
 
 ## Related Pages
 

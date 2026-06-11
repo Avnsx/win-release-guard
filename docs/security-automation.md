@@ -115,8 +115,9 @@ warnings and errors from that event list are synced to GitHub Issues. Notice
 events stay visible in policy output and the dashboard, but they are
 dashboard-only for issue sync and must not create, update, or reopen GitHub
 Issues. Derived dashboard-only rows such as `No source issues reported`,
-existing-device exclusion notes, and freshness notices are not issue-sync
-inputs. Matching open
+existing-device exclusion notes, freshness notices, and the
+`required_baseline_matched_latest_observed` baseline-update notice are not
+issue-sync inputs. Matching open
 issues are left untouched when their title, body, and labels already match the
 current diagnostic. Changed open issues are patched without a recurring
 still-present comment. Matching closed issues are reopened with a comment while

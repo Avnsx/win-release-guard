@@ -63,20 +63,27 @@ select the same build, all three fields can legitimately be the same.
 Atom is discovery for public Support article hrefs. The generator fetches only
 safe Atom `alternate` links to `https://support.microsoft.com` article paths.
 It ignores `self` links, feed/API/search/download/static paths, non-support
-hosts, userinfo, fragments, traversal patterns, and overlong URLs. Accepted
-evidence URLs are canonicalized without tracking query strings. Legacy
+hosts, userinfo, unsafe ports, traversal patterns, and overlong URLs. Accepted
+evidence URLs allow no port or explicit `:443` and are canonicalized without
+tracking query strings or fragments. Legacy
 `/help/<digits>` paths remain valid only when Atom provided them directly; the
 generator does not synthesize `/help/<KB>` fallbacks. If an Atom KB row lacks a
 usable support href, the generator records `atom_support_article_href_missing`
 evidence. Support article text can provide human-readable KB context and
 explicit security wording only after validation confirms that the article URL,
 KB, expected build, and parseable applicability match the Atom record. Empty or
-unknown `Applies to` values are degraded, not mismatch proof by themselves.
+unknown `Applies to` values are degraded, not mismatch proof by themselves. The
+article parser records bounded `applies_to` text and `applies_to_releases`
+when release values are parseable, and it stops heading/list extraction before
+unrelated sections such as prerequisites or known issues.
 Public MSRC CVRF data provides higher-confidence exact-KB-token security
 classification and compact CVE context when available; substring values such as
 `KB50941260`, `15094126`, or `5094126a` do not match `KB5094126`. Atom title
 buckets remain low-confidence labels; generic `OS Build(s)` wording is not
-security evidence. If validation is `mismatch`, the technical Atom diagnostic
+security evidence. Exact-KB remediation evidence is still security evidence
+even when optional CVE, severity, or product fields are absent; when present,
+CVEs, severities, and product IDs are sorted, deduplicated, and capped for
+bounded output. If validation is `mismatch`, the technical Atom diagnostic
 remains visible and the mismatch reasons are recorded, but article
 KB/title/build facts and Support-derived security wording are not trusted for
 the dashboard summary or `Security patch` tag. If validation is `degraded`,
@@ -156,6 +163,12 @@ legacy `internals: notices` label may still be searched only so older managed
 Notice issues with the exact body marker can be closed as stale. Labels alone do
 not make an issue managed; the internal body marker is required.
 
+The `required_baseline_matched_latest_observed` event is a dashboard-only
+notice emitted only when the active baseline-update notice exists. It explains
+that a real Release Health B-release required baseline has caught up to latest
+observed Microsoft evidence. It is never warning/error severity and is skipped
+by GitHub Issue sync.
+
 In the publish workflow, a GitHub Issues API, label, or permission failure in the
 sync step is published as static degraded metadata instead of blocking signed
 Pages output. The dashboard displays `Issue sync unavailable` from
@@ -178,8 +191,8 @@ note. When present, row export also includes additive enrichment fields such as
 `security_evidence_source`, `support_article_url`,
 `support_article_validation_status`, `support_article_validation_reasons`,
 `support_article_expected_kb`, `support_article_expected_build`,
-`support_article_expected_release`, `atom_entry_id`, and
-`atom_support_article_id`. It is meant for technical lookup and handoff of the
+`support_article_expected_release`, `support_article_applies_to_releases`,
+`atom_entry_id`, and `atom_support_article_id`. It is meant for technical lookup and handoff of the
 current dashboard state; it does not call GitHub, write browser-side data back
 to the repository, or change the signed policy verdict.
 
@@ -198,6 +211,7 @@ Issues or writing tokens.
 | Atom KB row has no Support article href. | `atom_support_article_href_missing` event. | Treat as source evidence gap; do not add a `/help/<KB>` resolver. |
 | Atom row links only to feed/API/search/download/static, non-support, or traversal URL. | `atom_support_article_href_missing` event with no latest-observed advancement. | Treat as unsafe or non-article evidence; use only a safe Atom `alternate` Support article URL. |
 | Support article KB/build/applies-to disagrees with Atom. | `support_article_enrichment_mismatch` event and validation reason codes. | Trust Atom KB/build/release and MSRC exact-KB evidence; do not use the mismatched article for summaries or Support-derived security labels. |
+| Required baseline catches up to latest observed build. | `baseline_update_notice` plus `required_baseline_matched_latest_observed` notice. | Treat as dashboard-only context; do not open or sync a GitHub Issue. |
 | Source diagnostics warning appears on dashboard. | Event kind and affected release/build. | Keep visible; only block if severity is error. |
 
 ## Verify

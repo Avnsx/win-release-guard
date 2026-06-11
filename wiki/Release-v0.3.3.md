@@ -22,7 +22,8 @@ Compact human summary of the `0.3.3` corrective source-evidence hardening releas
 | Build semantics | `latest_build` is Release Health Current Versions, `latest_observed_build` is newest supported public Microsoft evidence, and `required_baseline_build` is the signed baseline floor. |
 | Atom diagnostics | Multi-build Atom entries keep unique diagnostic IDs; canonical warnings can keep Atom-form IDs while sibling rows use deterministic hash-form IDs. |
 | Support validation | Support article URL, KB, build, and parseable applicability are validated before article facts enrich summaries or Support-derived security labels. |
-| MSRC joins | CVRF matching requires exact KB tokens; unavailable or malformed CVRF stays unknown/unavailable. |
+| MSRC joins | CVRF matching requires exact KB tokens; unavailable or malformed CVRF stays unknown/unavailable, and context lists are capped. |
+| Baseline notice | Caught-up real B-release baselines can show a 21-day dashboard-only notice without changing verdicts or issue sync. |
 | Dashboard | Static Pages keeps unique row IDs, visible validation status, copy/export JSON, no raw Support HTML, no tokens, no CDN, and no external JS/CSS/fonts. |
 | Handoff | `.tmp/prompt-chain/*.patch` files are local hints only; tracked edits, tests, docs where needed, and logical commits are required. |
 | PyPI lane | `pypi-publish.yml` builds wheel/sdist and publishes through Trusted Publishing / GitHub OIDC only after tag or published-release gates. |
@@ -39,17 +40,32 @@ rules select that same build, all three build fields can legitimately match.
 Atom discovers Support article hrefs; it is not a synthesized `/help/<KB>`
 resolver. The generator prefers safe Atom `alternate` links to
 `https://support.microsoft.com` article paths and records a Source Diagnostic
-when no usable support href exists.
+when no usable support href exists. Otherwise safe article URLs have tracking
+queries and fragments stripped; unsafe ports, userinfo, traversal, overlong
+paths, and non-support hosts still reject.
 
 Support article enrichment is trusted only after URL, KB, expected build, and
 parseable `Applies to` evidence are compatible with the Atom record. Mismatch
 and degraded statuses stay visible without dumping raw article HTML or treating
-mismatched article text as summary/security truth.
+mismatched article text as summary/security truth. The parser records bounded
+`applies_to` text and `applies_to_releases` when release values can be parsed.
 
 MSRC CVRF exact-KB-token evidence can still classify a KB as security when the
 Support article is bad. Larger tokens such as `KB50941260`, `15094126`, and
 `5094126a` do not match `KB5094126`, and malformed/unavailable CVRF data does
-not silently become non-security proof.
+not silently become non-security proof. Exact-KB remediation evidence remains
+security evidence even without optional CVE/severity/product fields; populated
+context lists are sorted, deduplicated, and capped.
+
+When a real non-preview, non-OOB Release Health B-release row becomes the
+required baseline and matches the broad target's latest observed build, the
+dashboard can show an informational blue/white baseline-update notice for 21
+days from the source-derived official baseline date. It labels date-only
+Release Health precision explicitly and uses deterministic local facts from
+Release Health, Atom, validated Support, and exact MSRC data. It does not call
+an LLM or cloud API, and it does not change signed verdicts, baseline
+selection, Source Diagnostics issue sync, runtime behavior, or `/api/v1`
+aliases.
 
 ## Generated Output Coverage
 
@@ -85,6 +101,7 @@ existing secure signing workflow with the real policy signing key.
 | WUA | Optional read-only secondary probe; never decides the policy verdict. |
 | Panther/setup logs | Administrator troubleshooting evidence only. |
 | Source Diagnostics | Source-health evidence only; notices are dashboard-only and not issue-syncable. |
+| Baseline notice | Informational dashboard output only. |
 | 26H1 | New-devices-only / excluded for existing devices. |
 | `/api/v1` | Existing public aliases remain compatible. |
 

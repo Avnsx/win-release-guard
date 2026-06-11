@@ -21,6 +21,7 @@ private state, or decide signed policy semantics.
 | --- | --- |
 | Header | Product display name, program version, dashboard/wiki/repo links. |
 | Target cards | Broad target, required baseline, latest observed build, and latest-observed evidence label. |
+| Baseline update notice | Dashboard-only notice when a real B-release required baseline catches up to latest observed evidence. |
 | Feed currency | Generated time, live age state, thresholds. |
 | Source diagnostics | Notice/warning/error filters, counts, source health tiles, drift or parser events. |
 | Excluded releases | Data-driven existing-device exclusion summary. |
@@ -95,11 +96,24 @@ value.
 
 Atom is discovery for Support article hrefs, not a synthesized `/help/<KB>`
 resolver. The generator uses safe Atom `alternate` support article links,
-validates fetched Support article URL, KB, build, and parseable applicability
+canonicalizes otherwise safe support URLs by stripping query strings and
+fragments, validates fetched Support article URL, KB, build, and parseable applicability
 before trusting article facts, and keeps mismatch/degraded status visible in
 Source Diagnostics. MSRC CVRF joins require exact KB-token matches; substring
 matches and malformed/unavailable CVRF data must not silently become
 non-security proof.
+
+When the broad target's required baseline is selected from a real non-preview,
+non-OOB Release Health B-release row and catches up to
+`latest_observed_build`, the dashboard can render a blue/white baseline-update
+notice above `Policy Feed Currency` and `Source Diagnostics`. It is
+informational only, lasts 21 days from the source-derived official baseline
+date, labels Release Health date-only precision when Microsoft provides only a
+date, and uses deterministic local summary text from Release Health, Atom,
+validated Support facts, and exact MSRC evidence. It never calls an LLM, cloud
+API, GitHub runtime API, external JS/CSS/font/CDN, or changes the signed
+policy verdict, required baseline selection, issue sync, runtime client
+behavior, or `/api/v1` aliases.
 
 ## Rules
 
@@ -108,6 +122,7 @@ non-security proof.
 | Keep dashboard static and no-token. | Add backend runtime dependencies. |
 | Keep JavaScript inline and local. | Add external JS/CSS/fonts/CDNs. |
 | Keep public endpoints stable. | Break API aliases or published URL fields. |
+| Keep baseline-update notices informational. | Treat the notice as compliance logic or GitHub Issue input. |
 | Preserve source diagnostics visibility. | Hide parser/source drift events. |
 
 GitHub Actions schedules are best-effort platform automation and do not guarantee a refresh time. Treat live endpoint checks and generated timestamps as operational truth.

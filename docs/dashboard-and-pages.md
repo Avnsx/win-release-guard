@@ -51,6 +51,7 @@ Generated HTML pages include a `<title>`, a concise `meta description`, a canoni
 | --- | --- |
 | Target summary | Broad target, required baseline, latest observed build, and latest-observed evidence label. |
 | Excluded releases | Data-driven 26H1 existing-device exclusion summary. |
+| Baseline update notice | Informational full-width notice when a real B-release required baseline catches up to latest observed evidence. |
 | Feed currency | Latest generated/compiled timestamp for the parsed policy results, live age state, 14/45-day thresholds. |
 | Source diagnostics | Keyboard-accessible severity filters, deterministic diagnostic IDs, counts, events, source health tiles, drift warnings. |
 | Programmatic API | Canonical and `/api/v1` endpoint links. |
@@ -74,8 +75,9 @@ select the same build, `latest_build`, `latest_observed_build`, and
 Atom is discovery, not a KB resolver. The generator selects only safe Atom
 `alternate` links to `https://support.microsoft.com` article paths. It ignores
 `self` links, feed/API/search/download/static paths, non-support hosts,
-userinfo, fragments, traversal patterns, and overlong URLs; accepted evidence
-URLs are canonicalized without tracking query strings. If an Atom KB row lacks a
+userinfo, unsafe ports, traversal patterns, and overlong URLs; otherwise safe
+evidence URLs accept no port or explicit `:443` and are canonicalized without
+tracking query strings or fragments. If an Atom KB row lacks a
 usable Support article href, the generator records
 `atom_support_article_href_missing` evidence instead of fetching `/help/<KB>`.
 Legacy `/help/<digits>` paths remain valid only when they came directly from
@@ -90,14 +92,20 @@ lag.
 
 Support article enrichment is trusted only after the fetched article matches the
 Atom record's selected support URL, KB, expected build, and parseable
-applicability. Empty or unknown `Applies to` evidence is degraded, not treated
-as proof of mismatch by itself. Mismatched article KB/build/release evidence
+applicability. The bounded `Applies to` extractor handles compact paragraphs,
+heading/list blocks, and heading/paragraph blocks, stops at following sections,
+and records `applies_to_releases` such as `["24H2", "25H2"]` when release
+values are parseable. Empty or unknown `Applies to` evidence is degraded, not
+treated as proof of mismatch by itself. Mismatched article KB/build/release evidence
 remains visible as Source Diagnostics validation metadata, but it is not used
 for administrator summaries, Support-derived security labels, or `Security
 patch` tags. MSRC CVRF joins use exact KB tokens only, so values such as
 `KB50941260`, `15094126`, or `5094126a` do not classify `KB5094126` as security
-evidence. If a partial article is compatible but incomplete, rows carry a
-compact degraded reason and stay grounded in Atom KB/build/release facts.
+evidence. Exact-KB remediation evidence still marks the KB as security even
+when optional CVE, severity, or product fields are absent; when those fields are
+present, context lists are sorted, deduplicated, and capped. If a partial
+article is compatible but incomplete, rows carry a compact degraded reason and
+stay grounded in Atom KB/build/release facts.
 
 Small info icons beside dashboard section labels are static links to the related
 Pages Wiki sections. Their hover/focus panels contain a compact explanation plus
@@ -109,6 +117,20 @@ the operations dashboard, before the `Policy Feed Currency` and `Source
 Diagnostics` panels. They must not appear as a late footer-like panel after the
 signature/API rows because warning state needs to be visible before readers scan
 the lower operational details.
+
+When `source_diagnostics.baseline_update_notice.active` is true, the dashboard
+renders a blue/white informational notice above the `Policy Feed Currency` and
+`Source Diagnostics` panels. It appears only when the broad target's
+`required_baseline_build` came from a real non-preview, non-OOB Release Health
+B-release row and now matches `latest_observed_build`. The notice uses
+deterministic local summary text from Release Health, Atom, validated Support
+article facts, and exact MSRC KB evidence; it does not use an LLM, cloud API,
+browser token, or external JavaScript. Microsoft date-only source precision is
+shown as date-only, the visibility window is 21 days from the source-derived
+official baseline date, and a small inline script hides stale static notices
+after `visible_until_utc` without fetching network resources. The notice is
+dashboard-only: it does not alter signed policy verdicts, required-baseline
+selection, `/api/v1` aliases, runtime client behavior, or GitHub Issue sync.
 
 The Source Diagnostics count tiles for Notices, Warnings, and Errors are native
 buttons. Selecting one filters the event feed to that severity, updates
@@ -169,6 +191,7 @@ as static HTML so missing ticket links are visible without client-side API calls
 | --- | --- |
 | Keep Pages static and GitHub-Pages-compatible. | Add external JS, CSS, fonts, CDN dependencies, or backend runtime assumptions. |
 | Keep Source Diagnostics issue sync in GitHub Actions. | Create GitHub Issues from browser JavaScript or embed GitHub tokens in the dashboard. |
+| Keep baseline-update notices informational and dashboard-only. | Use a notice to change policy verdicts, baseline selection, or issue sync. |
 | Keep API aliases byte-equivalent unless manifest documents a compatible difference. | Break `/api/v1` paths. |
 | Preserve no-JavaScript fallback text for feed age. | Rely only on render-time generated age. |
 
