@@ -18,6 +18,7 @@ from win11_release_guard.remote_policy import (
 
 ATOM_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
 HASH_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:1111111111111111"
+SIBLING_HASH_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:2222222222222222"
 
 
 def _fixture_html() -> str:
@@ -384,6 +385,51 @@ def test_json_source_diagnostics_accepts_supported_diagnostic_id_forms():
     }
 
 
+def test_json_source_diagnostics_accepts_atom_canonical_and_sibling_hash_ids():
+    data = _json_policy()
+    data["source_diagnostics"] = {
+        "events": [
+            {
+                "id": SIBLING_HASH_SOURCE_DIAGNOSTIC_ID,
+                "severity": "notice",
+                "kind": "atom_newer_than_release_history",
+                "release": "24H2",
+                "build_family": 26100,
+                "build": "26100.8655",
+                "kb_article": "KB5094126",
+                "atom_entry_id": "uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
+                "atom_support_article_id": "968480",
+            },
+            {
+                "id": ATOM_SOURCE_DIAGNOSTIC_ID,
+                "severity": "warning",
+                "kind": "atom_newer_than_release_history",
+                "release": "25H2",
+                "build_family": 26200,
+                "build": "26200.8655",
+                "kb_article": "KB5094126",
+                "atom_entry_id": "uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
+                "atom_support_article_id": "968480",
+            },
+        ],
+        "issue_status": {
+            ATOM_SOURCE_DIAGNOSTIC_ID: {
+                "number": 42,
+                "state": "open",
+                "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+            },
+        },
+    }
+
+    policy = load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
+
+    assert [event["id"] for event in policy.source_diagnostics["events"]] == [
+        SIBLING_HASH_SOURCE_DIAGNOSTIC_ID,
+        ATOM_SOURCE_DIAGNOSTIC_ID,
+    ]
+    assert policy.source_diagnostics["events"][0]["atom_support_article_id"] == "968480"
+
+
 @pytest.mark.parametrize(
     "diagnostic_id",
     (
@@ -415,6 +461,27 @@ def test_json_source_diagnostics_rejects_malformed_event_ids(diagnostic_id: str)
     }
 
     with pytest.raises(PolicyParseError, match=r"source_diagnostics\.events\[0\]\.id"):
+        load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
+
+
+def test_json_source_diagnostics_rejects_duplicate_event_ids():
+    data = _json_policy()
+    data["source_diagnostics"] = {
+        "events": [
+            {
+                "id": HASH_SOURCE_DIAGNOSTIC_ID,
+                "severity": "warning",
+                "kind": "probe",
+            },
+            {
+                "id": HASH_SOURCE_DIAGNOSTIC_ID,
+                "severity": "notice",
+                "kind": "probe_sibling",
+            },
+        ],
+    }
+
+    with pytest.raises(PolicyParseError, match="source_diagnostics.events ids must be unique"):
         load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
 
 

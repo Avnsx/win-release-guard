@@ -25,7 +25,12 @@ FRESHNESS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="policy-freshness-data">(.*?)</script>',
     re.DOTALL,
 )
-SOURCE_DIAGNOSTIC_ID_RE = re.compile(r'data-diagnostic-id="(wrg-source-diagnostic-v1:[0-9a-f]{16})"')
+SOURCE_DIAGNOSTIC_ID_RE = re.compile(
+    r'data-diagnostic-id="'
+    r"(wrg-source-diagnostic-v1:"
+    r"(?:[0-9a-f]{16}|uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12};id=[1-9][0-9]*))"
+    r'"'
+)
 ATOM_ENTRY_ID = "uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
 ATOM_SOURCE_DIAGNOSTIC_ID = f"wrg-source-diagnostic-v1:{ATOM_ENTRY_ID}"
 KB5094126_SUPPORT_URL = (

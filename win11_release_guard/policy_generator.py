@@ -5138,6 +5138,7 @@ def _source_diagnostic_id(
     affects_required_baseline: Any = None,
     source_url: Any = None,
     allow_message_fallback: bool = False,
+    extra_identity_fields: Mapping[str, Any] | None = None,
 ) -> str:
     tag_fields = _source_diagnostic_id_tag_fields(tags)
     category = kind if _source_diagnostic_has_id_value(kind) else title
@@ -5171,6 +5172,11 @@ def _source_diagnostic_id(
     normalized_source_url = _source_diagnostic_id_url_host_path(source_url)
     if normalized_source_url:
         fields["source_url"] = _source_diagnostic_id_payload_field(normalized_source_url)
+
+    for key, value in sorted((extra_identity_fields or {}).items(), key=lambda item: str(item[0])):
+        if value in (None, ""):
+            continue
+        fields[f"extra_{key}"] = _source_diagnostic_id_payload_field(value)
 
     if allow_message_fallback and not any(
         key in fields
@@ -5277,10 +5283,30 @@ def _source_diagnostic_id_hint_for_event(event: Mapping[str, Any]) -> str | None
     return None
 
 
-def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
-    hint = _source_diagnostic_id_hint_for_event(event)
-    if hint is not None:
-        return hint
+def _atom_diagnostic_id_from_event(event: Mapping[str, Any]) -> str | None:
+    for key in ("diagnostic_id_hint", "id"):
+        diagnostic_id = _source_diagnostic_id_text(event.get(key))
+        if (
+            diagnostic_id.startswith(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:uuid:")
+            and _is_source_diagnostic_id(diagnostic_id)
+        ):
+            return diagnostic_id
+    atom_entry_id = _source_diagnostic_id_text(event.get("atom_entry_id"))
+    if atom_entry_id:
+        diagnostic_id = f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:{atom_entry_id}"
+        if (
+            diagnostic_id.startswith(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:uuid:")
+            and _is_source_diagnostic_id(diagnostic_id)
+        ):
+            return diagnostic_id
+    return None
+
+
+def _source_diagnostic_hash_id_for_event(
+    event: Mapping[str, Any],
+    *,
+    extra_identity_fields: Mapping[str, Any] | None = None,
+) -> str:
     kind = event.get("kind")
     severity = _source_diagnostic_event_severity(event.get("severity"))
     title = _source_diagnostic_event_label(kind)
@@ -5299,17 +5325,121 @@ def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
         affects_broad_target=event.get("affects_broad_target"),
         affects_required_baseline=event.get("affects_required_baseline"),
         source_url=event.get("source_url") or event.get("url") or event.get("atom_feed_url"),
+        extra_identity_fields=extra_identity_fields,
     )
 
 
-def _source_diagnostic_event_with_id(event: Mapping[str, Any]) -> dict[str, Any]:
-    item = dict(event)
-    item["id"] = _source_diagnostic_id_for_event(item)
-    return item
+def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
+    hint = _source_diagnostic_id_hint_for_event(event)
+    if hint is not None:
+        return hint
+    return _source_diagnostic_hash_id_for_event(event)
+
+
+def _atom_canonical_event_key(index: int, event: Mapping[str, Any]) -> tuple[Any, ...]:
+    severity = _source_diagnostic_event_severity(event.get("severity"))
+    build_major, build_minor = _build_key(str(event.get("build") or ""))
+    return (
+        0 if severity == "warning" else 1 if severity == "error" else 2,
+        0 if _source_diagnostic_id_bool(event.get("affects_required_baseline")) is True else 1,
+        0 if _source_diagnostic_id_bool(event.get("affects_broad_target")) is True else 1,
+        -build_major,
+        -build_minor,
+        _source_diagnostic_id_text(event.get("kind")),
+        _source_diagnostic_id_text(event.get("release")),
+        _source_diagnostic_id_text(event.get("build")),
+        index,
+    )
+
+
+def _canonical_atom_event_indexes(events: Sequence[Mapping[str, Any]]) -> dict[int, str]:
+    groups: dict[str, list[tuple[int, Mapping[str, Any]]]] = {}
+    for index, event in enumerate(events):
+        atom_diagnostic_id = _atom_diagnostic_id_from_event(event)
+        if atom_diagnostic_id is not None:
+            groups.setdefault(atom_diagnostic_id, []).append((index, event))
+
+    canonical: dict[int, str] = {}
+    for atom_diagnostic_id, candidates in groups.items():
+        index, _ = min(candidates, key=lambda item: _atom_canonical_event_key(item[0], item[1]))
+        canonical[index] = atom_diagnostic_id
+    return canonical
+
+
+def _event_atom_entry_identity(event: Mapping[str, Any]) -> str | None:
+    atom_entry_id = _source_diagnostic_id_text(event.get("atom_entry_id"))
+    if atom_entry_id:
+        return atom_entry_id
+    atom_diagnostic_id = _atom_diagnostic_id_from_event(event)
+    if atom_diagnostic_id:
+        return atom_diagnostic_id.removeprefix(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
+    return None
+
+
+def _source_diagnostic_collision_hash_id(
+    event: Mapping[str, Any],
+    *,
+    event_index: int,
+    collision_id: str,
+    collision_round: int,
+) -> str:
+    return _source_diagnostic_hash_id_for_event(
+        event,
+        extra_identity_fields={
+            "atom_entry_id": _event_atom_entry_identity(event),
+            "collision_id": collision_id,
+            "collision_round": collision_round,
+            "event_index": event_index,
+            "diagnostic_id_hint": event.get("diagnostic_id_hint"),
+        },
+    )
+
+
+def _resolve_source_diagnostic_id_collisions(
+    events: list[dict[str, Any]],
+    *,
+    protected_indexes: set[int],
+) -> list[dict[str, Any]]:
+    for collision_round in range(1, 6):
+        by_id: dict[str, list[int]] = {}
+        for index, event in enumerate(events):
+            by_id.setdefault(str(event.get("id") or ""), []).append(index)
+        collisions = {diagnostic_id: indexes for diagnostic_id, indexes in by_id.items() if len(indexes) > 1}
+        if not collisions:
+            return events
+        for diagnostic_id, indexes in sorted(collisions.items()):
+            protected = [index for index in indexes if index in protected_indexes]
+            keep = min(protected or indexes)
+            for index in indexes:
+                if index == keep:
+                    continue
+                events[index]["id"] = _source_diagnostic_collision_hash_id(
+                    events[index],
+                    event_index=index,
+                    collision_id=diagnostic_id,
+                    collision_round=collision_round,
+                )
+    raise PolicyParseError("Could not assign unique source diagnostic IDs.")
 
 
 def _source_diagnostic_events_with_ids(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_source_diagnostic_event_with_id(event) for event in events]
+    items = [dict(event) for event in events]
+    canonical_atom_indexes = _canonical_atom_event_indexes(items)
+    for index, item in enumerate(items):
+        atom_diagnostic_id = _atom_diagnostic_id_from_event(item)
+        if index in canonical_atom_indexes:
+            item["id"] = canonical_atom_indexes[index]
+        elif atom_diagnostic_id is not None:
+            item["id"] = _source_diagnostic_hash_id_for_event(
+                item,
+                extra_identity_fields={"atom_entry_id": _event_atom_entry_identity(item)},
+            )
+        else:
+            item["id"] = _source_diagnostic_id_for_event(item)
+    return _resolve_source_diagnostic_id_collisions(
+        items,
+        protected_indexes=set(canonical_atom_indexes),
+    )
 
 
 def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -5319,23 +5449,11 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
     message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
     source = _source_diagnostic_source_label(kind)
     tags = _source_diagnostic_event_tags(event)
-    diagnostic_id = _source_diagnostic_id_hint_for_event(event)
+    diagnostic_id = _source_diagnostic_id_text(event.get("id"))
+    if not _is_source_diagnostic_id(diagnostic_id):
+        diagnostic_id = _source_diagnostic_id_hint_for_event(event)
     if diagnostic_id is None:
-        diagnostic_id = _source_diagnostic_id(
-            severity=severity,
-            source=source,
-            title=title,
-            message=message,
-            tags=tags,
-            kind=kind,
-            release=event.get("release"),
-            build_family=event.get("build_family"),
-            build=event.get("build"),
-            kb_article=event.get("kb_article"),
-            affects_broad_target=event.get("affects_broad_target"),
-            affects_required_baseline=event.get("affects_required_baseline"),
-            source_url=event.get("source_url") or event.get("url") or event.get("atom_feed_url"),
-        )
+        diagnostic_id = _source_diagnostic_hash_id_for_event(event)
     row: dict[str, Any] = {
         "id": diagnostic_id,
         "severity": severity,
@@ -5421,10 +5539,10 @@ def _source_diagnostic_rows(policy: ReleasePolicy, *, generated_age_days: float)
     raw_events = source_diagnostics.get("events")
     rows: list[dict[str, Any]] = []
     if isinstance(raw_events, list):
+        event_items = [dict(event) for event in raw_events if isinstance(event, Mapping)]
         rows.extend(
             _source_diagnostic_row_from_event(event)
-            for event in raw_events
-            if isinstance(event, Mapping)
+            for event in _source_diagnostic_events_with_ids(event_items)
         )
 
     if not rows:

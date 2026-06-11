@@ -176,6 +176,7 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
     if events is not None:
         if not isinstance(events, list):
             raise PolicyParseError("source_diagnostics.events must be a list.")
+        seen_event_ids: set[str] = set()
         for index, event in enumerate(events):
             if not isinstance(event, Mapping):
                 raise PolicyParseError(f"source_diagnostics.events[{index}] must be an object.")
@@ -195,6 +196,10 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
                 raise PolicyParseError(
                     f"source_diagnostics.events[{index}].id must be a source diagnostic id."
                 )
+            if isinstance(diagnostic_id, str):
+                if diagnostic_id in seen_event_ids:
+                    raise PolicyParseError("source_diagnostics.events ids must be unique.")
+                seen_event_ids.add(diagnostic_id)
             release = event.get("release")
             if release is not None:
                 _release(release, f"source_diagnostics.events[{index}].release")

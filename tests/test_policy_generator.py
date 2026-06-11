@@ -193,6 +193,24 @@ def _kb5094126_msrc_fixture() -> dict[str, object]:
     return json.loads((FIXTURES / "msrc-cvrf-2026-Jun-kb5094126.json").read_text(encoding="utf-8"))
 
 
+def _kb5094126_fixture_policy() -> ReleasePolicy:
+    def support_fetcher(url: str, timeout: float, max_bytes: int) -> str:
+        assert url == KB5094126_SUPPORT_URL
+        return _kb5094126_support_fixture()
+
+    def msrc_fetcher(url: str, timeout: float, max_bytes: int) -> dict[str, object]:
+        assert url == "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf/2026-Jun"
+        return _kb5094126_msrc_fixture()
+
+    return generate_policy(
+        release_health_html=_html_file("windows11-release-health-header-variants.html"),
+        atom_feed_xml=_kb5094126_atom_fixture(),
+        generated_at_utc="2026-06-11T00:00:00+00:00",
+        support_article_fetcher=support_fetcher,
+        msrc_cvrf_fetcher=msrc_fetcher,
+    )
+
+
 @pytest.mark.parametrize(
     "diagnostic_id",
     (
@@ -1190,6 +1208,69 @@ def test_source_diagnostics_atom_entry_id_propagates_to_event_and_dashboard() ->
     index = policy_generator_module.render_policy_index(policy, policy_bytes=None, signature=None)
     assert f'data-diagnostic-id="{ATOM_SOURCE_DIAGNOSTIC_ID}"' in index
     assert "diagnostic_id:row.getAttribute('data-diagnostic-id')||''" in index
+
+
+def test_kb5094126_multi_build_atom_events_get_unique_diagnostic_ids() -> None:
+    policy = _kb5094126_fixture_policy()
+    events = [
+        event
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history"
+        and event["kb_article"] == "KB5094126"
+        and event["build"] in {"26100.8655", "26200.8655"}
+    ]
+
+    assert [(event["severity"], event["release"], event["build"]) for event in events] == [
+        ("notice", "24H2", "26100.8655"),
+        ("warning", "25H2", "26200.8655"),
+    ]
+    ids = [event["id"] for event in events]
+    assert len(set(ids)) == len(ids)
+
+    notice = next(event for event in events if event["build"] == "26100.8655")
+    warning = next(event for event in events if event["build"] == "26200.8655")
+    assert warning["id"] == ATOM_SOURCE_DIAGNOSTIC_ID
+    assert re.fullmatch(r"wrg-source-diagnostic-v1:[0-9a-f]{16}", notice["id"])
+    assert notice["id"] != ATOM_SOURCE_DIAGNOSTIC_ID
+    for event in (notice, warning):
+        assert event["atom_entry_id"] == ATOM_ENTRY_ID
+        assert event["atom_support_article_id"] == ATOM_SUPPORT_ARTICLE_ID
+        assert event["support_url"] == KB5094126_SUPPORT_URL
+        assert event["source_url"] == KB5094126_SUPPORT_URL
+        assert "id=968480" in policy_generator_module._source_diagnostic_event_tags(event)
+    validate_policy_document(policy.to_dict())
+
+
+def test_kb5094126_dashboard_rows_and_visible_export_ids_are_unique(tmp_path: Path) -> None:
+    policy = _kb5094126_fixture_policy()
+    written = write_policy_outputs(policy, output_dir=tmp_path, write_index=True, write_manifest=True)
+    index = written["index"].read_text(encoding="utf-8")
+    row_ids = re.findall(
+        r'data-diagnostic-id="(wrg-source-diagnostic-v1:(?:[0-9a-f]{16}|uuid:[0-9a-f-]{36};id=[1-9][0-9]*))"',
+        index,
+    )
+    event_ids = [
+        event["id"]
+        for event in policy.source_diagnostics["events"]
+        if event["kind"] == "atom_newer_than_release_history"
+    ]
+
+    assert len(set(row_ids)) == len(row_ids)
+    assert set(event_ids) <= set(row_ids)
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in row_ids
+    assert "function visibleDiagnosticEntries()" in index
+    assert "diagnostic_id:row.getAttribute('data-diagnostic-id')||''" in index
+
+    export_like_ids = [
+        match.group(1)
+        for match in re.finditer(
+            r'<article class="diag-row [^"]+" data-diagnostic-severity="[^"]+" '
+            r'data-diagnostic-id="([^"]+)"',
+            index,
+        )
+    ]
+    assert export_like_ids == row_ids
+    assert len(set(export_like_ids)) == len(export_like_ids)
 
 
 def test_atom_support_latest_observed_does_not_change_required_baseline() -> None:

@@ -229,6 +229,35 @@ def test_issue_title_uses_atom_support_article_id_event_field_for_hash_fallback(
     assert sync_tool.issue_title(diagnostic).endswith("[id=968480]")
 
 
+def test_issue_sync_ignores_atom_notice_sibling_but_keeps_warning_title_suffix() -> None:
+    notice_id = "wrg-source-diagnostic-v1:2222222222222222"
+    events = [
+        _event(
+            notice_id,
+            severity="notice",
+            release="24H2",
+            build_family=26100,
+            build="26100.8655",
+            atom_entry_id="uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
+            atom_support_article_id="968480",
+        ),
+        _event(
+            ATOM_SOURCE_DIAGNOSTIC_ID,
+            severity="warning",
+            release="25H2",
+            build_family=26200,
+            build="26200.8655",
+            atom_entry_id="uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
+            atom_support_article_id="968480",
+        ),
+    ]
+
+    diagnostics = sync_tool.diagnostics_from_policy(_policy(events))
+
+    assert [diagnostic.diagnostic_id for diagnostic in diagnostics] == [ATOM_SOURCE_DIAGNOSTIC_ID]
+    assert sync_tool.issue_title(diagnostics[0]).endswith("[id=968480]")
+
+
 def test_issue_title_trims_base_title_without_corrupting_atom_suffix() -> None:
     diagnostic = sync_tool.diagnostics_from_policy(
         _policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID, title="A" * 300)])
