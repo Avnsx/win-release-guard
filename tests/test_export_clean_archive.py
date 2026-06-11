@@ -111,7 +111,9 @@ def _write_minimal_required_archive(archive_path: Path, forbidden_entry: str) ->
     "forbidden_entry",
     [
         ".git/config",
+        ".pytest_cache/v/cache/nodeids",
         ".tmp/signing-test/private-key.b64",
+        ".tmp/prompt-chain/final-combined.patch",
         "private-key.b64",
         "site/windows-release-policy.json",
         "generated_site/index.html",

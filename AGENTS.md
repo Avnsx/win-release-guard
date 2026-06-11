@@ -81,11 +81,14 @@ Canonical repository and feed:
   for JSON captures.
 - CodeQL code scanning is configured by `.github/workflows/codeql.yml`. If GitHub code scanning is disabled in repository settings, enable it under Settings, Code security and analysis.
 - Handover files are temporary local artifacts. Do not commit or publish `*handover*.md`; they are ignored and excluded from clean archives.
+- `.tmp/prompt-chain/*.patch` files are local hints only. A task is
+  implemented only when the intended behavior exists in tracked files, tests
+  pass, required docs are updated, and logical commits exist.
 - The only recommended handoff artifact is the validated clean archive created
   with `python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip`
   and checked with
   `python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip`.
-  Do not share raw worktree ZIPs because they can include `.git/`, `.tmp/`,
+  Raw worktree ZIPs are not release artifacts because they can include `.git/`, `.tmp/`,
   `site/`, `dist/`, pycache, package metadata, and private signing-key scratch
   files.
 - The signed bundled policy JSON must use the current `win11_release_guard` identity and must verify against its detached signature.

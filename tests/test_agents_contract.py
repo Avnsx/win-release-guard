@@ -174,7 +174,17 @@ def test_agents_contract_requires_validated_clean_archive_for_handoff() -> None:
     assert "only recommended handoff artifact is the validated clean archive" in text
     assert "python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip" in text
     assert "python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip" in text
-    assert "Do not share raw worktree ZIPs" in text
+    assert "Raw worktree ZIPs are not release artifacts" in text
     assert ".git/" in text
     assert ".tmp/" in text
     assert "private signing-key scratch" in text
+
+
+def test_agents_contract_rejects_patch_only_task_completion() -> None:
+    text = _agents_text()
+
+    assert "`.tmp/prompt-chain/*.patch` files are local hints only" in text
+    assert "implemented only when the intended behavior exists in tracked files" in text
+    assert "tests\n  pass" in text
+    assert "required docs are updated" in text
+    assert "logical commits exist" in text
