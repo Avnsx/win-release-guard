@@ -26,7 +26,7 @@ from .models import (
     ReleasePolicyEntry,
     ServicingChannel,
 )
-from .policy_schema import SUPPORTED_POLICY_SCHEMA_VERSION
+from .policy_schema import SUPPORTED_POLICY_SCHEMA_VERSION, is_source_diagnostic_id
 
 
 HttpGet = Callable[..., Any]
@@ -912,6 +912,22 @@ def _validate_build(value: Any, field: str, *, required: bool = False) -> str | 
     return build
 
 
+def _build_key(value: str) -> tuple[int, int]:
+    major, minor = value.split(".", 1)
+    return int(major), int(minor)
+
+
+def _validate_latest_observed_build(
+    latest_build: str | None,
+    latest_observed_build: str | None,
+    field: str,
+) -> None:
+    if latest_build is None or latest_observed_build is None:
+        return
+    if _build_key(latest_observed_build) < _build_key(latest_build):
+        raise PolicyParseError(f"{field} must not be older than latest_build.")
+
+
 def _entry_has_explicit_baseline(data: Mapping[str, Any], target: Mapping[str, Any]) -> bool:
     if _validate_build(target.get("baseline_build"), "broad_target_existing_devices.baseline_build"):
         return True
@@ -972,6 +988,35 @@ def _compatibility_warnings(data: Mapping[str, Any], allowed_keys: set[str]) -> 
         for key in unknown_keys
     )
     return warnings
+
+
+def _validate_source_diagnostic_ids(data: Mapping[str, Any]) -> None:
+    source_diagnostics = data.get("source_diagnostics")
+    if source_diagnostics is None:
+        return
+    if not isinstance(source_diagnostics, Mapping):
+        raise PolicyParseError("source_diagnostics must be an object.")
+
+    events = source_diagnostics.get("events")
+    if events is not None:
+        if not isinstance(events, list):
+            raise PolicyParseError("source_diagnostics.events must be a list.")
+        for index, event in enumerate(events):
+            if not isinstance(event, Mapping):
+                raise PolicyParseError(f"source_diagnostics.events[{index}] must be an object.")
+            diagnostic_id = event.get("id")
+            if diagnostic_id is not None and not is_source_diagnostic_id(diagnostic_id):
+                raise PolicyParseError(
+                    f"source_diagnostics.events[{index}].id must be a source diagnostic id."
+                )
+
+    issue_status = source_diagnostics.get("issue_status")
+    if issue_status is not None:
+        if not isinstance(issue_status, Mapping):
+            raise PolicyParseError("source_diagnostics.issue_status must be an object.")
+        for diagnostic_id in issue_status:
+            if not is_source_diagnostic_id(diagnostic_id):
+                raise PolicyParseError("source_diagnostics.issue_status keys must be source diagnostic ids.")
 
 
 def _normalize_json_policy_data(
@@ -1041,6 +1086,7 @@ def _normalize_json_policy_data(
         published_urls=published_urls,
     ):
         warnings.append("Loaded policy URL is not listed in published_urls or source_urls.")
+    _validate_source_diagnostic_ids(data)
 
     current_versions = _require_sequence(data, "current_versions")
     normalized_current_versions: list[Mapping[str, Any]] = []
@@ -1055,8 +1101,11 @@ def _normalize_json_policy_data(
             item.get("latest_observed_build"),
             f"current_versions[{index}].latest_observed_build",
         )
-        if latest_build and latest_observed and latest_observed != latest_build:
-            raise PolicyParseError(f"current_versions[{index}].latest_observed_build must match latest_build.")
+        _validate_latest_observed_build(
+            latest_build,
+            latest_observed,
+            f"current_versions[{index}].latest_observed_build",
+        )
         baseline_build = _validate_build(item.get("baseline_build"), f"current_versions[{index}].baseline_build")
         required_baseline = _validate_build(
             item.get("required_baseline_build"),
@@ -1092,8 +1141,11 @@ def _normalize_json_policy_data(
         broad_target.get("latest_observed_build"),
         "broad_target_existing_devices.latest_observed_build",
     )
-    if target_latest_build and target_latest_observed and target_latest_observed != target_latest_build:
-        raise PolicyParseError("broad_target_existing_devices.latest_observed_build must match latest_build.")
+    _validate_latest_observed_build(
+        target_latest_build,
+        target_latest_observed,
+        "broad_target_existing_devices.latest_observed_build",
+    )
     target_baseline_build = _validate_build(
         broad_target.get("baseline_build"),
         "broad_target_existing_devices.baseline_build",

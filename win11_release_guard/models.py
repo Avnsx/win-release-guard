@@ -740,6 +740,7 @@ class ReleasePolicyEntry:
     latest_build: str | None = None
     baseline_build: str | None = None
     required_baseline_build: str | None = None
+    latest_observed_build: str | None = None
     servicing_option: str | None = None
     availability_date: str | None = None
     reason: str | None = None
@@ -752,6 +753,8 @@ class ReleasePolicyEntry:
         object.__setattr__(self, "version", self.version.upper())
         object.__setattr__(self, "build_family", int(self.build_family))
         object.__setattr__(self, "latest_build", _optional_str(self.latest_build))
+        latest_observed = _optional_str(self.latest_observed_build) or self.latest_build
+        object.__setattr__(self, "latest_observed_build", latest_observed)
         object.__setattr__(self, "baseline_build", _optional_str(self.baseline_build))
         required_baseline = _optional_str(self.required_baseline_build)
         if required_baseline is None:
@@ -791,10 +794,6 @@ class ReleasePolicyEntry:
     def effective_baseline_build(self) -> str | None:
         return self.required_baseline_build or self.baseline_build or self.latest_build
 
-    @property
-    def latest_observed_build(self) -> str | None:
-        return self.latest_build
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
@@ -818,6 +817,7 @@ class ReleasePolicyEntry:
             version=str(data["version"]),
             build_family=int(data["build_family"]),
             latest_build=_optional_str(data.get("latest_build")),
+            latest_observed_build=_optional_str(data.get("latest_observed_build")),
             baseline_build=_optional_str(data.get("baseline_build")),
             required_baseline_build=_optional_str(data.get("required_baseline_build")),
             servicing_option=_optional_str(data.get("servicing_option")),

@@ -262,9 +262,9 @@ def test_cli_pretty_compliant_exit_code(monkeypatch, capsys):
 def test_cli_pretty_shows_required_baseline_and_latest_observed(monkeypatch, capsys):
     base_policy = _policy()
     assert base_policy.broad_target_existing_devices is not None
-    target = replace(base_policy.broad_target_existing_devices, latest_build="26200.8524")
+    target = replace(base_policy.broad_target_existing_devices, latest_observed_build="26200.8524")
     current_versions = tuple(
-        replace(entry, latest_build="26200.8524")
+        replace(entry, latest_observed_build="26200.8524")
         if entry.version == "25H2" and entry.build_family == 26200
         else entry
         for entry in base_policy.current_versions

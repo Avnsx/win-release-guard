@@ -17,14 +17,16 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from win11_release_guard.config import DEFAULT_PAGES_BASE_URL, DEFAULT_POLICY_URL
+from win11_release_guard.policy_schema import SOURCE_DIAGNOSTIC_ID_PATTERN_TEXT, is_source_diagnostic_id
 
 
 DIAGNOSTIC_ID_COMMENT_PREFIX = "wrg-source-diagnostic-id"
-DIAGNOSTIC_ID_RE = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
 DIAGNOSTIC_ID_COMMENT_RE = re.compile(
     r"<!--\s*"
     + re.escape(DIAGNOSTIC_ID_COMMENT_PREFIX)
-    + r":\s*(wrg-source-diagnostic-v1:[0-9a-f]{16})\s*-->"
+    + r":\s*("
+    + SOURCE_DIAGNOSTIC_ID_PATTERN_TEXT
+    + r")\s*-->"
 )
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 LEGACY_NOTICE_LABEL = "internals: notices"
@@ -35,6 +37,8 @@ LABEL_BY_SEVERITY = {
 MANAGED_LABELS = (*LABEL_BY_SEVERITY.values(), LEGACY_NOTICE_LABEL)
 DEFAULT_CREATE_LIMIT = 10
 DEFAULT_REQUEST_DELAY_SECONDS = 1.0
+ATOM_DIAGNOSTIC_ID_PREFIX = "wrg-source-diagnostic-v1:uuid:"
+ATOM_PUBLIC_ID_RE = re.compile(r"^[1-9][0-9]*$")
 
 
 class GitHubClient(Protocol):
@@ -244,7 +248,7 @@ def _event_title(kind: str) -> str:
 
 def _diagnostic_from_event(event: Mapping[str, Any]) -> DiagnosticIssue | None:
     diagnostic_id = _normalized_text(event.get("id"))
-    if not DIAGNOSTIC_ID_RE.fullmatch(diagnostic_id):
+    if not is_source_diagnostic_id(diagnostic_id):
         return None
     severity = _normalized_text(event.get("severity")).lower()
     if severity not in LABEL_BY_SEVERITY:
@@ -302,7 +306,7 @@ def _count_sync_skipped_notices(events: Sequence[Mapping[str, Any]]) -> int:
         1
         for event in events
         if _normalized_text(event.get("severity")).lower() == "notice"
-        and DIAGNOSTIC_ID_RE.fullmatch(_normalized_text(event.get("id")))
+        and is_source_diagnostic_id(_normalized_text(event.get("id")))
     )
 
 
@@ -331,11 +335,45 @@ def load_policy(*, policy_file: Path | None = None, policy_url: str | None = Non
     return _load_policy_from_url(policy_url or DEFAULT_POLICY_URL)
 
 
+def _atom_public_id_from_diagnostic_id(diagnostic_id: str) -> str | None:
+    if not is_source_diagnostic_id(diagnostic_id):
+        return None
+    marker = ";id="
+    if not diagnostic_id.startswith(ATOM_DIAGNOSTIC_ID_PREFIX) or marker not in diagnostic_id:
+        return None
+    public_id = diagnostic_id.rsplit(marker, 1)[1]
+    return public_id if ATOM_PUBLIC_ID_RE.fullmatch(public_id) else None
+
+
+def _atom_public_id_from_event(event: Mapping[str, Any]) -> str | None:
+    for key in ("atom_support_article_id", "support_article_id"):
+        public_id = _normalized_text(event.get(key))
+        if ATOM_PUBLIC_ID_RE.fullmatch(public_id):
+            return public_id
+    return None
+
+
+def _diagnostic_atom_public_id(diagnostic: DiagnosticIssue) -> str | None:
+    return _atom_public_id_from_diagnostic_id(diagnostic.diagnostic_id) or _atom_public_id_from_event(
+        diagnostic.event
+    )
+
+
+def _diagnostic_public_id_suffix(diagnostic: DiagnosticIssue) -> str:
+    public_id = _diagnostic_atom_public_id(diagnostic)
+    if public_id is None:
+        return ""
+    suffix = f" [id={public_id}]"
+    return suffix if len(suffix) < 220 else ""
+
+
 def issue_title(diagnostic: DiagnosticIssue) -> str:
+    suffix = _diagnostic_public_id_suffix(diagnostic)
     title = f"[Source diagnostics][{diagnostic.severity}] {diagnostic.title}"
-    if len(title) <= 220:
-        return title
-    return title[:217].rstrip(" .:-") + "..."
+    limit = 220 - len(suffix)
+    if len(title) > limit:
+        title = title[: max(0, limit - 3)].rstrip(" .:-") + "..."
+    return title + suffix
 
 
 def _wiki_url(page: str, fragment: str | None = None) -> str:
@@ -512,7 +550,7 @@ def _issue_diagnostic_id(issue: Mapping[str, Any]) -> str | None:
     if len(matches) != 1:
         return None
     diagnostic_id = matches[0]
-    return diagnostic_id if DIAGNOSTIC_ID_RE.fullmatch(diagnostic_id) else None
+    return diagnostic_id if is_source_diagnostic_id(diagnostic_id) else None
 
 
 def _issue_status_record(repository: str, number: int, *, state: str = "open") -> dict[str, Any]:

@@ -61,21 +61,25 @@ API alias drift visible to clients and checks.
 
 ## Baseline And Preview Semantics
 
-The dashboard shows two build numbers that are easy to mix up. `latest_observed_build`
-is the newest Windows build the generator found in public Microsoft source data.
-It is useful context when a device is ahead of the normal fleet baseline, but it
-does not decide compliance by itself.
+The dashboard shows two build numbers that are easy to mix up: `latest_build`
+and `latest_observed_build`. `latest_build` is the value Microsoft Release
+Health currently publishes in the slow-moving Current Versions table.
+`latest_observed_build` is the newest official Microsoft-observed build found
+by the generator across supported public source evidence, including Atom-linked
+Support articles. It is useful context when a device is ahead of the normal
+fleet baseline, but it does not decide compliance by itself.
 
 `required_baseline_build` is the minimum signed build this policy currently
 requires for existing Windows 11 fleet devices. Devices below that build need a
-quality update. Preview or out-of-band builds can appear as the latest observed
-build without becoming the required baseline for the fleet.
+quality update. A newer Atom/support observed build can appear as
+`latest_observed_build` without becoming the required baseline for the fleet.
 
 | Field / term | Meaning |
 | --- | --- |
+| `latest_build` | Microsoft Release Health Current Versions table value. |
 | `baseline_build` | Required broad-fleet quality baseline. |
 | `required_baseline_build` | Explicit required baseline used by current readers. |
-| `latest_observed_build` | Newest Microsoft-observed current-table or release-history build. |
+| `latest_observed_build` | Newest official Microsoft-observed build from supported public evidence, including Atom-linked Support articles. |
 | B-release | Default required quality baseline. |
 | D-preview | Can explain a newer local build without becoming the default required baseline. |
 

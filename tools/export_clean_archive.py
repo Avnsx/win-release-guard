@@ -20,12 +20,24 @@ ALLOWED_NORMALIZED_PYPI_BADGE_ENDPOINTS = (
     "https://img.shields.io/pypi/pyversions/win11-release-guard",
     "https://img.shields.io/pypi/dm/win11-release-guard",
 )
-REQUIRED_README_PUBLIC_SOURCES_STATEMENT = (
-    "The production generator uses public Microsoft Release Health and Atom sources only; "
-    "it does not use Microsoft "
-    "Graph, Az"
-    "ure, OI"
-    "DC, or token-authenticated Microsoft APIs."
+REQUIRED_PUBLIC_ENRICHMENT_SOURCE_STATEMENT = (
+    "The production generator may use public Microsoft Release Health HTML, public Microsoft Update History Atom data, "
+    "Atom-linked public Microsoft Support articles, and unauthenticated public MSRC CVRF data for source diagnostics "
+    "and informational enrichment; it does not use Microsoft "
+    "Graph or token-authenticated Microsoft APIs."
+)
+REQUIRED_AGENTS_PUBLIC_ENRICHMENT_STATEMENT = (
+    "The production generator may use public Microsoft Release Health HTML, public Microsoft Update History Atom feed data, "
+    "Atom-linked public Microsoft Support articles, and unauthenticated public MSRC CVRF data for source diagnostics "
+    "and informational enrichment."
+)
+ALLOWED_ACTIVE_AUTH_BOUNDARIES = (
+    REQUIRED_PUBLIC_ENRICHMENT_SOURCE_STATEMENT,
+    REQUIRED_AGENTS_PUBLIC_ENRICHMENT_STATEMENT,
+    "Authenticated Microsoft "
+    "Graph, token-authenticated Microsoft APIs, and historical authenticated metadata research "
+    "remain out of active production generator architecture; historical research may remain only in "
+    "`docs/architecture-insight.md` when explicitly marked out of scope.",
 )
 
 INCLUDE_PATHS = (
@@ -273,8 +285,9 @@ def _validate_archive_content(archive_path: Path) -> None:
                 auth_text = ""
             elif name.startswith("tests/"):
                 auth_text = ""
-            elif name == "README.md":
-                auth_text = auth_text.replace(REQUIRED_README_PUBLIC_SOURCES_STATEMENT, "")
+            else:
+                for statement in ALLOWED_ACTIVE_AUTH_BOUNDARIES:
+                    auth_text = auth_text.replace(statement, "")
             for pattern in FORBIDDEN_ACTIVE_AUTH_PATTERNS:
                 if re.search(re.escape(pattern), auth_text, flags=re.IGNORECASE):
                     findings.append(f"{name}: active auth reference {pattern!r}")

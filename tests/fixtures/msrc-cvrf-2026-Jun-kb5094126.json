@@ -1,0 +1,43 @@
+{
+  "Vulnerability": [
+    {
+      "CVE": "CVE-2026-0001",
+      "Threats": [
+        {
+          "Type": "Severity",
+          "Description": {
+            "Value": "Important"
+          }
+        }
+      ],
+      "Remediations": [
+        {
+          "Description": {
+            "Value": "Security Update for KB5094126"
+          },
+          "ProductID": [
+            "11568",
+            "11569"
+          ]
+        }
+      ]
+    },
+    {
+      "CVE": "CVE-2026-0002",
+      "Threats": [
+        {
+          "Type": "Severity",
+          "Description": {
+            "Value": "Critical"
+          }
+        }
+      ],
+      "Remediations": [
+        {
+          "URL": "https://support.microsoft.com/help/5094126",
+          "ProductID": "11570"
+        }
+      ]
+    }
+  ]
+}

@@ -7,6 +7,15 @@ import win11_release_guard.policy_generator as policy_generator_module
 from win11_release_guard.policy_generator import render_policy_index
 
 
+ATOM_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
+ATOM_ENTRY_ID = "uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
+KB5094126_SUPPORT_URL = (
+    "https://support.microsoft.com/en-us/topic/"
+    "june-9-2026-kb5094126-os-builds-26200-8655-and-26100-8655-"
+    "1a9bcba6-5f53-4075-8156-fe11ac631737"
+)
+
+
 def _assert_no_external_or_client_auth(index: str) -> None:
     lower = index.lower()
     assert "script src" not in lower
@@ -94,6 +103,87 @@ def test_source_diagnostic_rows_with_issue_metadata_render_safe_link_and_status(
     assert "data-diagnostic-filter-root" in index
     assert "row.hidden=!match" in index
     assert '<article class="diag-row warning" data-diagnostic-severity="warning" hidden' not in index
+    _assert_no_external_or_client_auth(index)
+
+
+def test_source_diagnostic_issue_metadata_accepts_atom_source_diagnostic_id() -> None:
+    event = dict(_diagnostic_event())
+    event["id"] = ATOM_SOURCE_DIAGNOSTIC_ID
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 1, "error": 0},
+            "events": [event],
+            "issue_status": {
+                ATOM_SOURCE_DIAGNOSTIC_ID: {
+                    "number": 42,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                }
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{ATOM_SOURCE_DIAGNOSTIC_ID}"' in index
+    assert 'href="https://github.com/Avnsx/win11_release_guard/issues/42"' in index
+    assert "#Ticket 42" in index
+    _assert_no_external_or_client_auth(index)
+
+
+def test_source_diagnostic_issue_metadata_keeps_enriched_atom_row_fields() -> None:
+    event = dict(_diagnostic_event())
+    event.update(
+        {
+            "id": ATOM_SOURCE_DIAGNOSTIC_ID,
+            "build": "26200.8655",
+            "kb_article": "KB5094126",
+            "message": "Atom feed shows a newer non-preview build 26200.8655 for 25H2.",
+            "user_message": "Security Patch June 2026: Windows 11 KB5094126 moves 25H2 to 26200.8655.",
+            "kb_update_bucket": "OS Build Update",
+            "kb_update_bucket_confidence": "low",
+            "is_security": True,
+            "security_evidence_source": "support_article",
+            "support_article_url": KB5094126_SUPPORT_URL,
+            "atom_entry_id": ATOM_ENTRY_ID,
+            "atom_support_article_id": "968480",
+        }
+    )
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 1, "error": 0},
+            "events": [event],
+            "issue_status": {
+                ATOM_SOURCE_DIAGNOSTIC_ID: {
+                    "number": 42,
+                    "state": "open",
+                    "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+                }
+            },
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert f'data-diagnostic-id="{ATOM_SOURCE_DIAGNOSTIC_ID}"' in index
+    assert 'data-user-message="Security Patch June 2026: Windows 11 KB5094126 moves 25H2 to 26200.8655."' in index
+    assert 'data-kb-update-bucket="OS Build Update"' in index
+    assert 'data-kb-update-bucket-confidence="low"' in index
+    assert 'data-is-security="true"' in index
+    assert 'data-security-evidence-source="support_article"' in index
+    assert f'data-support-article-url="{KB5094126_SUPPORT_URL}"' in index
+    assert f'data-atom-entry-id="{ATOM_ENTRY_ID}"' in index
+    assert 'data-atom-support-article-id="968480"' in index
+    assert '<p class="diag-user-message">Security Patch June 2026' in index
+    assert '<p class="diag-technical-message">Atom feed shows a newer non-preview build 26200.8655 for 25H2.</p>' in index
+    assert '<span>Security patch</span>' in index
+    assert '<span>id=968480</span>' in index
+    assert "#Ticket 42" in index
+    assert "message:compactText(row.querySelector('.diag-technical-message'))" in index
+    assert "addAttr('data-user-message','user_message')" in index
+    assert "addAttr('data-atom-support-article-id','atom_support_article_id')" in index
     _assert_no_external_or_client_auth(index)
 
 

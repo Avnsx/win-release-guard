@@ -70,10 +70,24 @@ python -m win11_release_guard --json-pretty --wua --include-raw-local-diagnostic
 | Headers | Compare Release Health table headings with fixtures. |
 | 26H1 note | Confirm special/new-devices-only text is still detected. |
 | B baseline | Confirm broad target has a B-release baseline. |
+| Atom support href | If an Atom KB row lacks a safe Support article href, keep the Source Diagnostic evidence; do not add a `/help/<KB>` fallback resolver. |
+| Security classification | Use MSRC CVRF or explicit Support article wording; do not infer security status from generic Atom title text. |
 
 ```powershell
 pytest -q tests/test_remote_policy.py tests/test_policy_generator.py
 ```
+
+## Latest Observed Is Newer Than Latest Build
+
+| Check | What to do |
+| --- | --- |
+| `latest_build` | Treat it as the Release Health Current Versions table value. |
+| `latest_observed_build` | Treat it as informational public Microsoft evidence, often from Atom-linked Support articles. |
+| `required_baseline_build` | Keep this as the signed quality baseline used for verdicts. |
+
+A newer latest-observed build can explain why a local machine is ahead of the
+normal fleet baseline. It does not make the device noncompliant and does not
+raise the required baseline unless the policy baseline rules select that build.
 
 ## Related Pages
 

@@ -16,6 +16,10 @@ from win11_release_guard.remote_policy import (
 )
 
 
+ATOM_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
+HASH_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:1111111111111111"
+
+
 def _fixture_html() -> str:
     with open("tests/fixtures/windows11-release-health.html", encoding="utf-8") as handle:
         return handle.read()
@@ -259,6 +263,39 @@ def test_release_policy_entry_from_dict_preserves_explicit_required_baseline():
     assert restored.required_baseline_build == "26200.8457"
 
 
+def test_release_policy_entry_defaults_latest_observed_to_latest_build():
+    entry = ReleasePolicyEntry.from_dict(
+        {
+            "version": "25H2",
+            "build_family": 26200,
+            "latest_build": "26200.8457",
+            "baseline_build": "26200.8457",
+        }
+    )
+
+    assert entry.latest_observed_build == "26200.8457"
+    assert entry.to_dict()["latest_observed_build"] == "26200.8457"
+
+
+def test_release_policy_entry_preserves_distinct_latest_observed_without_baseline_change():
+    entry = ReleasePolicyEntry.from_dict(
+        {
+            "version": "25H2",
+            "build_family": 26200,
+            "latest_build": "26200.8457",
+            "latest_observed_build": "26200.8655",
+            "baseline_build": "26200.8457",
+            "required_baseline_build": "26200.8457",
+        }
+    )
+
+    assert entry.latest_build == "26200.8457"
+    assert entry.latest_observed_build == "26200.8655"
+    assert entry.required_baseline_build == "26200.8457"
+    assert entry.effective_baseline_build == "26200.8457"
+    assert ReleasePolicyEntry.from_dict(entry.to_dict()).latest_observed_build == "26200.8655"
+
+
 def test_json_string_loads():
     policy = load_policy_text(
         json.dumps(_json_policy()),
@@ -304,6 +341,112 @@ def test_json_source_diagnostics_loads():
     assert policy.source_diagnostics["release_health_html"]["bytes"] == 1234
     assert policy.source_diagnostics["atom_feed"]["newest_atom_updated"] == "2026-05-16T18:00:00Z"
     assert not any("source_diagnostics" in warning for warning in policy.validation_warnings)
+
+
+def test_json_source_diagnostics_accepts_supported_diagnostic_id_forms():
+    data = _json_policy()
+    data["source_diagnostics"] = {
+        "events": [
+            {
+                "id": HASH_SOURCE_DIAGNOSTIC_ID,
+                "severity": "warning",
+                "kind": "legacy_hash_probe",
+            },
+            {
+                "id": ATOM_SOURCE_DIAGNOSTIC_ID,
+                "severity": "warning",
+                "kind": "atom_probe",
+            },
+        ],
+        "issue_status": {
+            HASH_SOURCE_DIAGNOSTIC_ID: {
+                "number": 41,
+                "state": "open",
+                "url": "https://github.com/Avnsx/win11_release_guard/issues/41",
+            },
+            ATOM_SOURCE_DIAGNOSTIC_ID: {
+                "number": 42,
+                "state": "open",
+                "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+            },
+        },
+    }
+
+    policy = load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
+
+    assert [event["id"] for event in policy.source_diagnostics["events"]] == [
+        HASH_SOURCE_DIAGNOSTIC_ID,
+        ATOM_SOURCE_DIAGNOSTIC_ID,
+    ]
+    assert set(policy.source_diagnostics["issue_status"]) == {
+        HASH_SOURCE_DIAGNOSTIC_ID,
+        ATOM_SOURCE_DIAGNOSTIC_ID,
+    }
+
+
+@pytest.mark.parametrize(
+    "diagnostic_id",
+    (
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=0",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=-1",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=notnumeric",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1C3E09919AF3;id=968480",
+        "WRG-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3 ;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480 extra",
+        "wrg-source-diagnostic-v1:1111111111111111-suffix",
+        "wrg-source-diagnostic-v1:AAAAAAAAAAAAAAAA",
+        " wrg-source-diagnostic-v1:1111111111111111",
+        "arbitrary-string-id",
+    ),
+)
+def test_json_source_diagnostics_rejects_malformed_event_ids(diagnostic_id: str):
+    data = _json_policy()
+    data["source_diagnostics"] = {
+        "events": [
+            {
+                "id": diagnostic_id,
+                "severity": "warning",
+                "kind": "probe",
+            }
+        ],
+    }
+
+    with pytest.raises(PolicyParseError, match=r"source_diagnostics\.events\[0\]\.id"):
+        load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
+
+
+@pytest.mark.parametrize(
+    "diagnostic_id",
+    (
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=0",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=-1",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=notnumeric",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1C3E09919AF3;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3 ;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480-extra",
+        "wrg-source-diagnostic-v1:1111111111111111-suffix",
+        "arbitrary-string-id",
+    ),
+)
+def test_json_source_diagnostics_rejects_malformed_issue_status_ids(diagnostic_id: str):
+    data = _json_policy()
+    data["source_diagnostics"] = {
+        "issue_status": {
+            diagnostic_id: {
+                "number": 42,
+                "state": "open",
+                "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+            }
+        }
+    }
+
+    with pytest.raises(PolicyParseError, match="source_diagnostics.issue_status keys"):
+        load_policy_text(json.dumps(data), source_url=DEFAULT_POLICY_URL)
 
 
 def test_api_policy_alias_does_not_warn():
@@ -428,6 +571,42 @@ def test_json_malformed_release_and_build_raise_policy_parse_error():
     data["release_history"][0]["build"] = "26200"
 
     with pytest.raises(PolicyParseError, match="full build string"):
+        load_policy_text(json.dumps(data))
+
+
+def test_json_accepts_newer_latest_observed_without_changing_required_baseline():
+    data = _json_policy()
+    data["current_versions"][1]["latest_observed_build"] = "26200.8655"
+    data["current_versions"][1]["required_baseline_build"] = "26200.8457"
+    data["broad_target_existing_devices"]["latest_observed_build"] = "26200.8655"
+    data["broad_target_existing_devices"]["required_baseline_build"] = "26200.8457"
+
+    policy = load_policy_text(json.dumps(data))
+
+    assert policy.broad_target_existing_devices is not None
+    assert policy.broad_target_existing_devices.latest_build == "26200.8457"
+    assert policy.broad_target_existing_devices.latest_observed_build == "26200.8655"
+    assert policy.broad_target_existing_devices.required_baseline_build == "26200.8457"
+    assert policy.broad_target_existing_devices.effective_baseline_build == "26200.8457"
+    current_25h2 = next(entry for entry in policy.current_versions if entry.version == "25H2")
+    assert current_25h2.latest_build == "26200.8457"
+    assert current_25h2.latest_observed_build == "26200.8655"
+    assert current_25h2.required_baseline_build == "26200.8457"
+
+
+def test_json_rejects_malformed_latest_observed_build():
+    data = _json_policy()
+    data["current_versions"][1]["latest_observed_build"] = "26200"
+
+    with pytest.raises(PolicyParseError, match=r"current_versions\[1\].latest_observed_build"):
+        load_policy_text(json.dumps(data))
+
+
+def test_json_rejects_older_latest_observed_build():
+    data = _json_policy()
+    data["broad_target_existing_devices"]["latest_observed_build"] = "26200.7000"
+
+    with pytest.raises(PolicyParseError, match="latest_observed_build must not be older than latest_build"):
         load_policy_text(json.dumps(data))
 
 

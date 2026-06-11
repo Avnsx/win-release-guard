@@ -17,7 +17,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 | `wua_probe.py` | Optional bounded read-only WUA probe. |
 | `audit_probes.py`, `diagnostic_tail.py`, `policy_diagnostics.py` | Read-only blocker diagnostics, bounded Panther/setup tail decoding, privacy markers, and collection-cap metadata. |
 | `remote_policy.py` | JSON loading plus generator-only Release Health parsing. |
-| `policy_generator.py` | Policy/dashboard/manifest/API generation plus first-party static Pages Wiki and changelog rendering. |
+| `policy_generator.py` | Policy/dashboard/manifest/API generation, Release Health/Atom parsing, Atom-linked Support article and MSRC CVRF enrichment, and first-party static Pages Wiki/changelog rendering. |
 | `signing.py`, `json_utils.py`, `policy_schema.py` | Trust, strict JSON, schema validation. |
 | `cache.py`, `bundled_policy.py`, `freshness.py`, `version.py` | Cache, bundled fallback, age calculations, identity. |
 
@@ -25,7 +25,7 @@ Related links: [maintainer guide](maintainer-guide.md) | [wiki architecture](../
 
 | Script | Responsibility |
 | --- | --- |
-| `generate_policy.py` | CLI wrapper for policy/dashboard generation. |
+| `generate_policy.py` | CLI wrapper for policy/dashboard generation from public Microsoft source data and unauthenticated enrichment sources. |
 | `generate_signing_key.py` | Local key generation into ignored scratch space. |
 | `export_clean_archive.py` | Clean source archive creation and validation. |
 | `scan_for_secret_material.py` | Secret/private-key pattern scanner. |

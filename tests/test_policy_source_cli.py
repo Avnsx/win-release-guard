@@ -675,6 +675,7 @@ def test_check_public_pages_accepts_legacy_raw_signature_aliases(monkeypatch, ca
     policy_bytes = _policy_bytes()
     signature_bytes = _raw_signature_bytes(policy_bytes)
     manifest_bytes = _manifest_bytes(policy_bytes)
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(datetime(2026, 6, 4, tzinfo=timezone.utc)))
     monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
 
     _install_public_page_fetch(monkeypatch, _public_page_bytes(policy_bytes, signature_bytes, manifest_bytes))
@@ -705,6 +706,7 @@ def test_check_public_pages_uses_custom_policy_published_urls(monkeypatch, capsy
     policy_bytes = _policy_bytes_with_published_urls(custom_urls)
     signature_bytes = _signature_bytes(policy_bytes)
     manifest_bytes = _manifest_bytes(policy_bytes, published_urls=custom_urls)
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(datetime(2026, 6, 4, tzinfo=timezone.utc)))
 
     def fake_source_fetch(url, *args, **kwargs):
         url = str(url)
@@ -879,6 +881,7 @@ def test_check_public_pages_manifest_documented_api_policy_difference_passes(mon
         api_policy_sha256=hashlib.sha256(api_policy_bytes).hexdigest(),
         api_signature_sha256=hashlib.sha256(api_signature_bytes).hexdigest(),
     )
+    monkeypatch.setattr(cli, "_utc_now_epoch_s", lambda: _epoch(datetime(2026, 6, 4, tzinfo=timezone.utc)))
     monkeypatch.setattr(cli, "fetch_policy_bytes", _fake_source_fetch(policy_bytes, signature_bytes, manifest_bytes))
     _install_public_page_fetch(
         monkeypatch,

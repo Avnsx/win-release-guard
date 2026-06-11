@@ -8,9 +8,11 @@ Use this when investigating generator/parser drift, Microsoft source changes, At
 
 Source diagnostics explain the health of the policy inputs and generator
 interpretation, not the final compliance verdict by themselves. They collect
-Release Health, Atom feed, parser, and drift signals so an administrator can see
-whether the public Microsoft source data changed, whether enrichment arrived
-late, or whether a parser assumption needs attention.
+Release Health, Atom feed, Atom-linked Support article, unauthenticated MSRC
+CVRF, parser, and drift signals so an administrator can see whether the public
+Microsoft source data changed, whether enrichment arrived late, or whether a
+parser assumption needs attention. These signals never override the signed
+policy verdict or required baseline semantics.
 
 The dashboard severity tiles are filters over those generated events. Notices
 are visibility-only, warnings call out non-blocking drift or missing enrichment,
@@ -23,6 +25,8 @@ verdict authority.
 | --- | --- |
 | Microsoft Release Health HTML | Bytes, fetch time, newest current-version revision, newest release-history date. |
 | Microsoft Update History Atom feed | Bytes, newest Atom build, newest published/updated timestamps. |
+| Atom-linked Microsoft Support articles | Public release-note href evidence and deterministic article enrichment when available. |
+| Public MSRC CVRF data | Unauthenticated security-update evidence and compact CVE context when available. |
 | Parser | Structured events for missing/changed headers and table anomalies. |
 | Drift checks | Current table lag, Atom newer rows, generated-after-source age. |
 
@@ -36,21 +40,28 @@ verdict authority.
 
 Atom drift keeps Preview and out-of-band rows at `notice` severity even when the
 build number is newer than Release History. A newer non-preview build for the
-current broad target becomes `warning` only when reliable baseline evidence is
-present, because it may affect the required baseline after Microsoft source
-publication catches up. Missing or malformed Atom input is also `warning`; it is
-visible source-health degradation, not a silent condition.
+current broad target can become `warning` when it has a KB and safe
+Atom-provided `support.microsoft.com` article href. That warning is source
+context; it does not promote the build to `required_baseline_build`.
+Missing or malformed Atom input is also `warning`; it is visible source-health
+degradation, not a silent condition.
 
 Microsoft's public sources can arrive out of order. The Atom/Update History feed
-can expose a KB or build before the Release Health HTML release-history table is
-manually refreshed. That race is normal for Preview, out-of-band, unknown-family,
-non-broad-target, or incomplete Atom rows, so those rows stay `notice`. Missing
-KB metadata is an uncertainty marker, not permanent proof that a row is harmless.
-A row is treated as required-baseline drift only when it maps to the current
-broad target, is not Preview or out-of-band, and has reliable baseline evidence.
-In the current generator that evidence is an extracted KB plus the build/release
-mapping; another durable upstream marker would need tests before it could serve
-the same role. The `source_drift_unresolved_after_24h` event is reserved for
+can expose a KB or build before the Release Health HTML Current Versions or
+release-history tables are manually refreshed. That race is normal for Preview,
+out-of-band, unknown-family, non-broad-target, or incomplete Atom rows, so those
+rows stay `notice`. Missing KB metadata is an uncertainty marker, not permanent
+proof that a row is harmless.
+
+Atom is discovery for public Support article hrefs. The generator fetches only
+Atom-provided `support.microsoft.com` article URLs that pass safe URL checks. If
+an Atom KB row lacks a usable support href, the generator records
+`atom_support_article_href_missing` evidence instead of resolving through
+`/help/<KB>`. Support article text can provide human-readable KB context and
+explicit security wording. Public MSRC CVRF data provides higher-confidence KB
+security classification and compact CVE context when available. Atom title
+buckets remain low-confidence labels; generic `OS Build(s)` wording is not
+security evidence. The `source_drift_unresolved_after_24h` event is reserved for
 warning/error drift that remains unresolved after the newest source timestamp,
 not for normal notice-only feed lag.
 
@@ -60,7 +71,17 @@ Source diagnostic IDs use stable event identity fields: severity, source,
 event kind/category, release, build family, build, KB article, affected target
 flags, and the source URL host/path when present. Generated timestamps, fetched
 timestamps, exact message wording, tag order, and display-only prose are not part
-of the normal ID basis.
+of the normal hash-ID basis.
+
+Supported ID forms are:
+
+| Form | Used for |
+| --- | --- |
+| `wrg-source-diagnostic-v1:<16 lowercase hex>` | Older and non-Atom diagnostics with deterministic hash identity. |
+| `wrg-source-diagnostic-v1:uuid:<canonical uuid>;id=<positive decimal>` | Atom-derived diagnostics when the Atom entry ID is a valid UUID plus public article ID. |
+
+Malformed, duplicate, missing, or legacy Atom IDs do not break generation; they
+fall back to the deterministic hash form.
 
 ## Publish Gate
 
@@ -78,12 +99,15 @@ The sync treats an issue as managed only when the body contains exactly one
 internal marker:
 
 ```text
-<!-- wrg-source-diagnostic-id: wrg-source-diagnostic-v1:<hash> -->
+<!-- wrg-source-diagnostic-id: <full source diagnostic ID> -->
 ```
 
 Labels, titles, and normal text that merely mention a diagnostic ID are ignored
 for mutation. Manual issues without that marker are not updated, commented,
-reopened, or closed by the sync.
+reopened, or closed by the sync. The body also contains
+`Source diagnostic ID: <full source diagnostic ID>` for human review. For
+Atom-derived diagnostics, the issue title appends the public article suffix,
+for example `[id=968480]`, while the marker and body keep the exact full ID.
 
 For managed open issues, the sync compares the current title, body, and labels
 with the desired diagnostic state. If they already match, the issue is left
@@ -121,11 +145,14 @@ issue.
 
 The small copy button above the diagnostic feed exports the rows visible at the
 time of the click as JSON to the local clipboard. The export includes severity,
-deterministic diagnostic ID, title, source, message, tags, optional static issue
-URL, the active filter, visible counts, and a short neutral context note. It is
-meant for technical lookup and handoff of the current dashboard state; it does
-not call GitHub, write browser-side data back to the repository, or change the
-signed policy verdict.
+deterministic diagnostic ID, title, source, technical message, tags, optional
+static issue URL, the active filter, visible counts, and a short neutral context
+note. When present, row export also includes additive enrichment fields such as
+`user_message`, `kb_update_bucket`, `is_security`,
+`security_evidence_source`, `support_article_url`, `atom_entry_id`, and
+`atom_support_article_id`. It is meant for technical lookup and handoff of the
+current dashboard state; it does not call GitHub, write browser-side data back
+to the repository, or change the signed policy verdict.
 
 For rehearsal runs, use `tools/sync_source_diagnostics_issues.py --dry-run` with
 `--dry-run-report-output` and `--dry-run-report-format json` or `markdown`.
@@ -138,13 +165,15 @@ Issues or writing tokens.
 | Symptom | Check | Action |
 | --- | --- | --- |
 | Current Versions parser fails. | Release Health table headers changed. | Update parser tests and code together. |
-| Atom feed has newer build than Release Health. | `atom_newer_than_release_history` event. | Inspect whether it is preview/OOB or missing B-release data. |
+| Atom feed has newer build than Release Health. | `atom_newer_than_release_history` event. | Inspect the KB, Support article href, build family, and whether latest observed remains informational. |
+| Atom KB row has no Support article href. | `atom_support_article_href_missing` event. | Treat as source evidence gap; do not add a `/help/<KB>` resolver. |
 | Source diagnostics warning appears on dashboard. | Event kind and affected release/build. | Keep visible; only block if severity is error. |
 
 ## Verify
 
 ```powershell
 pytest -q tests/test_remote_policy.py tests/test_policy_generator.py tests/test_publish_policy_workflow.py
+pytest -q tests/test_source_diagnostics_issue_sync.py tests/test_source_diagnostics_issue_metadata.py
 python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-manifest
 ```
 

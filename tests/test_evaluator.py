@@ -371,9 +371,9 @@ def test_evaluate_windows_update_state_25h2_old_ubr_quality_update_required():
 def test_evaluate_uses_required_baseline_when_latest_observed_is_preview():
     base_policy = _edition_channel_policy()
     assert base_policy.broad_target_existing_devices is not None
-    target = replace(base_policy.broad_target_existing_devices, latest_build="26200.8524")
+    target = replace(base_policy.broad_target_existing_devices, latest_observed_build="26200.8524")
     current_versions = tuple(
-        replace(entry, latest_build="26200.8524")
+        replace(entry, latest_observed_build="26200.8524")
         if entry.version == "25H2" and entry.build_family == 26200
         else entry
         for entry in base_policy.current_versions
@@ -392,11 +392,13 @@ def test_evaluate_uses_required_baseline_when_latest_observed_is_preview():
     assert result.status is EvaluationStatus.COMPLIANT
     assert result.baseline_build == "26200.8457"
     assert result.target is not None
+    assert result.target.latest_build == "26200.8457"
     assert result.target.latest_observed_build == "26200.8524"
     assert result.target.required_baseline_build == "26200.8457"
     assert result.details["target_latest_observed_build"] == "26200.8524"
     assert result.details["target_required_baseline_build"] == "26200.8457"
     current_25h2 = next(entry for entry in policy.current_versions if entry.version == "25H2")
+    assert current_25h2.latest_build == "26200.8457"
     assert current_25h2.latest_observed_build == "26200.8524"
     assert current_25h2.required_baseline_build == "26200.8457"
 

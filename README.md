@@ -93,6 +93,8 @@ Deep dive: [Quick Start](https://avnsx.github.io/win11_release_guard/wiki/Quick-
 
 Public `/api/v1` aliases and signing-key overlap rules are maintained for at least 24 months unless a documented last-resort trust break is required. GitHub Pages is static; feed freshness is recomputed from generated timestamps in the browser and CLI. Source Diagnostics tiles filter Notices, Warnings, and Errors; `View all` resets the feed. Optional `#Ticket` links are hover/focus-only static links to repository issues when workflow-generated metadata exists for real warning/error source-diagnostic events.
 
+`latest_build` stays the value Microsoft Release Health publishes in the Current Versions table. `latest_observed_build` can be newer when the generator sees a newer official build through the public Atom feed and its linked Microsoft Support article. That value is context for administrators; it does not become `required_baseline_build` unless the normal signed baseline rules select it.
+
 > [!NOTE]
 > `Policy Feed Currency` is the latest compilation timestamp for the parsed policy results. If it looks old, check the [publish-policy workflow](https://github.com/Avnsx/win11_release_guard/actions/workflows/publish-policy.yml) and the [Anti-Static Freshness](https://avnsx.github.io/win11_release_guard/wiki/Anti-Static-Freshness/) notes.
 
@@ -149,7 +151,8 @@ Deployment-affecting changes require the live Pages gate before handover. Use th
 
 - Runtime clients fetch public JSON plus `.sig`. Runtime clients do not authenticate to GitHub and do not need GitHub tokens, private repository access, or a paid signing certificate.
 - The private policy signing key lives only in the GitHub Actions secret `WIN11_RELEASE_GUARD_POLICY_SIGNING_KEY_B64`; public verification keys are committed.
-- The production generator uses public Microsoft Release Health and Atom sources only; it does not use token-authenticated Microsoft APIs.
+- The production generator may use public Microsoft Release Health HTML, public Microsoft Update History Atom data, Atom-linked public Microsoft Support articles, and unauthenticated public MSRC CVRF data for source diagnostics and informational enrichment; it does not use Microsoft Graph or token-authenticated Microsoft APIs.
+- Atom is discovery for Support article hrefs; when an Atom KB row lacks a usable `support.microsoft.com` article URL, the generator records Source Diagnostic evidence instead of resolving through `/help/<KB>`. Security-patch classification comes from MSRC CVRF or explicit Support article wording, not the Atom title alone.
 - Source Diagnostics issue sync runs only for warning/error events in GitHub Actions with the built-in `github.token` / `GITHUB_TOKEN` and minimal `issues: write`; notices stay dashboard-only, and no PAT or extra repository secret is required.
 - PyPI publishing uses Trusted Publishing / GitHub OIDC in `.github/workflows/pypi-publish.yml`; no PyPI API token is required.
 - GitHub scheduled workflows are best-effort automation, not guaranteed cron. Badge status is a useful signal, not an operational proof.

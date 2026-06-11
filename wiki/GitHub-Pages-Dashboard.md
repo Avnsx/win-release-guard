@@ -20,7 +20,7 @@ private state, or decide signed policy semantics.
 | Section | Shows |
 | --- | --- |
 | Header | Product display name, program version, dashboard/wiki/repo links. |
-| Target cards | Broad target, required baseline, latest observed build. |
+| Target cards | Broad target, required baseline, latest observed build, and latest-observed evidence label. |
 | Feed currency | Generated time, live age state, thresholds. |
 | Source diagnostics | Notice/warning/error filters, counts, source health tiles, drift or parser events. |
 | Excluded releases | Data-driven existing-device exclusion summary. |
@@ -73,10 +73,23 @@ workflow-generated issue metadata contains a canonical
 warning/error `source_diagnostics.events` row. Derived UI rows, clear-state
 rows, and Notice events remain visible and filterable without ticket links.
 
+Rows may show a concise administrator-facing summary above the technical
+message. The technical message, source chip, tags, diagnostic ID, issue metadata,
+and copy-to-clipboard data remain available for triage. Atom-derived rows can
+carry fields such as `support_article_url`, `atom_entry_id`,
+`atom_support_article_id`, `kb_update_bucket`, `is_security`, and
+`security_evidence_source`.
+
 The dashboard never creates GitHub Issues and never calls the GitHub Issues API
 from browser JavaScript. Issue creation, update, reopen, and close operations
 belong only to GitHub Actions issue-sync workflows using the built-in
 `GITHUB_TOKEN` with minimal `issues: write` permission.
+
+`latest_build` on the signed policy remains the Microsoft Release Health Current
+Versions table value. The dashboard's `Latest observed` card can show a newer
+`latest_observed_build` from an Atom-linked Support article and labels that
+evidence source. This is informational context only; it does not change
+`required_baseline_build`.
 
 ## Rules
 
@@ -93,7 +106,7 @@ GitHub Actions schedules are best-effort platform automation and do not guarante
 
 ```powershell
 python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest
-pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_wiki_markdown_links.py
+pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_wiki_markdown_links.py tests/test_source_diagnostics_issue_metadata.py
 python -m win11_release_guard --check-public-pages
 ```
 

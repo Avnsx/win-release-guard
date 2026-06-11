@@ -9,7 +9,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tools import sync_source_diagnostics_issues as sync_tool
+
+
+ATOM_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
 
 
 class FakeGitHubClient:
@@ -71,8 +76,9 @@ def _event(
     severity: str = "warning",
     kind: str = "atom_newer_than_release_history",
     message: str = "Atom feed reports a newer baseline build.",
+    **extra: Any,
 ) -> dict[str, Any]:
-    return {
+    event = {
         "id": diagnostic_id,
         "severity": severity,
         "kind": kind,
@@ -84,6 +90,8 @@ def _event(
         "affects_required_baseline": severity == "warning",
         "message": message,
     }
+    event.update(extra)
+    return event
 
 
 def _policy(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -164,6 +172,277 @@ def test_issue_sync_deduplicates_by_diagnostic_id_before_creating() -> None:
     assert payload["labels"] == ["internals: warning"]
     assert f"<!-- wrg-source-diagnostic-id: {diagnostic_id} -->" in payload["body"]
     assert f"Source diagnostic ID: `{diagnostic_id}`" in payload["body"]
+
+
+def test_issue_sync_accepts_atom_source_diagnostic_id_for_events_and_markers() -> None:
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID)]))
+    client = FakeGitHubClient(
+        {
+            ATOM_SOURCE_DIAGNOSTIC_ID: [
+                {
+                    "number": 42,
+                    "state": "open",
+                    "title": sync_tool.issue_title(diagnostics[0]),
+                    "body": sync_tool.issue_body(diagnostics[0]),
+                    "labels": [{"name": "internals: warning"}],
+                }
+            ]
+        }
+    )
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert [diagnostic.diagnostic_id for diagnostic in diagnostics] == [ATOM_SOURCE_DIAGNOSTIC_ID]
+    assert sync_tool.issue_title(diagnostics[0]).endswith("[id=968480]")
+    assert f"Source diagnostic ID: `{ATOM_SOURCE_DIAGNOSTIC_ID}`" in sync_tool.issue_body(diagnostics[0])
+    assert _marker(ATOM_SOURCE_DIAGNOSTIC_ID) in sync_tool.issue_body(diagnostics[0])
+    assert summary.created == 0
+    assert summary.issue_status[ATOM_SOURCE_DIAGNOSTIC_ID] == {
+        "number": 42,
+        "state": "open",
+        "url": "https://github.com/Avnsx/win11_release_guard/issues/42",
+    }
+    assert client.searches == [("Avnsx/win11_release_guard", ATOM_SOURCE_DIAGNOSTIC_ID)]
+    assert client.created == []
+    assert client.updated == []
+    assert client.comments == []
+
+
+def test_issue_title_keeps_hash_diagnostic_id_out_of_title_suffix() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:1111111111111111"
+    diagnostic = sync_tool.diagnostics_from_policy(_policy([_event(diagnostic_id)]))[0]
+
+    assert sync_tool.issue_title(diagnostic) == "[Source diagnostics][warning] Atom Newer Than Release History"
+
+
+def test_issue_title_uses_atom_support_article_id_event_field_for_hash_fallback() -> None:
+    diagnostic_id = "wrg-source-diagnostic-v1:1111111111111111"
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy([_event(diagnostic_id, atom_support_article_id="968480")])
+    )[0]
+
+    assert sync_tool.issue_title(diagnostic).endswith("[id=968480]")
+
+
+def test_issue_title_trims_base_title_without_corrupting_atom_suffix() -> None:
+    diagnostic = sync_tool.diagnostics_from_policy(
+        _policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID, title="A" * 300)])
+    )[0]
+
+    title = sync_tool.issue_title(diagnostic)
+
+    assert len(title) <= 220
+    assert title.endswith("[id=968480]")
+    assert title[: -len(" [id=968480]")].endswith("...")
+
+
+def test_issue_sync_creates_atom_issue_with_title_suffix_and_full_body_id() -> None:
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID)]))
+    client = FakeGitHubClient()
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert client.searches == [("Avnsx/win11_release_guard", ATOM_SOURCE_DIAGNOSTIC_ID)]
+    repository, payload = client.created[0]
+    assert repository == "Avnsx/win11_release_guard"
+    assert payload["title"].endswith("[id=968480]")
+    assert _marker(ATOM_SOURCE_DIAGNOSTIC_ID) in payload["body"]
+    assert f"Source diagnostic ID: `{ATOM_SOURCE_DIAGNOSTIC_ID}`" in payload["body"]
+    assert summary.issue_status[ATOM_SOURCE_DIAGNOSTIC_ID] == {
+        "number": 1,
+        "state": "open",
+        "url": "https://github.com/Avnsx/win11_release_guard/issues/1",
+    }
+    assert summary.actions[0]["diagnostic_id"] == ATOM_SOURCE_DIAGNOSTIC_ID
+
+
+def test_issue_sync_updates_open_atom_issue_to_title_suffix() -> None:
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID)]))
+    old_issue = {
+        "number": 42,
+        "state": "open",
+        "title": "[Source diagnostics][warning] Atom Newer Than Release History",
+        "body": sync_tool.issue_body(diagnostics[0]),
+        "labels": [{"name": "internals: warning"}],
+    }
+    client = FakeGitHubClient({ATOM_SOURCE_DIAGNOSTIC_ID: [old_issue]})
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.created == 0
+    assert summary.updated == 1
+    assert client.searches == [("Avnsx/win11_release_guard", ATOM_SOURCE_DIAGNOSTIC_ID)]
+    assert client.updated[0][1] == 42
+    assert client.updated[0][2]["title"].endswith("[id=968480]")
+    assert _marker(ATOM_SOURCE_DIAGNOSTIC_ID) in client.updated[0][2]["body"]
+    assert f"Source diagnostic ID: `{ATOM_SOURCE_DIAGNOSTIC_ID}`" in client.updated[0][2]["body"]
+    assert client.comments == []
+
+
+def test_issue_sync_reopens_atom_issue_with_suffix_and_full_comment_id() -> None:
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID)]))
+    client = FakeGitHubClient(
+        {
+            ATOM_SOURCE_DIAGNOSTIC_ID: [
+                {
+                    "number": 52,
+                    "state": "closed",
+                    "title": "Closed atom diagnostic",
+                    "body": _marker(ATOM_SOURCE_DIAGNOSTIC_ID),
+                    "labels": [{"name": "internals: warning"}],
+                }
+            ]
+        }
+    )
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.reopened == 1
+    assert summary.commented == 1
+    assert client.updated[0][1] == 52
+    assert client.updated[0][2]["state"] == "open"
+    assert client.updated[0][2]["title"].endswith("[id=968480]")
+    assert _marker(ATOM_SOURCE_DIAGNOSTIC_ID) in client.updated[0][2]["body"]
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in client.comments[0][2]
+
+
+def test_issue_sync_closes_stale_atom_issue_with_full_id_comment() -> None:
+    active_id = "wrg-source-diagnostic-v1:2222222222222222"
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(active_id)]))
+    stale_issue = {
+        "number": 92,
+        "state": "open",
+        "title": "Stale atom diagnostic",
+        "body": _marker(ATOM_SOURCE_DIAGNOSTIC_ID),
+        "labels": [{"name": "internals: warning"}],
+    }
+    client = FakeGitHubClient(open_managed_issues=[stale_issue])
+
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=client,
+        request_delay_seconds=0,
+    )
+
+    assert summary.closed == 1
+    assert client.closed == [("Avnsx/win11_release_guard", 92, "completed")]
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in client.comments[0][2]
+
+
+def test_issue_sync_dry_run_report_preserves_full_atom_id(tmp_path: Path) -> None:
+    diagnostics = sync_tool.diagnostics_from_policy(_policy([_event(ATOM_SOURCE_DIAGNOSTIC_ID)]))
+    stdout = io.StringIO()
+    summary = sync_tool.sync_diagnostics(
+        diagnostics,
+        repository="Avnsx/win11_release_guard",
+        client=None,
+        dry_run=True,
+        request_delay_seconds=0,
+        stdout=stdout,
+    )
+    report = tmp_path / "dry-run.md"
+
+    sync_tool.write_dry_run_report_output(
+        report,
+        report_format="markdown",
+        repository="Avnsx/win11_release_guard",
+        diagnostics=diagnostics,
+        summary=summary,
+        include_notices=False,
+    )
+
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in stdout.getvalue()
+    assert summary.actions[0]["diagnostic_id"] == ATOM_SOURCE_DIAGNOSTIC_ID
+    assert ATOM_SOURCE_DIAGNOSTIC_ID in report.read_text(encoding="utf-8")
+
+
+def test_issue_sync_skips_malformed_atom_event_id_before_sync() -> None:
+    stdout = io.StringIO()
+    diagnostics = sync_tool.diagnostics_from_policy(
+        _policy(
+            [
+                _event(
+                    "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=0"
+                )
+            ]
+        ),
+        stdout=stdout,
+    )
+
+    assert diagnostics == []
+    assert "Skipping source diagnostic without a valid deterministic ID." in stdout.getvalue()
+
+
+def test_issue_sync_skips_atom_notice_events() -> None:
+    notice = _event(ATOM_SOURCE_DIAGNOSTIC_ID, severity="notice")
+
+    assert sync_tool.diagnostics_from_policy(_policy([notice])) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        _marker("wrg-source-diagnostic-v1:1111111111111111"),
+        _marker(ATOM_SOURCE_DIAGNOSTIC_ID),
+    ),
+)
+def test_issue_diagnostic_id_extracts_supported_marker_forms(body: str) -> None:
+    expected = body.split(": ", 1)[1].split(" -->", 1)[0]
+
+    assert sync_tool._issue_diagnostic_id({"body": body}) == expected
+
+
+@pytest.mark.parametrize(
+    "diagnostic_id",
+    (
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=0",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=-1",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=notnumeric",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1C3E09919AF3;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3 ;id=968480",
+        "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480-extra",
+        "arbitrary-string-id",
+    ),
+)
+def test_issue_diagnostic_id_ignores_malformed_atom_marker_ids(diagnostic_id: str) -> None:
+    assert sync_tool._issue_diagnostic_id({"body": _marker(diagnostic_id)}) is None
+
+
+def test_issue_diagnostic_id_ignores_body_without_exactly_one_valid_marker() -> None:
+    assert sync_tool._issue_diagnostic_id({"body": "Manual issue without a marker."}) is None
+    assert sync_tool._issue_diagnostic_id(
+        {
+            "body": (
+                f"{_marker(ATOM_SOURCE_DIAGNOSTIC_ID)}\n"
+                f"{_marker('wrg-source-diagnostic-v1:1111111111111111')}"
+            )
+        }
+    ) is None
 
 
 def test_issue_sync_reads_only_source_diagnostics_events_not_display_rows() -> None:

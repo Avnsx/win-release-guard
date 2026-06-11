@@ -49,7 +49,7 @@ Generated HTML pages include a `<title>`, a concise `meta description`, a canoni
 
 | Area | Must show |
 | --- | --- |
-| Target summary | Broad target, baseline, latest observed build. |
+| Target summary | Broad target, required baseline, latest observed build, and latest-observed evidence label. |
 | Excluded releases | Data-driven 26H1 existing-device exclusion summary. |
 | Feed currency | Latest generated/compiled timestamp for the parsed policy results, live age state, 14/45-day thresholds. |
 | Source diagnostics | Keyboard-accessible severity filters, deterministic diagnostic IDs, counts, events, source health tiles, drift warnings. |
@@ -60,15 +60,25 @@ device-compliance verdicts. Notices are informational, warnings are
 non-blocking source drift or enrichment problems, and errors are
 publish-blocking generator/source failures.
 
-Microsoft Release Health HTML and the public Atom/Update History feed can be
-temporarily out of step. Atom rows that are Preview, out-of-band,
-non-broad-target, unknown-family, or missing a KB/stable baseline marker remain
-normal notices. Missing KB metadata is uncertainty, not proof that the row is
-harmless forever. A warning is reserved for non-preview broad-target Atom drift
-with reliable required-baseline evidence. In the current generator that evidence
-is an extracted KB plus the build/release mapping. `source_drift_unresolved_after_24h`
-is reserved for warning/error drift that remains unresolved after the newest
-source timestamp, not for notice-only source lag.
+Microsoft Release Health HTML, the public Atom/Update History feed,
+Atom-linked public Microsoft Support articles, and unauthenticated public MSRC
+CVRF data can be temporarily out of step. `latest_build` is the value from the
+Release Health Current Versions table; `latest_observed_build` can move ahead
+when the generator finds a newer non-preview broad-target build through an Atom
+entry with a safe `support.microsoft.com` article href. That observed value is
+informational until the signed baseline rules select it as
+`required_baseline_build`.
+
+Atom is discovery, not a KB resolver. If an Atom KB row lacks a usable Support
+article href, the generator records `atom_support_article_href_missing` evidence
+instead of fetching `/help/<KB>`. MSRC CVRF and explicit Support article wording
+provide higher-confidence security classification; Atom titles are kept as
+low-confidence update buckets only. Source Diagnostics and enrichment can
+explain observed builds and KB classification, but they do not override signed
+policy verdicts or required baseline semantics.
+`source_drift_unresolved_after_24h` is reserved for warning/error drift that
+remains unresolved after the newest source timestamp, not for notice-only source
+lag.
 
 Small info icons beside dashboard section labels are static links to the related
 Pages Wiki sections. Their hover/focus panels contain a compact explanation plus
@@ -85,12 +95,17 @@ The Source Diagnostics count tiles for Notices, Warnings, and Errors are native
 buttons. Selecting one filters the event feed to that severity, updates
 `aria-pressed`, and reports the visible row count through the live status text.
 The `View all` button resets only the selected severity filter and shows the
-current diagnostic rows for all severities again. The copy button above the
-diagnostic feed exports the currently visible Source Diagnostics rows to the
+current diagnostic rows for all severities again. Rows can show a concise
+administrator-facing summary above the technical message while keeping the
+source, diagnostic ID, tags, and issue metadata visible. The copy button above
+the diagnostic feed exports the currently visible Source Diagnostics rows to the
 local clipboard as JSON. That JSON includes severity, deterministic diagnostic
-ID, title, source, message, tags, optional static issue URL, visible counts, the
-active filter, and a neutral context note for technical triage; it does not
-fetch GitHub, write to GitHub, or embed credentials. The separate `Expand View`
+ID, title, source, technical message, tags, optional static issue URL, visible
+counts, the active filter, and a neutral context note for technical triage. When
+present, it also adds fields such as `user_message`, `kb_update_bucket`,
+`is_security`, `security_evidence_source`, `support_article_url`,
+`atom_entry_id`, and `atom_support_article_id`. It does not fetch GitHub, write
+to GitHub, or embed credentials. The separate `Expand View`
 button toggles the expanded diagnostic layout: while expanded, the Programmatic
 API panel is hidden, the Source Diagnostics panel spans the dashboard space
 where that panel normally sits, and the event feed gains additional vertical
@@ -133,6 +148,6 @@ as static HTML so missing ticket links are visible without client-side API calls
 
 ```powershell
 python tools/generate_policy.py --release-health-html tests/fixtures/windows11-release-health.html --atom-feed tests/fixtures/windows11-atom.xml --output-dir site --write-index --write-robots --write-sitemap --write-manifest
-pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_wiki_markdown_links.py tests/test_policy_source_cli.py
+pytest -q tests/test_pages_landing.py tests/test_policy_generator.py tests/test_wiki_markdown_links.py tests/test_source_diagnostics_issue_metadata.py tests/test_policy_source_cli.py
 python -m win11_release_guard --check-public-pages
 ```

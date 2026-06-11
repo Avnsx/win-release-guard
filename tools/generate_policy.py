@@ -22,9 +22,9 @@ from win11_release_guard.policy_generator import (
     build_policy_from_sources,
     write_policy_outputs,
 )
+from win11_release_guard.policy_schema import is_source_diagnostic_id
 
 
-SOURCE_DIAGNOSTIC_ID_RE = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
 SOURCE_DIAGNOSTIC_ISSUE_URL_RE = re.compile(
     r"^https://github\.com/Avnsx/win11_release_guard/issues/([1-9][0-9]*)$"
 )
@@ -85,7 +85,7 @@ def _issue_status_mapping(value: Any) -> dict[str, Mapping[str, Any]]:
         raise ValueError("source diagnostic issue status must be an object.")
     records: dict[str, Mapping[str, Any]] = {}
     for diagnostic_id, record in value.items():
-        if not isinstance(diagnostic_id, str) or not SOURCE_DIAGNOSTIC_ID_RE.fullmatch(diagnostic_id):
+        if not is_source_diagnostic_id(diagnostic_id):
             raise ValueError("source diagnostic issue status keys must be deterministic diagnostic IDs.")
         if not isinstance(record, Mapping):
             raise ValueError("source diagnostic issue status records must be objects.")

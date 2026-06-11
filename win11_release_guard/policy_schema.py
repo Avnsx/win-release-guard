@@ -56,7 +56,14 @@ ALLOWED_POLICY_FIELDS = frozenset(
 _RELEASE_PATTERN = re.compile(r"^\d{2}H[12]$", re.IGNORECASE)
 _BUILD_PATTERN = re.compile(r"^\d{5}\.\d+$")
 _URL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
-_SOURCE_DIAGNOSTIC_ID_PATTERN = re.compile(r"^wrg-source-diagnostic-v1:[0-9a-f]{16}$")
+SOURCE_DIAGNOSTIC_ID_PATTERN_TEXT = (
+    r"wrg-source-diagnostic-v1:"
+    r"(?:"
+    r"[0-9a-f]{16}"
+    r"|uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12};id=[1-9][0-9]*"
+    r")"
+)
+SOURCE_DIAGNOSTIC_ID_PATTERN = re.compile(rf"^{SOURCE_DIAGNOSTIC_ID_PATTERN_TEXT}$")
 _SOURCE_DIAGNOSTIC_ISSUE_URL_PATTERN = re.compile(
     r"^https://github\.com/Avnsx/win11_release_guard/issues/[1-9][0-9]*$"
 )
@@ -69,6 +76,10 @@ PUBLISHED_URL_KEYS = (
     "api_signature",
     "api_manifest",
 )
+
+
+def is_source_diagnostic_id(value: Any) -> bool:
+    return isinstance(value, str) and SOURCE_DIAGNOSTIC_ID_PATTERN.fullmatch(value) is not None
 
 
 def _require_mapping(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -113,6 +124,22 @@ def _optional_build(value: Any, field: str) -> str | None:
     if value in (None, ""):
         return None
     return _build(value, field)
+
+
+def _build_key(value: str) -> tuple[int, int]:
+    major, minor = value.split(".", 1)
+    return int(major), int(minor)
+
+
+def _validate_latest_observed_build(
+    latest_build: str,
+    latest_observed_build: str | None,
+    field: str,
+) -> None:
+    if latest_observed_build is None:
+        return
+    if _build_key(latest_observed_build) < _build_key(latest_build):
+        raise PolicyParseError(f"{field} must not be older than latest_build.")
 
 
 def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
@@ -164,9 +191,7 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
             if message is not None and not isinstance(message, str):
                 raise PolicyParseError(f"source_diagnostics.events[{index}].message must be a string.")
             diagnostic_id = event.get("id")
-            if diagnostic_id is not None and (
-                not isinstance(diagnostic_id, str) or not _SOURCE_DIAGNOSTIC_ID_PATTERN.fullmatch(diagnostic_id)
-            ):
+            if diagnostic_id is not None and not is_source_diagnostic_id(diagnostic_id):
                 raise PolicyParseError(
                     f"source_diagnostics.events[{index}].id must be a source diagnostic id."
                 )
@@ -198,7 +223,7 @@ def _validate_source_diagnostics(data: Mapping[str, Any]) -> None:
             raise PolicyParseError("source_diagnostics.issue_status must be an object.")
         for diagnostic_id, record in issue_status.items():
             key = str(diagnostic_id)
-            if not _SOURCE_DIAGNOSTIC_ID_PATTERN.fullmatch(key):
+            if not is_source_diagnostic_id(diagnostic_id):
                 raise PolicyParseError("source_diagnostics.issue_status keys must be source diagnostic ids.")
             if not isinstance(record, Mapping):
                 raise PolicyParseError(f"source_diagnostics.issue_status.{key} must be an object.")
@@ -361,10 +386,11 @@ def validate_policy_document(data: Mapping[str, Any]) -> tuple[str, ...]:
             entry.get("latest_observed_build"),
             f"current_versions[{index}].latest_observed_build",
         )
-        if latest_observed is not None and latest_observed != latest:
-            raise PolicyParseError(
-                f"current_versions[{index}].latest_observed_build must match latest_build."
-            )
+        _validate_latest_observed_build(
+            latest,
+            latest_observed,
+            f"current_versions[{index}].latest_observed_build",
+        )
         baseline_build = _optional_build(entry.get("baseline_build"), f"current_versions[{index}].baseline_build")
         required_baseline = _optional_build(
             entry.get("required_baseline_build"),
@@ -384,8 +410,11 @@ def validate_policy_document(data: Mapping[str, Any]) -> tuple[str, ...]:
         target.get("latest_observed_build"),
         "broad_target_existing_devices.latest_observed_build",
     )
-    if target_latest_observed is not None and target_latest_observed != target_latest:
-        raise PolicyParseError("broad_target_existing_devices.latest_observed_build must match latest_build.")
+    _validate_latest_observed_build(
+        target_latest,
+        target_latest_observed,
+        "broad_target_existing_devices.latest_observed_build",
+    )
     target_baseline_build = _optional_build(
         target.get("baseline_build"),
         "broad_target_existing_devices.baseline_build",
@@ -438,7 +467,10 @@ __all__ = [
     "POLICY_SCHEMA_VERSION",
     "PUBLISHED_URL_KEYS",
     "REQUIRED_POLICY_FIELDS",
+    "SOURCE_DIAGNOSTIC_ID_PATTERN",
+    "SOURCE_DIAGNOSTIC_ID_PATTERN_TEXT",
     "SUPPORTED_POLICY_SCHEMA_VERSION",
+    "is_source_diagnostic_id",
     "policy_document_to_json",
     "validate_policy_document",
 ]

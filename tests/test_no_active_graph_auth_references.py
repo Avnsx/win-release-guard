@@ -5,9 +5,22 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_README_STATEMENT = (
-    "The production generator uses public Microsoft Release Health and Atom sources only; "
-    "it does not use token-authenticated Microsoft APIs."
+REQUIRED_SOURCE_STATEMENT = (
+    "The production generator may use public Microsoft Release Health HTML, public Microsoft Update History Atom data, "
+    "Atom-linked public Microsoft Support articles, and unauthenticated public MSRC CVRF data for source diagnostics "
+    "and informational enrichment; it does not use Microsoft Graph or token-authenticated Microsoft APIs."
+)
+REQUIRED_AGENTS_STATEMENT = (
+    "The production generator may use public Microsoft Release Health HTML, public Microsoft Update History Atom feed data, "
+    "Atom-linked public Microsoft Support articles, and unauthenticated public MSRC CVRF data for source diagnostics "
+    "and informational enrichment."
+)
+ALLOWED_ACTIVE_AUTH_BOUNDARIES = (
+    REQUIRED_SOURCE_STATEMENT,
+    REQUIRED_AGENTS_STATEMENT,
+    "Authenticated Microsoft Graph, token-authenticated Microsoft APIs, and historical authenticated metadata research "
+    "remain out of active production generator architecture; historical research may remain only in "
+    "`docs/architecture-insight.md` when explicitly marked out of scope.",
 )
 FORBIDDEN_PATTERNS = (
     "Microsoft " + "Graph",
@@ -67,18 +80,20 @@ def _iter_scanned_files() -> list[Path]:
     return sorted(files)
 
 
-def test_readme_states_public_sources_only() -> None:
+def test_readme_states_public_enrichment_sources_without_auth() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-    assert REQUIRED_README_STATEMENT in readme
+    assert REQUIRED_SOURCE_STATEMENT in readme
+    assert REQUIRED_AGENTS_STATEMENT in agents
 
 
 def test_no_active_authenticated_microsoft_api_references() -> None:
     findings: list[str] = []
     for path in _iter_scanned_files():
         text = path.read_text(encoding="utf-8", errors="replace")
-        if path == ROOT / "README.md":
-            text = text.replace(REQUIRED_README_STATEMENT, "")
+        for statement in ALLOWED_ACTIVE_AUTH_BOUNDARIES:
+            text = text.replace(statement, "")
         lowered = text.lower()
         for pattern in FORBIDDEN_PATTERNS:
             index = lowered.find(pattern.lower())

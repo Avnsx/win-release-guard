@@ -148,13 +148,21 @@ Source diagnostic IDs are based on stable event identity fields: severity,
 source, event kind/category, release, build family, build, KB article, affected
 target flags, and source URL host/path when available. Generated/fetched
 timestamps, exact message wording, tag order, and display-only prose are
-excluded from the normal ID basis to avoid duplicate issue churn.
+excluded from the normal hash-ID basis to avoid duplicate issue churn. Older
+and non-Atom diagnostics keep the compact form
+`wrg-source-diagnostic-v1:<16 lowercase hex>`. Atom-derived diagnostics may use
+the durable public Atom entry form
+`wrg-source-diagnostic-v1:uuid:<canonical uuid>;id=<positive decimal>` when the
+entry ID is valid; malformed or legacy Atom IDs fall back to the hash form.
 
 An issue is considered managed only when its body contains exactly one internal
 HTML comment marker of the form
-`<!-- wrg-source-diagnostic-id: wrg-source-diagnostic-v1:<hash> -->`. Labels,
+`<!-- wrg-source-diagnostic-id: <full source diagnostic ID> -->`. Labels,
 titles, or plain-text diagnostic ID mentions are not enough for the sync to
-update, comment, reopen, or close an issue.
+update, comment, reopen, or close an issue. The issue body also includes
+`Source diagnostic ID: <full source diagnostic ID>` for human review. For valid
+Atom-form IDs, issue titles keep the exact full ID in the body and append only
+the public suffix, for example `[id=968480]`, to the title.
 
 The standalone `sync-source-diagnostics-issues.yml` workflow supports manual
 dry-runs. In dry-run mode the tool does not create, update, comment, reopen, or
@@ -176,7 +184,7 @@ README badges show latest workflow status only. The schedule is not the only con
 | Keep workflow permissions minimal. | Add `contents: write` outside the tagged release workflow and the dedicated Wiki sync workflow. |
 | Keep GitHub Issues sync in Actions with the built-in token. | Add issue creation calls, tokens, or GitHub API writes to client-side Pages JavaScript. |
 | Keep GitHub internal Wiki sync in `sync-wiki.yml` with `wiki/*.md` source only. | Push generated HTML or use browser JavaScript to write the GitHub Wiki. |
-| Keep signed feed generation public-source only. | Add token-authenticated Microsoft API requirements to production generator. |
+| Keep signed feed generation limited to public Microsoft source data and unauthenticated enrichment. | Add token-authenticated Microsoft API requirements to production generator. |
 | Keep PyPI publishing on Trusted Publishing / OIDC. | Add PyPI API tokens, Twine passwords, usernames, or credentialed repository URLs. |
 | Scan generated Pages output before upload. | Publish stale or unsigned artifacts silently. |
 | Treat scheduled runs as best-effort. | Present schedules as guaranteed timing. |
@@ -191,4 +199,5 @@ python -m win11_release_guard --check-policy-source
 python -m win11_release_guard --check-public-pages
 pytest -q tests/test_repository_automation.py tests/test_publish_policy_workflow.py tests/test_workflow_node24.py
 pytest -q tests/test_pypi_publish_workflow.py tests/test_github_action_versions.py
+pytest -q tests/test_source_diagnostics_issue_sync.py tests/test_source_diagnostics_issue_metadata.py
 ```

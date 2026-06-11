@@ -54,6 +54,15 @@ Fields can be added compatibly. Existing public v1 paths and contract fields sho
 
 Static Pages output can become old without re-rendering. The page embeds generated epoch fields and uses browser time to show live feed age.
 
+## Why can latest observed be newer than latest build?
+
+`latest_build` is the Microsoft Release Health Current Versions table value.
+That table can lag behind public Update History Atom entries and their linked
+Microsoft Support articles. `latest_observed_build` records the newest official
+build the generator found in supported public evidence. It is context only and
+does not become `required_baseline_build` unless the signed baseline rules
+select it.
+
 ## Related Pages
 
 [Home](Home) | [Quick Start](Quick-Start) | [Troubleshooting](Troubleshooting)

@@ -9,8 +9,9 @@ import urllib.request
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -36,6 +37,7 @@ from .models import QualityPolicy, ReleaseHistoryEntry, ReleasePolicy, ReleasePo
 from .policy_schema import (
     GENERATOR_VERSION,
     SUPPORTED_POLICY_SCHEMA_VERSION,
+    is_source_diagnostic_id,
     policy_document_to_json,
     validate_policy_document,
 )
@@ -44,6 +46,9 @@ from .signing import sign_policy_bytes as sign_ed25519_policy_bytes
 
 
 DEFAULT_WINDOWS11_ATOM_FEED_URL = "https://support.microsoft.com/en-us/feed/atom/4ec863cc-2ecd-e187-6cb3-b50c6545db92"
+DEFAULT_MAX_SUPPORT_ARTICLE_BYTES = 2 * 1024 * 1024
+DEFAULT_MAX_MSRC_CVRF_BYTES = 16 * 1024 * 1024
+MSRC_CVRF_API_BASE_URL = "https://api.msrc.microsoft.com/cvrf/v3.0/cvrf"
 GITHUB_RELEASES_BASE_URL = "https://github.com/Avnsx/win11_release_guard/releases/tag"
 GITHUB_LICENSE_URL = "https://github.com/Avnsx/win11_release_guard/blob/main/LICENSE.txt"
 GITHUB_REPOSITORY_URL = "https://github.com/Avnsx/win11_release_guard"
@@ -143,11 +148,16 @@ class ChangelogSection:
 
 
 _LAST_UTC_NOW_MS = 0
+SupportArticleFetcher = Callable[[str, float, int], str]
+MsrcCvrfFetcher = Callable[[str, float, int], Any]
 
 
 @dataclass(frozen=True)
 class AtomFeedEntry:
     title: str
+    entry_id: str | None = None
+    support_article_id: str | None = None
+    diagnostic_id_hint: str | None = None
     link: str | None = None
     published: str | None = None
     updated: str | None = None
@@ -561,7 +571,23 @@ def _link(element: ElementTree.Element, ns: Mapping[str, str]) -> str | None:
         href = link.attrib.get("href")
         if href:
             return href
+    for link in element.findall("link"):
+        href = link.attrib.get("href")
+        if href:
+            return href
     return None
+
+
+def _atom_support_article_id(entry_id: str | None) -> str | None:
+    match = re.search(r"(?:^|;)id=([1-9][0-9]*)(?:$|;)", entry_id or "")
+    return match.group(1) if match else None
+
+
+def _atom_diagnostic_id_hint(entry_id: str | None) -> str | None:
+    if not entry_id:
+        return None
+    diagnostic_id = f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:{entry_id}"
+    return diagnostic_id if is_source_diagnostic_id(diagnostic_id) else None
 
 
 def _extract_kb(text: str | None) -> str | None:
@@ -598,6 +624,7 @@ def parse_atom_feed(xml_text: str) -> tuple[AtomFeedEntry, ...]:
 
     parsed: list[AtomFeedEntry] = []
     for entry in entries:
+        entry_id = _text(entry, "atom:id", ns) or _text(entry, "id", ns)
         title = _text(entry, "atom:title", ns) or _text(entry, "title", ns) or ""
         content = _text(entry, "atom:content", ns) or _text(entry, "content", ns)
         published = _text(entry, "atom:published", ns) or _text(entry, "published", ns)
@@ -608,6 +635,9 @@ def parse_atom_feed(xml_text: str) -> tuple[AtomFeedEntry, ...]:
         parsed.append(
             AtomFeedEntry(
                 title=title,
+                entry_id=entry_id,
+                support_article_id=_atom_support_article_id(entry_id),
+                diagnostic_id_hint=_atom_diagnostic_id_hint(entry_id),
                 link=link,
                 published=published,
                 updated=updated,
@@ -643,12 +673,473 @@ def _history_sort_key(row: ReleaseHistoryEntry) -> tuple[str, tuple[int, int]]:
 
 
 def _kb_url(kb_article: str | None, feed_entry: AtomFeedEntry | None = None) -> str | None:
-    if feed_entry and feed_entry.link:
+    if feed_entry is not None:
         return feed_entry.link
     kb = _extract_kb(kb_article)
     if not kb:
         return None
     return f"https://support.microsoft.com/help/{kb[2:]}"
+
+
+def _safe_atom_support_article_url(value: str | None) -> str | None:
+    url = str(value or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    path = parsed.path or ""
+    if parsed.scheme.lower() != "https" or host != "support.microsoft.com":
+        return None
+    if not path.startswith("/") or path == "/":
+        return None
+    lowered_path = path.lower()
+    if lowered_path.startswith("/feed/") or lowered_path.startswith("/api/") or "/feed/" in lowered_path:
+        return None
+    return url
+
+
+class _SupportArticleTextExtractor(HTMLParser):
+    _SKIP_TAGS = {"script", "style", "noscript", "svg"}
+    _BLOCK_TAGS = {
+        "article",
+        "aside",
+        "br",
+        "dd",
+        "div",
+        "dt",
+        "figcaption",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "main",
+        "p",
+        "section",
+        "td",
+        "th",
+        "tr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._capture_title = False
+        self._capture_h1 = False
+        self._title_parts: list[str] = []
+        self._h1_parts: list[str] = []
+        self._text_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized = tag.lower()
+        if normalized in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if normalized == "title":
+            self._capture_title = True
+        elif normalized == "h1":
+            self._capture_h1 = True
+        if normalized in self._BLOCK_TAGS:
+            self._text_parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if normalized in self._SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if normalized == "title":
+            self._capture_title = False
+        elif normalized == "h1":
+            self._capture_h1 = False
+        if normalized in self._BLOCK_TAGS:
+            self._text_parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = data.strip()
+        if not text:
+            return
+        if self._capture_title:
+            self._title_parts.append(text)
+        if self._capture_h1:
+            self._h1_parts.append(text)
+        self._text_parts.append(text)
+
+    @property
+    def title(self) -> str | None:
+        title = " ".join(self._h1_parts).strip() or " ".join(self._title_parts).strip()
+        return _compact_article_text(title) or None
+
+    @property
+    def text(self) -> str:
+        return _compact_article_text(" ".join(self._text_parts))
+
+
+_SECURITY_ARTICLE_PHRASES = (
+    "includes the latest security fixes",
+    "addresses security vulnerabilities",
+    "security updates",
+)
+_TITLE_BUCKET_RULES = (
+    ("safe os dynamic update", "Safe OS Dynamic Update"),
+    ("setup dynamic update", "Setup Dynamic Update"),
+    ("out of box experience update", "OOBE Update"),
+    ("hotpatch", "Hotpatch"),
+    ("ai component update", "AI Component Update"),
+    ("execution provider update", "AI Execution Provider Update"),
+    ("servicing stack update", "Servicing Stack Update"),
+    ("preview", "Preview OS Build Update"),
+    ("out-of-band", "Out-of-band OS Build Update"),
+)
+_MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+_MONTH_ABBREVIATIONS = (
+    "",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def _compact_article_text(value: str | None) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _atom_title_bucket(title: Any) -> dict[str, str]:
+    normalized = re.sub(r"\s+", " ", str(title or "")).strip().lower().replace("_", "-")
+    for needle, bucket in _TITLE_BUCKET_RULES:
+        if needle in normalized:
+            return {"bucket": bucket, "confidence": "low"}
+    if re.search(r"\bos builds?\b", normalized):
+        return {"bucket": "OS Build Update", "confidence": "low"}
+    return {"bucket": "Microsoft Support Update", "confidence": "low"}
+
+
+def _msrc_month_id_from_atom_date(value: Any) -> str | None:
+    parsed = _parse_source_timestamp(str(value or "") or None)
+    if parsed is None:
+        return None
+    return f"{parsed.year}-{_MONTH_ABBREVIATIONS[parsed.month]}"
+
+
+def _extract_support_article_facts(url: str, html_text: str) -> dict[str, Any]:
+    parser = _SupportArticleTextExtractor()
+    parser.feed(html_text)
+    parser.close()
+    title = parser.title
+    text = parser.text
+    searchable = _compact_article_text(" ".join(part for part in (title, text) if part))
+    lower_searchable = searchable.lower()
+    security_signals = tuple(
+        phrase for phrase in _SECURITY_ARTICLE_PHRASES if phrase in lower_searchable
+    )
+    improvement_labels: list[str] = []
+    for label in re.findall(r"\[([A-Za-z0-9][A-Za-z0-9 .+/#&-]{1,60})\]", searchable):
+        compact_label = _compact_article_text(label)
+        if compact_label and compact_label not in improvement_labels:
+            improvement_labels.append(compact_label)
+        if len(improvement_labels) >= 8:
+            break
+    release_date = None
+    month_pattern = "|".join(_MONTH_NAMES)
+    match = re.search(rf"\b({month_pattern})\s+\d{{1,2}},\s+20\d{{2}}\b", searchable)
+    if match:
+        release_date = match.group(0)
+    applies_to = None
+    applies_match = re.search(r"\bApplies to\s*:?\s*([^.;]{1,180})", searchable, flags=re.IGNORECASE)
+    if applies_match:
+        applies_to = _compact_article_text(applies_match.group(1))
+    known_issue_status = None
+    if "not currently aware of any issues" in lower_searchable:
+        known_issue_status = "not_currently_aware"
+
+    facts: dict[str, Any] = {
+        "url": url,
+        "title": title,
+        "kb_article": _extract_kb(searchable),
+        "builds": list(_extract_builds(searchable)[:8]),
+        "release_date": release_date,
+        "applies_to": applies_to,
+        "known_issue_status": known_issue_status,
+        "improvement_labels": improvement_labels,
+        "is_security": True if security_signals else False,
+        "security_evidence_source": "support_article" if security_signals else "none",
+        "security_signals": list(security_signals),
+    }
+    return {key: value for key, value in facts.items() if value not in (None, "", [], ())}
+
+
+def _default_support_article_fetcher(url: str, timeout: float, max_bytes: int) -> str:
+    return _fetch_url(url, timeout=timeout, max_bytes=max_bytes)
+
+
+def _msrc_cvrf_url(month_id: str) -> str:
+    return f"{MSRC_CVRF_API_BASE_URL}/{month_id}"
+
+
+def _default_msrc_cvrf_fetcher(url: str, timeout: float, max_bytes: int) -> Mapping[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": DEFAULT_USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        content_length = _content_length_from_headers(response.headers)
+        if content_length is not None and content_length > max_bytes:
+            raise PolicyFetchError(
+                f"MSRC CVRF response is too large: exceeds safety cap of {max_bytes} bytes."
+            )
+        data = response.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise PolicyFetchError(
+                f"MSRC CVRF response is too large: exceeds safety cap of {max_bytes} bytes."
+            )
+        decoded = json.loads(data.decode(charset, errors="replace"))
+    if not isinstance(decoded, Mapping):
+        raise PolicyFetchError("MSRC CVRF response must be a JSON object.")
+    return decoded
+
+
+def _support_article_enrichment(
+    url: str,
+    *,
+    fetcher: SupportArticleFetcher,
+    timeout: float,
+) -> dict[str, Any]:
+    safe_url = _safe_atom_support_article_url(url)
+    if safe_url is None:
+        return {
+            "url": url,
+            "status": "skipped",
+            "reason": "invalid_support_article_url",
+        }
+    try:
+        html_text = fetcher(safe_url, timeout, DEFAULT_MAX_SUPPORT_ARTICLE_BYTES)
+    except Exception as exc:
+        return {
+            "url": safe_url,
+            "status": "error",
+            "error": str(exc),
+        }
+    try:
+        facts = _extract_support_article_facts(safe_url, html_text)
+    except Exception as exc:
+        return {
+            "url": safe_url,
+            "status": "degraded",
+            "error": str(exc),
+        }
+    status = "ok"
+    reason = None
+    if not facts.get("title") and not facts.get("kb_article") and not facts.get("builds"):
+        status = "degraded"
+        reason = "support_article_parse_incomplete"
+    facts["status"] = status
+    facts["bytes"] = len(html_text.encode("utf-8"))
+    if reason:
+        facts["reason"] = reason
+    return facts
+
+
+def _as_sequence(value: Any) -> tuple[Any, ...]:
+    if value in (None, ""):
+        return ()
+    if isinstance(value, (str, bytes)):
+        return (value,)
+    if isinstance(value, Sequence):
+        return tuple(value)
+    return (value,)
+
+
+def _dict_value(mapping: Mapping[str, Any], *keys: str) -> Any:
+    lower_keys = {key.lower(): key for key in mapping}
+    for key in keys:
+        actual = lower_keys.get(key.lower())
+        if actual is not None:
+            return mapping.get(actual)
+    return None
+
+
+def _nested_text_values(value: Any) -> tuple[str, ...]:
+    values: list[str] = []
+    if isinstance(value, Mapping):
+        for item in value.values():
+            values.extend(_nested_text_values(item))
+    elif isinstance(value, (str, bytes)):
+        text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+        if text:
+            values.append(text)
+    elif isinstance(value, Sequence):
+        for item in value:
+            values.extend(_nested_text_values(item))
+    elif value not in (None, ""):
+        values.append(str(value))
+    return tuple(values)
+
+
+def _cvrf_description_value(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        for key in ("Value", "value", "Text", "text", "Description", "description"):
+            candidate = value.get(key)
+            if candidate not in (None, ""):
+                if isinstance(candidate, Mapping):
+                    nested = _cvrf_description_value(candidate)
+                    if nested:
+                        return nested
+                return str(candidate)
+    if value not in (None, ""):
+        return str(value)
+    return None
+
+
+def _cvrf_vulnerabilities(cvrf: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    raw = _dict_value(cvrf, "Vulnerability", "Vulnerabilities")
+    return tuple(item for item in _as_sequence(raw) if isinstance(item, Mapping))
+
+
+def _cvrf_remediations(vulnerability: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    raw = _dict_value(vulnerability, "Remediations", "Remediation")
+    return tuple(item for item in _as_sequence(raw) if isinstance(item, Mapping))
+
+
+def _cvrf_product_ids(remediation: Mapping[str, Any]) -> tuple[str, ...]:
+    products: list[str] = []
+    for key, value in remediation.items():
+        normalized = str(key).lower().replace("_", "")
+        if normalized in {"productid", "productids", "product"} or normalized.endswith("productid"):
+            for item in _as_sequence(value):
+                if isinstance(item, (str, int)):
+                    text = str(item).strip()
+                    if text:
+                        products.append(text)
+    return tuple(dict.fromkeys(products))
+
+
+def _cvrf_vulnerability_severities(vulnerability: Mapping[str, Any]) -> tuple[str, ...]:
+    severities: list[str] = []
+    direct = _dict_value(vulnerability, "Severity")
+    if isinstance(direct, (str, int)):
+        severities.append(str(direct).strip())
+    threats = _as_sequence(_dict_value(vulnerability, "Threats", "Threat"))
+    for threat in threats:
+        if not isinstance(threat, Mapping):
+            continue
+        threat_type = str(_dict_value(threat, "Type") or "").lower()
+        if "severity" not in threat_type:
+            continue
+        description = _cvrf_description_value(_dict_value(threat, "Description", "Value"))
+        if description:
+            severities.append(description.strip())
+    return tuple(dict.fromkeys(item for item in severities if item))
+
+
+def _cvrf_kb_join(cvrf: Mapping[str, Any], kb_article: str | None) -> dict[str, Any]:
+    kb = _extract_kb(kb_article)
+    if not kb:
+        return {
+            "is_security": False,
+            "cves": [],
+            "severities": [],
+            "products": [],
+            "evidence_source": "none",
+        }
+    bare_kb = kb[2:]
+    needles = (kb, bare_kb)
+    cves: list[str] = []
+    severities: list[str] = []
+    products: list[str] = []
+    for vulnerability in _cvrf_vulnerabilities(cvrf):
+        matching_remediations = []
+        for remediation in _cvrf_remediations(vulnerability):
+            text = " ".join(_nested_text_values(remediation))
+            if any(needle in text for needle in needles):
+                matching_remediations.append(remediation)
+        if not matching_remediations:
+            continue
+        cve = str(_dict_value(vulnerability, "CVE", "Cve", "cve") or "").strip()
+        if not cve:
+            match = re.search(r"\bCVE-\d{4}-\d{4,}\b", " ".join(_nested_text_values(vulnerability)))
+            cve = match.group(0) if match else ""
+        if cve:
+            cves.append(cve)
+        severities.extend(_cvrf_vulnerability_severities(vulnerability))
+        for remediation in matching_remediations:
+            products.extend(_cvrf_product_ids(remediation))
+    return {
+        "is_security": bool(cves or severities or products),
+        "cves": sorted(dict.fromkeys(cves)),
+        "severities": sorted(dict.fromkeys(severities)),
+        "products": sorted(dict.fromkeys(products)),
+        "evidence_source": "msrc_cvrf" if cves or severities or products else "none",
+    }
+
+
+def _support_article_security_result(article: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(article, Mapping):
+        return {
+            "is_security": None,
+            "cves": [],
+            "severities": [],
+            "products": [],
+            "evidence_source": "unavailable",
+        }
+    if article.get("is_security") is True:
+        return {
+            "is_security": True,
+            "cves": [],
+            "severities": [],
+            "products": [],
+            "evidence_source": "support_article",
+        }
+    status = str(article.get("status") or "")
+    if status in {"error", "skipped"}:
+        return {
+            "is_security": None,
+            "cves": [],
+            "severities": [],
+            "products": [],
+            "evidence_source": "unavailable",
+        }
+    return {
+        "is_security": False,
+        "cves": [],
+        "severities": [],
+        "products": [],
+        "evidence_source": "none",
+    }
 
 
 def _catalog_url(kb_article: str | None) -> str | None:
@@ -696,6 +1187,13 @@ def _enrich_history(
                     "atom_updated": atom_entry.updated,
                 }
             )
+            for key, value in (
+                ("atom_entry_id", atom_entry.entry_id),
+                ("atom_support_article_id", atom_entry.support_article_id),
+                ("diagnostic_id_hint", atom_entry.diagnostic_id_hint),
+            ):
+                if value:
+                    metadata[key] = value
 
         enriched.append(
             replace(
@@ -826,8 +1324,7 @@ def _atom_newer_than_history(
 ) -> tuple[dict[str, Any], ...]:
     newest_by_family, history_builds, history_kbs = _history_build_maps(release_history)
     release_by_family = _history_release_by_family(release_history)
-    missing: list[dict[str, Any]] = []
-    seen: set[tuple[str, str | None]] = set()
+    missing_by_key: dict[tuple[str, str | None], dict[str, Any]] = {}
     for entry in atom_entries:
         kb = _extract_kb(entry.kb_article)
         for build in entry.builds:
@@ -839,24 +1336,473 @@ def _atom_newer_than_history(
             if _build_key(build) <= newest_by_family.get(family, (-1, -1)):
                 continue
             key = (build, kb)
-            if key in seen:
+            record = {
+                "release": release_by_family.get(family),
+                "build": build,
+                "build_family": family,
+                "kb_article": kb,
+                "preview": entry.preview,
+                "out_of_band": entry.out_of_band,
+                "kb_missing_from_release_history": bool(kb and kb not in history_kbs),
+                "published": entry.published,
+                "updated": entry.updated,
+                "title": entry.title,
+                "atom_entry_id": entry.entry_id,
+                "atom_support_article_id": entry.support_article_id,
+                "atom_feed_url": entry.link,
+                "support_url": entry.link,
+                "diagnostic_id_hint": entry.diagnostic_id_hint,
+            }
+            current = missing_by_key.get(key)
+            if current is None or _atom_drift_record_is_preferred(record, current):
+                missing_by_key[key] = record
+    return tuple(
+        missing_by_key[key]
+        for key in sorted(
+            missing_by_key,
+            key=lambda item: (_build_key(item[0]), item[1] or ""),
+        )
+    )
+
+
+def _atom_observed_record_is_preferred(candidate: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    candidate_build = _build_key(str(candidate.get("build") or ""))
+    current_build = _build_key(str(current.get("build") or ""))
+    if candidate_build != current_build:
+        return candidate_build > current_build
+    return _atom_drift_record_is_preferred(candidate, current)
+
+
+def _atom_support_href_missing_event(
+    *,
+    target: ReleasePolicyEntry,
+    entry: AtomFeedEntry,
+    build: str,
+    kb_article: str,
+) -> dict[str, Any]:
+    event = {
+        "severity": "warning",
+        "kind": "atom_support_article_href_missing",
+        "release": target.version,
+        "build_family": target.build_family,
+        "build": build,
+        "kb_article": kb_article,
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "message": (
+            f"Atom feed reports {kb_article} build {build} for the broad target but does not provide "
+            "a usable support.microsoft.com article href; latest observed build was not advanced from Atom evidence."
+        ),
+        "published": entry.published,
+        "updated": entry.updated,
+        "title": entry.title,
+        "atom_entry_id": entry.entry_id,
+        "atom_support_article_id": entry.support_article_id,
+        "atom_feed_url": entry.link,
+        "support_url": entry.link,
+    }
+    return {key: value for key, value in event.items() if value not in (None, "")}
+
+
+def _latest_observed_atom_support_record(
+    target: ReleasePolicyEntry | None,
+    atom_entries: tuple[AtomFeedEntry, ...],
+    release_history: tuple[ReleaseHistoryEntry, ...],
+) -> tuple[dict[str, Any] | None, tuple[dict[str, Any], ...]]:
+    if target is None or not target.latest_build:
+        return None, ()
+
+    release_by_family = _history_release_by_family(release_history)
+    target_latest_key = _build_key(target.latest_build)
+    selected: dict[str, Any] | None = None
+    missing_href_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for entry in atom_entries:
+        if entry.preview or entry.out_of_band:
+            continue
+        kb_article = _extract_kb(entry.kb_article)
+        if not kb_article:
+            continue
+        support_url = _safe_atom_support_article_url(entry.link)
+        for build in entry.builds:
+            build_key = _build_key(build)
+            family = build_key[0]
+            if family != target.build_family:
                 continue
-            seen.add(key)
-            missing.append(
-                {
-                    "release": release_by_family.get(family),
-                    "build": build,
-                    "build_family": family,
-                    "kb_article": kb,
-                    "preview": entry.preview,
-                    "out_of_band": entry.out_of_band,
-                    "kb_missing_from_release_history": bool(kb and kb not in history_kbs),
-                    "published": entry.published,
-                    "updated": entry.updated,
-                    "title": entry.title,
-                }
-            )
-    return tuple(missing)
+            if release_by_family.get(family) != target.version:
+                continue
+            if build_key <= target_latest_key:
+                continue
+            if support_url is None:
+                event = _atom_support_href_missing_event(
+                    target=target,
+                    entry=entry,
+                    build=build,
+                    kb_article=kb_article,
+                )
+                key = (build, kb_article)
+                current = missing_href_by_key.get(key)
+                if current is None or _atom_drift_record_is_preferred(event, current):
+                    missing_href_by_key[key] = event
+                continue
+
+            record = {
+                "build": build,
+                "release": target.version,
+                "build_family": family,
+                "kb_article": kb_article,
+                "latest_observed_source": "atom_support_article",
+                "latest_observed_source_url": support_url,
+                "latest_observed_kb_article": kb_article,
+                "latest_observed_published": entry.published,
+                "latest_observed_updated": entry.updated,
+                "latest_observed_atom_entry_id": entry.entry_id,
+                "latest_observed_atom_support_article_id": entry.support_article_id,
+                "atom_entry_id": entry.entry_id,
+                "atom_support_article_id": entry.support_article_id,
+                "atom_feed_url": support_url,
+                "support_url": support_url,
+                "updated": entry.updated,
+                "published": entry.published,
+                "title": entry.title,
+            }
+            if entry.diagnostic_id_hint:
+                record["diagnostic_id_hint"] = entry.diagnostic_id_hint
+            record = {key: value for key, value in record.items() if value not in (None, "")}
+            if selected is None or _atom_observed_record_is_preferred(record, selected):
+                selected = record
+
+    missing_events = tuple(
+        missing_href_by_key[key]
+        for key in sorted(missing_href_by_key, key=lambda item: (_build_key(item[0]), item[1]))
+    )
+    return selected, missing_events
+
+
+def _entry_with_latest_observed_evidence(
+    entry: ReleasePolicyEntry,
+    record: Mapping[str, Any],
+) -> ReleasePolicyEntry:
+    build = str(record.get("build") or "")
+    if not build:
+        return entry
+    metadata = dict(entry.metadata)
+    for key in (
+        "latest_observed_source",
+        "latest_observed_source_url",
+        "latest_observed_kb_article",
+        "latest_observed_published",
+        "latest_observed_updated",
+        "latest_observed_atom_entry_id",
+        "latest_observed_atom_support_article_id",
+    ):
+        value = record.get(key)
+        if value not in (None, ""):
+            metadata[key] = value
+    return replace(entry, latest_observed_build=build, metadata=metadata)
+
+
+def _support_article_record_url(record: Mapping[str, Any]) -> str | None:
+    return _safe_atom_support_article_url(str(record.get("support_url") or record.get("atom_feed_url") or "") or None)
+
+
+def _records_for_support_article_enrichment(
+    *,
+    target: ReleasePolicyEntry | None,
+    atom_entries: tuple[AtomFeedEntry, ...],
+    release_history: tuple[ReleaseHistoryEntry, ...],
+    observed_record: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    if target is None:
+        return ()
+    records_by_url: dict[str, dict[str, Any]] = {}
+    if observed_record is not None:
+        url = _support_article_record_url(observed_record)
+        if url:
+            records_by_url[url] = dict(observed_record)
+
+    for record in _atom_newer_than_history(atom_entries, release_history):
+        url = _support_article_record_url(record)
+        if not url:
+            continue
+        if record.get("preview") or record.get("out_of_band"):
+            continue
+        if record.get("release") != target.version or record.get("build_family") != target.build_family:
+            continue
+        if not _extract_kb(str(record.get("kb_article") or "")):
+            continue
+        current = records_by_url.get(url)
+        if current is None or _atom_observed_record_is_preferred(record, current):
+            records_by_url[url] = dict(record)
+    return tuple(records_by_url[url] for url in sorted(records_by_url))
+
+
+def _support_article_enrichments(
+    records: tuple[Mapping[str, Any], ...],
+    *,
+    fetcher: SupportArticleFetcher | None,
+    timeout: float,
+) -> dict[str, dict[str, Any]]:
+    if fetcher is None:
+        return {}
+    enrichments: dict[str, dict[str, Any]] = {}
+    for record in records:
+        url = _support_article_record_url(record)
+        if not url or url in enrichments:
+            continue
+        enrichments[url] = _support_article_enrichment(
+            url,
+            fetcher=fetcher,
+            timeout=timeout,
+        )
+    return enrichments
+
+
+def _support_article_enrichment_event(
+    record: Mapping[str, Any],
+    enrichment: Mapping[str, Any],
+    target: ReleasePolicyEntry | None,
+) -> dict[str, Any] | None:
+    status = str(enrichment.get("status") or "")
+    if status == "not_fetched":
+        return None
+    if status == "ok":
+        return None
+    release = str(record.get("release") or "") or None
+    build_family = record.get("build_family")
+    build = str(record.get("build") or "") or None
+    kb_article = _extract_kb(str(record.get("kb_article") or "")) or None
+    affects_broad_target = bool(
+        target is not None
+        and release == target.version
+        and build_family == target.build_family
+    )
+    kind = "support_article_enrichment_degraded" if status == "degraded" else "support_article_enrichment_unavailable"
+    url = str(enrichment.get("url") or record.get("support_url") or record.get("atom_feed_url") or "")
+    message = (
+        f"Support article enrichment for {kb_article or 'unknown KB'} build {build or 'unknown'} "
+        f"is {status or 'unavailable'} at {url or 'unknown URL'}."
+    )
+    if enrichment.get("error"):
+        message += f" {enrichment['error']}"
+    event = {
+        "severity": "warning" if affects_broad_target else "notice",
+        "kind": kind,
+        "release": release,
+        "build_family": build_family,
+        "build": build,
+        "kb_article": kb_article,
+        "affects_broad_target": affects_broad_target,
+        "affects_required_baseline": False,
+        "message": message,
+        "source_url": url or None,
+        "support_article_status": status or "unavailable",
+        "support_article_error": enrichment.get("error"),
+        "support_article_reason": enrichment.get("reason"),
+        "atom_entry_id": record.get("atom_entry_id"),
+        "atom_support_article_id": record.get("atom_support_article_id"),
+        "atom_feed_url": record.get("atom_feed_url"),
+    }
+    return {key: value for key, value in event.items() if value not in (None, "")}
+
+
+def _support_article_enrichment_events(
+    records: tuple[Mapping[str, Any], ...],
+    enrichments: Mapping[str, Mapping[str, Any]],
+    target: ReleasePolicyEntry | None,
+) -> tuple[dict[str, Any], ...]:
+    events: list[dict[str, Any]] = []
+    for record in records:
+        url = _support_article_record_url(record)
+        if not url:
+            continue
+        enrichment = enrichments.get(url)
+        if not isinstance(enrichment, Mapping):
+            continue
+        event = _support_article_enrichment_event(record, enrichment, target)
+        if event is not None:
+            events.append(event)
+    return tuple(_dedupe_source_events(events))
+
+
+def _msrc_cvrf_payloads(
+    records: tuple[Mapping[str, Any], ...],
+    *,
+    fetcher: MsrcCvrfFetcher | None,
+    timeout: float,
+) -> tuple[dict[str, Mapping[str, Any]], dict[str, dict[str, Any]]]:
+    if fetcher is None:
+        return {}, {}
+    month_ids = sorted(
+        {
+            month_id
+            for record in records
+            if (month_id := _msrc_month_id_from_atom_date(record.get("published") or record.get("updated")))
+        }
+    )
+    payloads: dict[str, Mapping[str, Any]] = {}
+    statuses: dict[str, dict[str, Any]] = {}
+    for month_id in month_ids:
+        url = _msrc_cvrf_url(month_id)
+        try:
+            payload = fetcher(url, timeout, DEFAULT_MAX_MSRC_CVRF_BYTES)
+        except Exception as exc:
+            statuses[month_id] = {
+                "status": "error",
+                "url": url,
+                "error": str(exc),
+            }
+            continue
+        if not isinstance(payload, Mapping):
+            statuses[month_id] = {
+                "status": "degraded",
+                "url": url,
+                "error": "MSRC CVRF response must be a JSON object.",
+            }
+            continue
+        payloads[month_id] = payload
+        statuses[month_id] = {
+            "status": "ok",
+            "url": url,
+        }
+    return payloads, statuses
+
+
+def _security_result_for_record(
+    record: Mapping[str, Any],
+    article: Mapping[str, Any] | None,
+    *,
+    msrc_payloads: Mapping[str, Mapping[str, Any]],
+    msrc_statuses: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    month_id = _msrc_month_id_from_atom_date(record.get("published") or record.get("updated"))
+    msrc_status = msrc_statuses.get(str(month_id or ""))
+    if month_id and msrc_status and msrc_status.get("status") == "ok":
+        cvrf_result = _cvrf_kb_join(msrc_payloads.get(month_id, {}), str(record.get("kb_article") or ""))
+        if cvrf_result["is_security"] is True:
+            return {
+                **cvrf_result,
+                "msrc_cvrf_month_id": month_id,
+                "msrc_cvrf_status": "ok",
+                "msrc_cvrf_url": msrc_status.get("url"),
+            }
+        support_result = _support_article_security_result(article)
+        if support_result["is_security"] is True:
+            return {
+                **support_result,
+                "msrc_cvrf_month_id": month_id,
+                "msrc_cvrf_status": "ok",
+                "msrc_cvrf_url": msrc_status.get("url"),
+            }
+        return {
+            **cvrf_result,
+            "msrc_cvrf_month_id": month_id,
+            "msrc_cvrf_status": "ok",
+            "msrc_cvrf_url": msrc_status.get("url"),
+        }
+
+    support_result = _support_article_security_result(article)
+    if support_result["is_security"] is True:
+        result = dict(support_result)
+    elif msrc_status:
+        result = {
+            "is_security": None,
+            "cves": [],
+            "severities": [],
+            "products": [],
+            "evidence_source": "unavailable",
+        }
+    else:
+        result = support_result
+    if month_id and msrc_status:
+        result.update(
+            {
+                "msrc_cvrf_month_id": month_id,
+                "msrc_cvrf_status": str(msrc_status.get("status") or "unavailable"),
+                "msrc_cvrf_url": msrc_status.get("url"),
+            }
+        )
+        if msrc_status.get("error"):
+            result["msrc_cvrf_error"] = msrc_status.get("error")
+    return result
+
+
+def _support_articles_with_security(
+    records: tuple[Mapping[str, Any], ...],
+    support_articles: Mapping[str, Mapping[str, Any]],
+    *,
+    msrc_payloads: Mapping[str, Mapping[str, Any]],
+    msrc_statuses: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    enriched = {str(url): dict(article) for url, article in support_articles.items()}
+    for record in records:
+        url = _support_article_record_url(record)
+        if not url:
+            continue
+        article = dict(enriched.get(url) or {"url": url, "status": "not_fetched"})
+        security = _security_result_for_record(
+            record,
+            article,
+            msrc_payloads=msrc_payloads,
+            msrc_statuses=msrc_statuses,
+        )
+        article["is_security"] = security.get("is_security")
+        article["security_evidence_source"] = security.get("evidence_source")
+        if security.get("cves"):
+            article["cves"] = security["cves"]
+        if security.get("severities"):
+            article["security_severities"] = security["severities"]
+        if security.get("products"):
+            article["security_products"] = security["products"]
+        for key in ("msrc_cvrf_month_id", "msrc_cvrf_status", "msrc_cvrf_url", "msrc_cvrf_error"):
+            value = security.get(key)
+            if value not in (None, ""):
+                article[key] = value
+        cleaned = {key: value for key, value in article.items() if value not in (None, "", [], ())}
+        if "is_security" in article:
+            cleaned["is_security"] = article["is_security"]
+        enriched[url] = cleaned
+    return enriched
+
+
+def _msrc_cvrf_events(
+    records: tuple[Mapping[str, Any], ...],
+    statuses: Mapping[str, Mapping[str, Any]],
+    target: ReleasePolicyEntry | None,
+) -> tuple[dict[str, Any], ...]:
+    events: list[dict[str, Any]] = []
+    affected_months = {
+        month_id
+        for record in records
+        if (
+            target is not None
+            and record.get("release") == target.version
+            and record.get("build_family") == target.build_family
+            and (month_id := _msrc_month_id_from_atom_date(record.get("published") or record.get("updated")))
+        )
+    }
+    for month_id in sorted(affected_months):
+        status = statuses.get(month_id)
+        if not status or status.get("status") == "ok":
+            continue
+        events.append(
+            {
+                "severity": "warning",
+                "kind": "msrc_cvrf_enrichment_unavailable",
+                "release": target.version if target else None,
+                "build_family": target.build_family if target else None,
+                "build": None,
+                "kb_article": None,
+                "affects_broad_target": bool(target),
+                "affects_required_baseline": False,
+                "message": f"MSRC CVRF enrichment for {month_id} is {status.get('status')}; security classification may use support article evidence only.",
+                "msrc_cvrf_month_id": month_id,
+                "msrc_cvrf_status": status.get("status"),
+                "msrc_cvrf_url": status.get("url"),
+                "msrc_cvrf_error": status.get("error"),
+            }
+        )
+    return tuple(_dedupe_source_events(events))
 
 
 def _current_version_latest_older_than_history(
@@ -891,6 +1837,24 @@ def _newest_atom_build(entries: tuple[AtomFeedEntry, ...]) -> str | None:
     return max(builds, key=_build_key)
 
 
+def _source_timestamp_for_sort(value: str | None) -> datetime:
+    return _parse_source_timestamp(value) or datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _atom_drift_record_is_preferred(candidate: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    candidate_updated = _source_timestamp_for_sort(str(candidate.get("updated") or "") or None)
+    current_updated = _source_timestamp_for_sort(str(current.get("updated") or "") or None)
+    if candidate_updated != current_updated:
+        return candidate_updated > current_updated
+    candidate_id = str(candidate.get("atom_entry_id") or "\uffff")
+    current_id = str(current.get("atom_entry_id") or "\uffff")
+    if candidate_id != current_id:
+        return candidate_id < current_id
+    return str(candidate.get("atom_feed_url") or candidate.get("title") or "") < str(
+        current.get("atom_feed_url") or current.get("title") or ""
+    )
+
+
 def _event_key(item: Mapping[str, Any]) -> tuple[str | None, str | None, str | None, str | None, str | None]:
     return (
         str(item.get("severity")) if item.get("severity") is not None else None,
@@ -902,15 +1866,19 @@ def _event_key(item: Mapping[str, Any]) -> tuple[str | None, str | None, str | N
 
 
 def _dedupe_source_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str | None, str | None, str | None, str | None, str | None]] = set()
+    by_key: dict[tuple[str | None, str | None, str | None, str | None, str | None], dict[str, Any]] = {}
+    order: list[tuple[str | None, str | None, str | None, str | None, str | None]] = []
     for event in events:
         key = _event_key(event)
-        if key in seen:
+        item = dict(event)
+        current = by_key.get(key)
+        if current is None:
+            order.append(key)
+            by_key[key] = item
             continue
-        seen.add(key)
-        deduped.append(dict(event))
-    return deduped
+        if _atom_drift_record_is_preferred(item, current):
+            by_key[key] = item
+    return [by_key[key] for key in order]
 
 
 def _source_event_counts(events: list[dict[str, Any]]) -> dict[str, int]:
@@ -922,7 +1890,105 @@ def _source_event_counts(events: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _atom_newer_event(item: Mapping[str, Any], target: ReleasePolicyEntry | None) -> dict[str, Any]:
+def _month_year_from_article_date(value: Any) -> str | None:
+    match = re.fullmatch(r"([A-Za-z]+)\s+\d{1,2},\s+(20\d{2})", str(value or "").strip())
+    if not match:
+        return None
+    return f"{match.group(1)} {match.group(2)}"
+
+
+def _month_year_from_timestamp(value: Any) -> str | None:
+    parsed = _parse_source_timestamp(str(value or "") or None)
+    if parsed is None:
+        return None
+    return f"{_MONTH_NAMES[parsed.month - 1]} {parsed.year}"
+
+
+def _human_join(items: Sequence[str]) -> str:
+    values = [item for item in items if item]
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]} and {values[1]}"
+    return ", ".join(values[:-1]) + f", and {values[-1]}"
+
+
+def _support_article_notice_summary(event: Mapping[str, Any], article: Mapping[str, Any]) -> str | None:
+    status = str(article.get("status") or "")
+    if status not in {"ok", "degraded", "not_fetched"} and event.get("is_security") is not True:
+        return None
+    kb_article = str(article.get("kb_article") or event.get("kb_article") or "unknown KB")
+    release = str(event.get("release") or "").strip()
+    build = str(event.get("build") or "").strip()
+    patch_type = "Security Patch" if event.get("is_security") is True else "Windows Update"
+    date_label = _month_year_from_article_date(article.get("release_date")) or _month_year_from_timestamp(
+        event.get("published")
+    )
+    prefix = f"{patch_type} {date_label}" if date_label else patch_type
+    target = f"Windows 11 {kb_article}"
+    if release and build:
+        movement = f"moves {release} to {build}"
+    elif build:
+        movement = f"reports build {build}"
+    else:
+        movement = "has public support notes"
+    summary = f"{prefix}: {target} {movement}"
+    labels = [str(label) for label in article.get("improvement_labels") or ()][:4]
+    if labels:
+        summary += f"; public notes mention {_human_join(labels)}"
+    return summary + "."
+
+
+def _event_with_support_article(
+    event: dict[str, Any],
+    article: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(article, Mapping):
+        return event
+    for source_key, event_key in (
+        ("status", "support_article_status"),
+        ("url", "support_article_url"),
+        ("title", "support_article_title"),
+        ("kb_article", "support_article_kb_article"),
+        ("builds", "support_article_builds"),
+        ("release_date", "support_article_release_date"),
+        ("applies_to", "support_article_applies_to"),
+        ("known_issue_status", "support_article_known_issue_status"),
+        ("improvement_labels", "support_article_improvement_labels"),
+        ("is_security", "is_security"),
+        ("security_evidence_source", "security_evidence_source"),
+        ("cves", "cves"),
+        ("security_severities", "security_severities"),
+        ("security_products", "security_products"),
+        ("security_signals", "security_signals"),
+        ("msrc_cvrf_month_id", "msrc_cvrf_month_id"),
+        ("msrc_cvrf_status", "msrc_cvrf_status"),
+        ("msrc_cvrf_url", "msrc_cvrf_url"),
+        ("msrc_cvrf_error", "msrc_cvrf_error"),
+        ("reason", "support_article_reason"),
+        ("error", "support_article_error"),
+    ):
+        value = article.get(source_key)
+        if source_key == "is_security" and source_key in article:
+            event[event_key] = value
+            continue
+        if value not in (None, "", [], ()):
+            event[event_key] = value
+    summary = _support_article_notice_summary(event, article)
+    if summary:
+        event["notice_summary"] = summary
+        event["user_message"] = summary
+    return event
+
+
+def _atom_newer_event(
+    item: Mapping[str, Any],
+    target: ReleasePolicyEntry | None,
+    *,
+    support_articles: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     release = str(item.get("release") or "") or None
     build_family = item.get("build_family")
     kb_article = item.get("kb_article")
@@ -949,7 +2015,7 @@ def _atom_newer_event(item: Mapping[str, Any], target: ReleasePolicyEntry | None
             "Atom feed has newer Preview/OOB or non-baseline update information not present in "
             f"Release Health release_history: {kb_article or 'unknown KB'} build {build}."
         )
-    return {
+    event = {
         "severity": severity,
         "kind": "atom_newer_than_release_history",
         "release": release,
@@ -960,6 +2026,28 @@ def _atom_newer_event(item: Mapping[str, Any], target: ReleasePolicyEntry | None
         "affects_required_baseline": affects_required_baseline,
         "message": message,
     }
+    bucket = _atom_title_bucket(item.get("title"))
+    event["kb_update_bucket"] = bucket["bucket"]
+    event["kb_update_bucket_confidence"] = bucket["confidence"]
+    for key in (
+        "atom_entry_id",
+        "atom_support_article_id",
+        "atom_feed_url",
+        "support_url",
+        "diagnostic_id_hint",
+        "published",
+        "updated",
+        "title",
+    ):
+        value = item.get(key)
+        if value not in (None, ""):
+            event[key] = value
+    source_url = item.get("support_url") or item.get("atom_feed_url")
+    if source_url not in (None, ""):
+        event["source_url"] = source_url
+    if support_articles and source_url not in (None, ""):
+        event = _event_with_support_article(event, support_articles.get(str(source_url)))
+    return event
 
 
 def _is_unresolved_source_drift_event(event: Mapping[str, Any]) -> bool:
@@ -1051,6 +2139,8 @@ def _source_diagnostics(
     current_versions: tuple[ReleasePolicyEntry, ...],
     release_history: tuple[ReleaseHistoryEntry, ...],
     atom_entries: tuple[AtomFeedEntry, ...],
+    support_articles: Mapping[str, Mapping[str, Any]] | None = None,
+    msrc_cvrf_statuses: Mapping[str, Mapping[str, Any]] | None = None,
     broad_target: ReleasePolicyEntry | None,
     parser_diagnostics: tuple[Mapping[str, Any], ...] = (),
     source_input_events: tuple[Mapping[str, Any], ...] = (),
@@ -1080,12 +2170,14 @@ def _source_diagnostics(
     newest_atom_updated = _newest_atom_timestamp(atom_entries, "updated")
     newest_atom_published = _newest_atom_timestamp(atom_entries, "published")
     atom_newer = _atom_newer_than_history(atom_entries, release_history)
+    effective_support_articles = support_articles or {}
+    effective_msrc_cvrf_statuses = msrc_cvrf_statuses or {}
     current_stale = _current_version_latest_older_than_history(current_versions, release_history)
     events = _dedupe_source_events(
         [
             *(dict(item) for item in parser_diagnostics),
             *(dict(item) for item in source_input_events),
-            *(_atom_newer_event(item, broad_target) for item in atom_newer),
+            *(_atom_newer_event(item, broad_target, support_articles=effective_support_articles) for item in atom_newer),
             *(_current_versions_lag_event(item, broad_target) for item in current_stale),
         ]
     )
@@ -1175,6 +2267,14 @@ def _source_diagnostics(
             "newest_source_timestamp": newest_source_timestamp,
             "generated_after_newest_source_hours": generated_after_hours,
         },
+        "support_articles": {
+            str(url): dict(article)
+            for url, article in sorted(effective_support_articles.items())
+        },
+        "msrc_cvrf": {
+            str(month_id): dict(status)
+            for month_id, status in sorted(effective_msrc_cvrf_statuses.items())
+        },
         "parser": {
             "events": parser_events,
         },
@@ -1240,6 +2340,10 @@ def _policy_with_enrichment(
     source_fetch_status: Mapping[str, Any],
     validation_warnings: tuple[str, ...],
     source_input_events: tuple[Mapping[str, Any], ...] = (),
+    support_article_fetcher: SupportArticleFetcher | None = None,
+    support_article_timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
+    msrc_cvrf_fetcher: MsrcCvrfFetcher | None = None,
+    msrc_cvrf_timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
     signature_status: str,
     published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
@@ -1281,6 +2385,52 @@ def _policy_with_enrichment(
                 "Could not select B-release required baseline for broad_target_existing_devices "
                 f"{target.version}/{target.build_family} from Release Health release_history."
             )
+        observed_record, observed_source_events = _latest_observed_atom_support_record(
+            target,
+            atom_entries,
+            release_history,
+        )
+        if observed_record is not None:
+            target = _entry_with_latest_observed_evidence(target, observed_record)
+            current_versions = tuple(
+                _entry_with_latest_observed_evidence(entry, observed_record)
+                if entry.version == target.version and entry.build_family == target.build_family
+                else entry
+                for entry in current_versions
+            )
+            source_input_events = (*source_input_events, *observed_source_events)
+        else:
+            source_input_events = (*source_input_events, *observed_source_events)
+    else:
+        observed_record = None
+
+    support_article_records = _records_for_support_article_enrichment(
+        target=target,
+        atom_entries=atom_entries,
+        release_history=release_history,
+        observed_record=observed_record,
+    )
+    support_articles = _support_article_enrichments(
+        support_article_records,
+        fetcher=support_article_fetcher,
+        timeout=support_article_timeout,
+    )
+    msrc_payloads, msrc_cvrf_statuses = _msrc_cvrf_payloads(
+        support_article_records,
+        fetcher=msrc_cvrf_fetcher,
+        timeout=msrc_cvrf_timeout,
+    )
+    support_articles = _support_articles_with_security(
+        support_article_records,
+        support_articles,
+        msrc_payloads=msrc_payloads,
+        msrc_statuses=msrc_cvrf_statuses,
+    )
+    source_input_events = (
+        *source_input_events,
+        *_support_article_enrichment_events(support_article_records, support_articles, target),
+        *_msrc_cvrf_events(support_article_records, msrc_cvrf_statuses, target),
+    )
 
     metadata = dict(base_policy.metadata)
     metadata["signature_status"] = signature_status
@@ -1296,6 +2446,8 @@ def _policy_with_enrichment(
         current_versions=current_versions,
         release_history=release_history,
         atom_entries=atom_entries,
+        support_articles=support_articles,
+        msrc_cvrf_statuses=msrc_cvrf_statuses,
         broad_target=target,
         parser_diagnostics=parser_diagnostics,
         source_input_events=source_input_events,
@@ -1352,6 +2504,10 @@ def generate_policy(
     generated_at_utc: str | None = None,
     signature_status: str = "unsigned",
     source_fetch_status: Mapping[str, Any] | None = None,
+    support_article_fetcher: SupportArticleFetcher | None = None,
+    support_article_timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
+    msrc_cvrf_fetcher: MsrcCvrfFetcher | None = None,
+    msrc_cvrf_timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
     published_urls: Mapping[str, str] | None = None,
 ) -> ReleasePolicy:
     warnings: list[str] = []
@@ -1405,6 +2561,10 @@ def generate_policy(
         source_fetch_status=effective_source_fetch_status,
         validation_warnings=tuple(dict.fromkeys(warnings)),
         source_input_events=tuple(source_input_events),
+        support_article_fetcher=support_article_fetcher,
+        support_article_timeout=support_article_timeout,
+        msrc_cvrf_fetcher=msrc_cvrf_fetcher,
+        msrc_cvrf_timeout=msrc_cvrf_timeout,
         signature_status=signature_status,
         published_urls=published_urls,
     )
@@ -3780,6 +4940,30 @@ def _status_text(policy: ReleasePolicy) -> str:
     return "Warning state" if policy.validation_warnings else "Policy current"
 
 
+def _latest_observed_source_label(entry: ReleasePolicyEntry | None) -> str:
+    if entry and str(entry.metadata.get("latest_observed_source") or "") == "atom_support_article":
+        return "Microsoft Support article via Atom feed"
+    return "Microsoft Current Versions table"
+
+
+def _latest_observed_evidence_metadata(entry: ReleasePolicyEntry | None) -> dict[str, Any]:
+    if entry is None:
+        return {}
+    return {
+        key: entry.metadata[key]
+        for key in (
+            "latest_observed_source",
+            "latest_observed_source_url",
+            "latest_observed_kb_article",
+            "latest_observed_published",
+            "latest_observed_updated",
+            "latest_observed_atom_entry_id",
+            "latest_observed_atom_support_article_id",
+        )
+        if key in entry.metadata and entry.metadata[key] not in (None, "")
+    }
+
+
 def _source_event_counts_for_policy(policy: ReleasePolicy) -> dict[str, int]:
     source_diagnostics = policy.source_diagnostics if isinstance(policy.source_diagnostics, Mapping) else {}
     raw_counts = source_diagnostics.get("event_counts") if isinstance(source_diagnostics, Mapping) else {}
@@ -4064,6 +5248,11 @@ def _source_diagnostic_event_tags(event: Mapping[str, Any]) -> tuple[str, ...]:
     if kb_article not in (None, ""):
         kb_text = str(kb_article)
         tags.append(kb_text if kb_text.upper().startswith("KB") else f"KB {kb_text}")
+    if event.get("is_security") is True:
+        tags.append("Security patch")
+        cves = event.get("cves")
+        if isinstance(cves, Sequence) and not isinstance(cves, (str, bytes)) and cves:
+            tags.append(f"CVEs {len(cves)}")
     build_family = event.get("build_family")
     if build_family not in (None, ""):
         tags.append(f"Family {build_family}")
@@ -4071,13 +5260,27 @@ def _source_diagnostic_event_tags(event: Mapping[str, Any]) -> tuple[str, ...]:
         tags.append("Required baseline")
     elif event.get("affects_broad_target"):
         tags.append("Broad target")
+    public_id = event.get("atom_support_article_id") or event.get("support_article_id")
+    if public_id not in (None, ""):
+        tags.append(f"id={public_id}")
     timestamp = _source_diagnostic_timestamp(event)
     if timestamp:
         tags.append(timestamp)
     return tuple(tags)
 
 
+def _source_diagnostic_id_hint_for_event(event: Mapping[str, Any]) -> str | None:
+    for key in ("diagnostic_id_hint", "id"):
+        diagnostic_id = _source_diagnostic_id_text(event.get(key))
+        if _is_source_diagnostic_id(diagnostic_id):
+            return diagnostic_id
+    return None
+
+
 def _source_diagnostic_id_for_event(event: Mapping[str, Any]) -> str:
+    hint = _source_diagnostic_id_hint_for_event(event)
+    if hint is not None:
+        return hint
     kind = event.get("kind")
     severity = _source_diagnostic_event_severity(event.get("severity"))
     title = _source_diagnostic_event_label(kind)
@@ -4116,8 +5319,8 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
     message = _short_diagnostic_text(event.get("message") or event.get("title") or title)
     source = _source_diagnostic_source_label(kind)
     tags = _source_diagnostic_event_tags(event)
-    diagnostic_id = _source_diagnostic_id_text(event.get("id"))
-    if not _is_source_diagnostic_id(diagnostic_id):
+    diagnostic_id = _source_diagnostic_id_hint_for_event(event)
+    if diagnostic_id is None:
         diagnostic_id = _source_diagnostic_id(
             severity=severity,
             source=source,
@@ -4133,15 +5336,33 @@ def _source_diagnostic_row_from_event(event: Mapping[str, Any]) -> dict[str, Any
             affects_required_baseline=event.get("affects_required_baseline"),
             source_url=event.get("source_url") or event.get("url") or event.get("atom_feed_url"),
         )
-    return {
+    row: dict[str, Any] = {
         "id": diagnostic_id,
         "severity": severity,
         "title": title,
         "source": source,
         "message": message,
+        "user_message": _short_diagnostic_text(
+            event.get("user_message") or event.get("notice_summary"),
+            max_length=240,
+        ),
         "tags": tags,
         "issue_sync_event": severity in {"warning", "error"},
     }
+    for key in (
+        "kb_update_bucket",
+        "kb_update_bucket_confidence",
+        "security_evidence_source",
+        "support_article_url",
+        "atom_entry_id",
+        "atom_support_article_id",
+    ):
+        value = event.get(key)
+        if value not in (None, "", (), [], {}):
+            row[key] = value
+    if isinstance(event.get("is_security"), bool):
+        row["is_security"] = event["is_security"]
+    return row
 
 
 def _source_diagnostic_row_from_text(severity: str, message: Any, *, source: str, title: str) -> dict[str, Any]:
@@ -4299,12 +5520,7 @@ def _source_diagnostic_text(value: Any, *, fallback: str = "") -> str:
 
 
 def _is_source_diagnostic_id(value: str) -> bool:
-    suffix = value.removeprefix(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
-    return (
-        value.startswith(f"{SOURCE_DIAGNOSTIC_ID_PREFIX}:")
-        and len(suffix) == SOURCE_DIAGNOSTIC_ID_HASH_LENGTH
-        and all(char in "0123456789abcdef" for char in suffix)
-    )
+    return is_source_diagnostic_id(value)
 
 
 def _source_diagnostic_issue_number(value: Any) -> int | None:
@@ -4487,8 +5703,8 @@ def _source_diagnostic_issue_link_html(issue: Mapping[str, Any] | None) -> str:
 
 
 def _source_diagnostic_row_id(row: Mapping[str, Any]) -> str:
-    existing_id = _source_diagnostic_text(row.get("id"))
-    if _is_source_diagnostic_id(existing_id):
+    existing_id = _source_diagnostic_id_hint_for_event(row)
+    if existing_id is not None:
         return existing_id
     severity = _source_diagnostic_event_severity(row.get("severity"))
     title = _source_diagnostic_text(row.get("title"), fallback="Source diagnostic")
@@ -4538,6 +5754,26 @@ def _placeholder_rows_for_unexplained_counts(
     return tuple(placeholders)
 
 
+def _source_diagnostic_row_data_attrs(row: Mapping[str, Any]) -> str:
+    attrs: list[str] = []
+    for key, attr in (
+        ("user_message", "data-user-message"),
+        ("kb_update_bucket", "data-kb-update-bucket"),
+        ("kb_update_bucket_confidence", "data-kb-update-bucket-confidence"),
+        ("security_evidence_source", "data-security-evidence-source"),
+        ("support_article_url", "data-support-article-url"),
+        ("atom_entry_id", "data-atom-entry-id"),
+        ("atom_support_article_id", "data-atom-support-article-id"),
+    ):
+        value = _source_diagnostic_text(row.get(key))
+        if value:
+            attrs.append(f' {attr}="{escape(value, quote=True)}"')
+    is_security = row.get("is_security")
+    if isinstance(is_security, bool):
+        attrs.append(f' data-is-security="{str(is_security).lower()}"')
+    return "".join(attrs)
+
+
 def _render_source_diagnostic_row(
     row: Mapping[str, Any],
     *,
@@ -4550,12 +5786,20 @@ def _render_source_diagnostic_row(
     source = _source_diagnostic_text(row.get("source"), fallback="Source")
     source_class = _source_diagnostic_source_class(source)
     message = _source_diagnostic_text(row.get("message"))
+    user_message = _source_diagnostic_text(row.get("user_message") or row.get("notice_summary"))
+    user_message_html = (
+        f"<p class=\"diag-user-message\">{escape(user_message)}</p>"
+        if user_message
+        else ""
+    )
+    technical_message_html = f"<p class=\"diag-technical-message\">{escape(message)}</p>"
     tag_items = _source_diagnostic_tag_items_html(row.get("tags"))
     diagnostic_id = _source_diagnostic_row_id(row)
+    data_attrs = _source_diagnostic_row_data_attrs(row)
     issue_link = _source_diagnostic_issue_link_html(issue_metadata)
     return (
         f"<article class=\"diag-row {severity}\" data-diagnostic-severity=\"{severity}\" "
-        f"data-diagnostic-id=\"{escape(diagnostic_id, quote=True)}\">"
+        f"data-diagnostic-id=\"{escape(diagnostic_id, quote=True)}\"{data_attrs}>"
         "<span class=\"diag-stripe\" aria-hidden=\"true\"></span>"
         f"{_source_diagnostic_icon_html(row)}"
         f"{issue_link}"
@@ -4565,7 +5809,8 @@ def _render_source_diagnostic_row(
         f"<strong>{escape(title)}</strong>"
         f"<span class=\"source-chip {source_class}\">{escape(source)}</span>"
         "</div>"
-        f"<p>{escape(message)}</p>"
+        f"{user_message_html}"
+        f"{technical_message_html}"
         f"<div class=\"diag-tags\">{tag_items}</div>"
         "</div>"
         "</article>"
@@ -5102,6 +6347,7 @@ def render_policy_index(
     target_release = target.version if target else "unknown"
     target_family = str(target.build_family) if target else "unknown"
     target_latest_observed = target.latest_observed_build if target else None
+    target_latest_observed_source = _latest_observed_source_label(target)
     target_baseline = target.required_baseline_build if target else None
     dashboard_url = _pages_root_url(base_url=base_url)
     dashboard_description = (
@@ -5153,7 +6399,7 @@ def render_policy_index(
         "    .signature-panel,.programmatic-api{border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.signature-panel{gap:16px;padding:22px}.signature-panel:after{content:'';position:absolute;right:-58px;top:-62px;width:166px;height:166px;border-radius:999px;background:radial-gradient(circle,rgba(0,120,212,.14),rgba(0,120,212,.06) 44%,rgba(0,120,212,0) 70%);box-shadow:inset 0 0 0 1px rgba(0,120,212,.1);pointer-events:none}.signature-panel.warning:after{background:radial-gradient(circle,rgba(180,83,9,.14),rgba(180,83,9,.05) 46%,rgba(180,83,9,0) 70%)}.signature-panel.error:after{background:radial-gradient(circle,rgba(180,35,24,.14),rgba(180,35,24,.05) 46%,rgba(180,35,24,0) 70%)}.signature-head{align-items:center}.signature-head h2,.programmatic-api h2{margin:0;color:#334155;font-weight:740;gap:9px}.signature-head .panel-heading-icon,.programmatic-api .panel-heading-icon{box-sizing:content-box;width:18px;height:18px;padding:7px;border:1px solid #c9e3ff;border-radius:12px;background:linear-gradient(180deg,#fff,#eaf5ff);color:#005bd3;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.signature-status-card{gap:5px;border-radius:14px;padding:15px 16px;background:linear-gradient(135deg,rgba(240,251,243,.98),rgba(255,255,255,.86));box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 18px rgba(16,124,16,.06)}.signature-status-card strong{font-size:17px}.signature-kv{gap:10px}.signature-kv div{grid-template-columns:minmax(116px,32%) minmax(0,1fr);gap:14px;border-color:rgba(197,216,236,.88);border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(246,250,255,.82));padding:13px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86);transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}.signature-kv div:hover{border-color:#aecded;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.08),inset 0 1px 0 rgba(255,255,255,.92);transform:none}.signature-kv dt{font-size:12px;font-weight:650;text-transform:uppercase;color:#65758e}.signature-kv dd{font-size:14px;color:#102033}.programmatic-api{gap:14px;padding:22px}.programmatic-api .api-note{margin:0;color:#334967;font-size:20px;line-height:1.3}.api-endpoints{gap:10px}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr) max-content;gap:12px;border-color:rgba(197,216,236,.9);border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(245,249,255,.84));padding:12px 13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.86);transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}.api-row-icon{box-sizing:content-box;width:18px;height:18px;padding:6px;border:1px solid #c9e3ff;border-radius:10px;background:linear-gradient(180deg,#fff,#eaf5ff);color:#005bd3}.api-endpoint-row:hover{border-color:#aecded;background:rgba(255,255,255,.96);box-shadow:0 8px 18px rgba(31,79,143,.08);text-decoration:none}.api-endpoint-row strong{font-size:13px;font-weight:700}.api-endpoint-row em{font-size:12px;color:#65758e}.api-endpoint-row code{justify-self:end;display:inline-flex;align-items:center;max-width:100%;border:1px solid #c9e3ff;border-radius:999px;background:linear-gradient(180deg,#fff,#edf6ff);padding:5px 9px;color:#064b7a;font-size:12px;line-height:1.2;white-space:nowrap;overflow-wrap:normal}.source-health{margin-top:2px;padding-top:14px;gap:10px;border-top-color:rgba(174,203,235,.78)}.source-health h3{color:#5b6d86;font-size:12px}.source-health-grid{gap:12px}.source-tile{position:relative;overflow:hidden;border-color:rgba(185,230,196,.95);border-radius:14px;background:linear-gradient(180deg,rgba(241,253,244,.96),rgba(250,255,251,.88));padding:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 8px 20px rgba(16,124,16,.06)}.source-tile:before{content:'';position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,var(--ok),rgba(0,120,212,.24));opacity:.45}.source-tile.warning:before{background:linear-gradient(90deg,var(--warn),rgba(180,83,9,.2))}.source-tile.error:before{background:linear-gradient(90deg,var(--err),rgba(180,35,24,.2))}.source-tile.unknown:before{background:linear-gradient(90deg,var(--unknown),rgba(100,116,139,.18))}.source-tile-head,.source-tile>a,.source-tile>.mini-kv{position:relative}.source-name{gap:9px}.source-name strong{color:#172033;font-size:16px}.source-icon{box-sizing:content-box;width:16px;height:16px;padding:5px;border:1px solid #b9e6c4;border-radius:10px;background:linear-gradient(180deg,#fff,#ecfff0);color:var(--ok)}.source-tile.warning .source-icon{border-color:#f6d493;background:linear-gradient(180deg,#fff,#fff4df);color:var(--warn)}.source-tile.error .source-icon{border-color:#f6b7ad;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.source-tile.unknown .source-icon{border-color:#cbd5e1;background:linear-gradient(180deg,#fff,#f1f5f9);color:var(--unknown)}.source-status{padding:3px 8px;background:rgba(255,255,255,.88);box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}.source-tile a{margin:10px 0 12px;color:#075985;font-size:13px}.mini-kv{grid-template-columns:82px minmax(0,1fr);gap:7px 11px}.mini-kv dt{font-weight:650;color:#65758e}.mini-kv dd{color:#1f2f49}.mini-kv .time-copy{gap:7px}.mini-kv .epoch-copy{background:#fff}.dashboard-warning-panel{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:start;column-gap:14px;padding:15px 18px;border-color:#f6d493;background:linear-gradient(180deg,rgba(255,250,240,.96),rgba(255,246,226,.84));box-shadow:0 14px 28px rgba(180,83,9,.08),inset 0 1px 0 rgba(255,255,255,.88)}.dashboard-warning-panel h2{margin:3px 0 0;color:#8a4b00}.warnings{margin:0;border-radius:14px;background:rgba(255,250,240,.7);padding:10px 12px 10px 26px;color:#9a3f00}.warnings li+li{margin-top:5px}footer{margin-top:36px;padding:18px 12px 2px;background:transparent;border-radius:0;color:#6b7a90;box-shadow:none}footer:before{width:min(760px,100%);margin-bottom:6px;background:linear-gradient(90deg,rgba(194,213,235,0),rgba(148,163,184,.44),rgba(194,213,235,0));box-shadow:none}.footer-note{max-width:920px}.footer-source{margin-top:4px;gap:5px 7px}.footer-github{border-color:rgba(197,216,236,.8);background:rgba(255,255,255,.54);box-shadow:none;color:#1d5f8f}.footer-license-basic{color:#1d5f8f}@media(max-width:1199px) and (min-width:901px){main{width:calc(100% - 44px);padding:28px}.kpi-card{padding:20px}.source-health-grid{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr)}.api-endpoint-row code{grid-column:2;justify-self:start;white-space:normal}.programmatic-api .api-note{font-size:18px}}@media(max-width:900px){.dashboard-grid{align-items:start}.span-5,.span-6,.span-7,.span-8,.span-12,#live-freshness-panel,.source-diagnostics,.signature-panel,.programmatic-api{grid-column:1/-1;grid-row:auto}.dashboard-warning-panel{grid-template-columns:1fr;row-gap:8px}.signature-panel,.programmatic-api{padding:20px}.source-health-grid{grid-template-columns:1fr}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr)}.api-endpoint-row code{grid-column:2;justify-self:start;white-space:normal}.signature-kv div{grid-template-columns:minmax(110px,30%) minmax(0,1fr)}}@media(max-width:640px){body:before{width:150vw;left:-42vw}body:after{width:130vw;right:-62vw}.brand{grid-template-columns:52px minmax(0,1fr)}.winmark{width:52px;height:52px}.title-line h1{font-size:30px;line-height:1.08}.subtitle{font-size:14px;max-width:100%}.dashboard-warning-panel{padding:14px}.signature-panel,.programmatic-api{padding:18px 14px;border-radius:16px}.signature-head{align-items:flex-start;display:grid}.trust-indicator{justify-self:start}.signature-kv div{grid-template-columns:1fr;gap:5px;padding:12px}.programmatic-api .api-note{font-size:16px}.api-endpoint-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.api-row-icon{margin-top:1px}.api-endpoint-row code{grid-column:1/-1;justify-self:start;white-space:normal}.source-tile{padding:13px}.source-tile-head{align-items:flex-start}.source-name strong{font-size:15px}.mini-kv{grid-template-columns:1fr;gap:4px}footer{margin-top:26px;padding:16px 4px 0}.footer-source{display:grid;justify-items:center}.footer-github{white-space:normal}}@media(max-width:360px){.title-line h1{font-size:27px}.api-endpoint-row{padding:11px}.source-name{align-items:flex-start}.footer-note{font-size:11px}}\n"
         "    @media(max-width:1500px){.freshness-panel .freshness-layout{grid-template-columns:1fr;gap:22px}.freshness-panel .thresholds{grid-template-columns:repeat(2,minmax(0,1fr))}}\n"
         "    @media(max-width:640px){main{width:calc(100% - 20px);padding:14px 10px}.kpi-head{flex-wrap:wrap;align-items:flex-start}.kpi-head .status-pill{margin-left:0}.subtitle{max-width:250px;overflow-wrap:break-word;word-break:normal}.freshness-panel .panel-head{align-items:flex-start;flex-direction:column}.freshness-state{align-self:flex-start}.diag-feed{overflow-x:hidden}.diag-row{grid-template-columns:4px 28px minmax(0,1fr);gap:7px}.diag-row-icon{width:18px;height:18px}.diag-row-head,.diag-row p,.diag-tags{min-width:0}.severity-badge,.source-chip,.diag-tags span,.diag-tags a{max-width:100%}.source-tile a{overflow-wrap:anywhere}.time-copy{flex-wrap:wrap}.freshness-panel .thresholds{grid-template-columns:1fr}}\n"
-        "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{margin:0;color:#172033}.panel-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.panel-action{appearance:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(197,216,236,.9);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:7px 13px;color:#0b4fb3;font-family:inherit;font-size:13px;font-weight:650;line-height:1;text-decoration:none;white-space:nowrap;cursor:pointer}.panel-action:hover{border-color:#9cccf6;background:#fff;text-decoration:none}.panel-action:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.panel-action[aria-pressed=\"true\"]{border-color:#9cccf6;background:#fff}.source-diagnostics{gap:14px;padding:22px;border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.source-diagnostics>.panel-head{flex:0 0 auto}.diag-feed-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px 0 -8px;min-height:22px}.diag-feed-bar .diag-filter-status{flex:1 1 auto;margin:0}.diag-export-copy{align-self:center;width:22px;height:22px;min-width:22px;margin-right:1px;border-color:transparent;border-radius:5px;background:transparent;box-shadow:none;color:#64748b}.diag-export-copy:hover{border-color:transparent;background:transparent;box-shadow:none;color:var(--blue-strong)}.diag-export-copy[data-copy-state=\"copied\"]{border-color:transparent;background:transparent;color:var(--ok)}.diag-export-copy[data-copy-state=\"failed\"]{border-color:transparent;background:transparent;color:var(--err)}.diag-export-copy svg{width:16px;height:16px}.diag-summary{gap:10px}.diag-tile{grid-template-columns:auto minmax(0,1fr) auto;min-height:64px;border-radius:13px;padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.diag-tile strong{font-size:25px;font-weight:720}.diag-tile span{font-size:13px}.diag-tile-icon{box-sizing:content-box;width:23px;height:23px;padding:8px;border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-tile.notice .diag-tile-icon{border:1px solid #bfdbfe;background:linear-gradient(180deg,#fff,#eaf5ff)}.diag-tile.warning .diag-tile-icon{border:1px solid #fed7aa;background:linear-gradient(180deg,#fff,#fff3e4)}.diag-tile.error .diag-tile-icon{border:1px solid #fecaca;background:linear-gradient(180deg,#fff,#fff0ed)}.diag-feed{height:340px;min-height:340px;max-height:340px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68));padding:14px;box-shadow:inset 0 1px 2px rgba(31,79,143,.05);scrollbar-color:#8eb7df rgba(232,243,255,.68)}.diag-feed::-webkit-scrollbar{width:8px}.diag-feed::-webkit-scrollbar-track{background:rgba(232,243,255,.64);border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#8eb7df;border:2px solid rgba(232,243,255,.84);border-radius:999px}.diag-events{gap:10px;padding:2px 4px 12px 2px}.diag-row{grid-template-columns:5px 50px minmax(0,1fr);gap:12px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(250,253,255,.88));padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row.warning{background:linear-gradient(90deg,#fffaf0,#fff)}.diag-row.error{background:linear-gradient(90deg,#fff8f6,#fff)}.diag-row>div{min-width:0}.diag-stripe{width:5px}.diag-row-icon{display:grid;place-items:center;justify-self:center;align-self:start;width:42px;height:46px;margin-top:0;border:1px solid #bfdbfe;border-radius:14px;background:linear-gradient(180deg,#fff,#eaf5ff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row-icon.warning{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:var(--warn)}.diag-row-icon.error{border-color:#fecaca;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.diag-row-icon .ui-icon{width:25px;height:25px}.diag-row-head{gap:6px}.diag-row-head strong{font-size:14px}.diag-row p{font-size:13px;color:#40516a;overflow-wrap:anywhere}.source-chip.src-diagnostics{color:#005bd3;background:var(--blue-soft);border-color:#bfdbfe}.source-chip.src-atom-feed{color:#005bd3;background:linear-gradient(180deg,#eef7ff,#f8fbff);border-color:#bfdbfe}.source-chip.src-release-policy,.source-chip.src-policy{color:#1d4ed8;background:linear-gradient(180deg,#edf4ff,#f8fbff);border-color:#c7d2fe}.source-chip.src-release-health{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.source-chip.src-freshness{color:#075985;background:#e0f2fe;border-color:#bae6fd}.source-chip.src-parser{color:var(--warn);background:var(--warn-soft);border-color:#fed7aa}.source-chip.src-signature{color:#5b21b6;background:#f3e8ff;border-color:#d8b4fe}.source-chip.src-source{color:#475569;background:#f8fafc;border-color:#cbd5e1}.diag-tags span,.diag-tags a{overflow-wrap:anywhere}.source-diagnostics #source-health{margin-top:0;padding-top:12px;border-top-color:rgba(174,203,235,.72)}\n"
+        "    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{margin:0;color:#172033}.panel-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}.panel-action{appearance:none;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(197,216,236,.9);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9);padding:7px 13px;color:#0b4fb3;font-family:inherit;font-size:13px;font-weight:650;line-height:1;text-decoration:none;white-space:nowrap;cursor:pointer}.panel-action:hover{border-color:#9cccf6;background:#fff;text-decoration:none}.panel-action:focus-visible{outline:3px solid rgba(0,120,212,.28);outline-offset:2px}.panel-action[aria-pressed=\"true\"]{border-color:#9cccf6;background:#fff}.source-diagnostics{gap:14px;padding:22px;border-radius:18px;border-color:rgba(174,203,235,.86);background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(246,251,255,.86));box-shadow:0 18px 38px rgba(31,79,143,.11),inset 0 1px 0 rgba(255,255,255,.9)}.source-diagnostics>.panel-head{flex:0 0 auto}.diag-feed-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:-4px 0 -8px;min-height:22px}.diag-feed-bar .diag-filter-status{flex:1 1 auto;margin:0}.diag-export-copy{align-self:center;width:22px;height:22px;min-width:22px;margin-right:1px;border-color:transparent;border-radius:5px;background:transparent;box-shadow:none;color:#64748b}.diag-export-copy:hover{border-color:transparent;background:transparent;box-shadow:none;color:var(--blue-strong)}.diag-export-copy[data-copy-state=\"copied\"]{border-color:transparent;background:transparent;color:var(--ok)}.diag-export-copy[data-copy-state=\"failed\"]{border-color:transparent;background:transparent;color:var(--err)}.diag-export-copy svg{width:16px;height:16px}.diag-summary{gap:10px}.diag-tile{grid-template-columns:auto minmax(0,1fr) auto;min-height:64px;border-radius:13px;padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.88)}.diag-tile strong{font-size:25px;font-weight:720}.diag-tile span{font-size:13px}.diag-tile-icon{box-sizing:content-box;width:23px;height:23px;padding:8px;border-radius:999px;background:rgba(255,255,255,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-tile.notice .diag-tile-icon{border:1px solid #bfdbfe;background:linear-gradient(180deg,#fff,#eaf5ff)}.diag-tile.warning .diag-tile-icon{border:1px solid #fed7aa;background:linear-gradient(180deg,#fff,#fff3e4)}.diag-tile.error .diag-tile-icon{border:1px solid #fecaca;background:linear-gradient(180deg,#fff,#fff0ed)}.diag-feed{height:340px;min-height:340px;max-height:340px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.76),rgba(238,247,255,.68));padding:14px;box-shadow:inset 0 1px 2px rgba(31,79,143,.05);scrollbar-color:#8eb7df rgba(232,243,255,.68)}.diag-feed::-webkit-scrollbar{width:8px}.diag-feed::-webkit-scrollbar-track{background:rgba(232,243,255,.64);border-radius:999px}.diag-feed::-webkit-scrollbar-thumb{background:#8eb7df;border:2px solid rgba(232,243,255,.84);border-radius:999px}.diag-events{gap:10px;padding:2px 4px 12px 2px}.diag-row{grid-template-columns:5px 50px minmax(0,1fr);gap:12px;border-color:rgba(197,216,236,.95);border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(250,253,255,.88));padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row.warning{background:linear-gradient(90deg,#fffaf0,#fff)}.diag-row.error{background:linear-gradient(90deg,#fff8f6,#fff)}.diag-row>div{min-width:0}.diag-stripe{width:5px}.diag-row-icon{display:grid;place-items:center;justify-self:center;align-self:start;width:42px;height:46px;margin-top:0;border:1px solid #bfdbfe;border-radius:14px;background:linear-gradient(180deg,#fff,#eaf5ff);color:var(--blue-strong);box-shadow:inset 0 1px 0 rgba(255,255,255,.9)}.diag-row-icon.warning{border-color:#fed7aa;background:linear-gradient(180deg,#fff,#fff3e4);color:var(--warn)}.diag-row-icon.error{border-color:#fecaca;background:linear-gradient(180deg,#fff,#fff0ed);color:var(--err)}.diag-row-icon .ui-icon{width:25px;height:25px}.diag-row-head{gap:6px}.diag-row-head strong{font-size:14px}.diag-row p{font-size:13px;color:#40516a;overflow-wrap:anywhere}.diag-row .diag-user-message{margin-top:6px;color:#1f2f49;font-weight:650}.diag-row .diag-technical-message{margin-top:5px}.source-chip.src-diagnostics{color:#005bd3;background:var(--blue-soft);border-color:#bfdbfe}.source-chip.src-atom-feed{color:#005bd3;background:linear-gradient(180deg,#eef7ff,#f8fbff);border-color:#bfdbfe}.source-chip.src-release-policy,.source-chip.src-policy{color:#1d4ed8;background:linear-gradient(180deg,#edf4ff,#f8fbff);border-color:#c7d2fe}.source-chip.src-release-health{color:var(--ok);background:var(--ok-soft);border-color:#b9e6c4}.source-chip.src-freshness{color:#075985;background:#e0f2fe;border-color:#bae6fd}.source-chip.src-parser{color:var(--warn);background:var(--warn-soft);border-color:#fed7aa}.source-chip.src-signature{color:#5b21b6;background:#f3e8ff;border-color:#d8b4fe}.source-chip.src-source{color:#475569;background:#f8fafc;border-color:#cbd5e1}.diag-tags span,.diag-tags a{overflow-wrap:anywhere}.source-diagnostics #source-health{margin-top:0;padding-top:12px;border-top-color:rgba(174,203,235,.72)}\n"
         "    @media(max-width:640px){.source-diagnostics{padding:18px 14px;gap:12px}.source-diagnostics>.panel-head{align-items:flex-start;flex-direction:column}.panel-action{padding:6px 11px}.diag-summary{grid-template-columns:1fr}.diag-feed{height:320px;min-height:320px;max-height:320px;padding:12px}.diag-row{grid-template-columns:5px 40px minmax(0,1fr);gap:9px;padding:10px}.diag-row-icon{width:36px;height:40px}.diag-row-icon .ui-icon{width:21px;height:21px}.diag-row-head strong{font-size:13px}}\n"
         "    .diag-row{grid-template-columns:5px 38px minmax(0,1fr)}.diag-row-icon{width:32px;height:34px;margin-top:1px;border:0;border-radius:0;background:transparent;box-shadow:none}.diag-row-icon.warning,.diag-row-icon.error{border-color:transparent;background:transparent}.diag-row-icon .ui-icon{width:28px;height:28px;stroke-width:2}.diag-row-head{align-items:center;column-gap:7px;row-gap:4px}.diag-row-head .source-chip{font-size:10px;line-height:1.05;padding:2px 7px;font-weight:650;color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc;box-shadow:inset 0 1px 0 rgba(255,255,255,.88);transform:translateY(-.5px)}.diag-row-head .source-chip.src-diagnostics,.diag-row-head .source-chip.src-atom-feed,.diag-row-head .source-chip.src-release-policy,.diag-row-head .source-chip.src-policy{color:#047f9e;background:linear-gradient(180deg,#ecfeff,#f8fdff);border-color:#a5f3fc}\n"
         "    @media(max-width:640px){.diag-row{grid-template-columns:5px 34px minmax(0,1fr)}.diag-row-icon{width:28px;height:30px;margin-top:0}.diag-row-icon .ui-icon{width:24px;height:24px}.diag-row-head .source-chip{font-size:10px;padding:2px 6px}}\n"
@@ -5188,7 +6434,7 @@ def render_policy_index(
         f"<div class=\"metric\">{escape(target_family)}</div><span class=\"label\">Windows build line</span></article>\n"
         "      <article class=\"panel span-3 kpi-card kpi-observed\"><div class=\"kpi-head\">"
         f"<span class=\"icon-bubble\">{_ui_icon_html('eye', class_name='ui-icon kpi-icon')}</span><h2><span>Latest observed</span>{_dashboard_info_topic_html('latest-observed', base_url=base_url)}</h2></div>"
-        f"<div class=\"metric\">{escape(target_latest_observed or 'unknown')}</div><span class=\"label\">Microsoft Current Versions table</span></article>\n"
+        f"<div class=\"metric\">{escape(target_latest_observed or 'unknown')}</div><span class=\"label\">{escape(target_latest_observed_source)}</span></article>\n"
         "      <article class=\"panel span-3 kpi-card kpi-baseline\"><div class=\"kpi-head\">"
         f"<span class=\"icon-bubble\">{_ui_icon_html('shield-check', class_name='ui-icon kpi-icon')}</span><h2><span>Required baseline</span>{_dashboard_info_topic_html('required-baseline', base_url=base_url)}</h2></div>"
         f"<div class=\"metric\">{escape(target_baseline or 'unknown')}</div><span class=\"label\">{escape(policy.quality_policy.value)} floor</span></article>\n"
@@ -5430,16 +6676,27 @@ def render_policy_index(
         "            var tags=[];\n"
         "            Array.prototype.forEach.call(row.querySelectorAll('.diag-tags span,.diag-tags a'),function(tag){var text=compactText(tag);if(text){tags.push(text);}});\n"
         "            var issueLink=row.querySelector('.diag-ticket-link[href]');\n"
-        "            entries.push({\n"
+        "            var entry={\n"
         "              severity:severity,\n"
         "              diagnostic_id:row.getAttribute('data-diagnostic-id')||'',\n"
         "              title:compactText(row.querySelector('.diag-row-head strong'))||'Source diagnostic',\n"
         "              source:compactText(row.querySelector('.source-chip'))||'Source',\n"
-        "              message:compactText(row.querySelector('p')),\n"
+        "              message:compactText(row.querySelector('.diag-technical-message'))||compactText(row.querySelector('p')),\n"
         "              tags:tags,\n"
         "              issue_url:issueLink ? (issueLink.getAttribute('href')||null) : null,\n"
         "              display_index:index+1\n"
-        "            });\n"
+        "            };\n"
+        "            function addAttr(attr,key){var value=row.getAttribute(attr)||'';if(value){entry[key]=value;}}\n"
+        "            addAttr('data-user-message','user_message');\n"
+        "            addAttr('data-kb-update-bucket','kb_update_bucket');\n"
+        "            addAttr('data-kb-update-bucket-confidence','kb_update_bucket_confidence');\n"
+        "            addAttr('data-security-evidence-source','security_evidence_source');\n"
+        "            addAttr('data-support-article-url','support_article_url');\n"
+        "            addAttr('data-atom-entry-id','atom_entry_id');\n"
+        "            addAttr('data-atom-support-article-id','atom_support_article_id');\n"
+        "            var isSecurity=row.getAttribute('data-is-security');\n"
+        "            if(isSecurity==='true'){entry.is_security=true;}else if(isSecurity==='false'){entry.is_security=false;}\n"
+        "            entries.push(entry);\n"
         "          });\n"
         "          return entries;\n"
         "        }\n"
@@ -5662,6 +6919,7 @@ def render_policy_manifest(
     base_url: str = DEFAULT_PAGES_BASE_URL,
 ) -> str:
     target = policy.broad_target_existing_devices
+    latest_observed_evidence = _latest_observed_evidence_metadata(target)
     policy_sha256 = _sha256_hex(policy_bytes)
     signature_sha256 = _sha256_hex(signature_bytes)
     verification = verification_metadata if verification_metadata is not None else _public_verification_metadata(signature)
@@ -5694,6 +6952,7 @@ def render_policy_manifest(
                 "build_family": target.build_family,
                 "latest_build": target.latest_build,
                 "latest_observed_build": target.latest_observed_build,
+                "latest_observed_evidence": latest_observed_evidence,
                 "baseline_build": target.baseline_build,
                 "required_baseline_build": target.required_baseline_build,
             }
@@ -5701,6 +6960,7 @@ def render_policy_manifest(
             else None
         ),
         "latest_observed_build": target.latest_observed_build if target else None,
+        "latest_observed_evidence": latest_observed_evidence,
         "baseline": target.required_baseline_build if target else None,
         "required_baseline_build": target.required_baseline_build if target else None,
         "warnings": list(policy.validation_warnings),
@@ -5742,6 +7002,10 @@ def build_policy_from_sources(
         release_health_url=release_health_url,
         atom_feed_url=atom_feed_url,
         source_fetch_status=source_fetch_status,
+        support_article_fetcher=_default_support_article_fetcher,
+        support_article_timeout=timeout,
+        msrc_cvrf_fetcher=_default_msrc_cvrf_fetcher,
+        msrc_cvrf_timeout=timeout,
         signature_status=signature_status,
     )
 
