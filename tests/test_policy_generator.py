@@ -382,7 +382,7 @@ def _assert_no_raw_support_article_leakage(outputs: dict[str, object], support_h
     )
     assert support_html.strip() not in combined
     assert "window.secret" not in combined
-    assert "Updates hardening for startup components." not in combined
+    assert "Microsoft is not currently aware of any issues in this update." not in combined
     assert "https://support.microsoft.com/help/5094126" not in combined
 
 
@@ -1798,6 +1798,14 @@ def test_support_article_fact_extraction_for_kb5094126() -> None:
         "desktop.ini",
         "AI components",
     ]
+    assert facts["improvement_details"] == [
+        "Secure Boot: Updates hardening for startup components.",
+        "Virtualization: Improves reliability for protected workloads.",
+        "desktop.ini: Hardens desktop.ini processing.",
+        "AI components: Updates Windows AI components.",
+    ]
+    assert all("Known issues" not in detail for detail in facts["improvement_details"])
+    assert all("not currently aware" not in detail for detail in facts["improvement_details"])
     assert facts["is_security"] is True
     assert facts["security_evidence_source"] == "support_article"
     assert "includes the latest security fixes" in facts["security_signals"]
@@ -2370,7 +2378,8 @@ def test_msrc_cvrf_marks_atom_diagnostic_as_security_and_uses_single_month_fetch
 
     row = policy_generator_module._source_diagnostic_row_from_event(event)
     assert "Security patch" in row["tags"]
-    assert "CVEs 2" in row["tags"]
+    assert "CVEs 2" not in row["tags"]
+    assert row["cves"] == ["CVE-2026-0001", "CVE-2026-0002"]
 
 
 def test_kb5094126_fixture_end_to_end_policy_dashboard_manifest_and_issue_title(tmp_path: Path) -> None:
@@ -2500,7 +2509,7 @@ def test_kb5094126_fixture_end_to_end_policy_dashboard_manifest_and_issue_title(
     )
     assert "<html" not in policy_json.lower()
     assert "window.secret" not in policy_json
-    assert "Updates hardening for startup components." not in policy_json
+    assert "Microsoft is not currently aware of any issues in this update." not in policy_json
     assert _kb5094126_support_fixture().strip() not in policy_json
     assert len(support_record_json) < 2500
 
@@ -2606,6 +2615,11 @@ def test_caught_up_kb5094126_creates_active_baseline_update_notice(tmp_path: Pat
             "Microsoft build. KB5094126 is the 2026-06 B security baseline; Atom first spotted it at "
             "2026-06-09T17:04:01Z, and Release Health lists the baseline date as 2026-06-09."
         ),
+        "update_summary": (
+            "Update highlights: Secure Boot: Updates hardening for startup components. "
+            "Virtualization: Improves reliability for protected workloads. desktop.ini: Hardens "
+            "desktop.ini processing. AI components: Updates Windows AI components."
+        ),
         "technical_summary": (
             "Release Health B-release row 2026-06 B selected 25H2/26200 build 26200.8655; support "
             "validation ok; security evidence trusted via msrc_cvrf."
@@ -2625,6 +2639,18 @@ def test_caught_up_kb5094126_creates_active_baseline_update_notice(tmp_path: Pat
         "security_evidence_source": "msrc_cvrf",
         "security_evidence_status": "trusted",
         "support_article_validation_status": "ok",
+        "support_article_improvement_labels": [
+            "Secure Boot",
+            "Virtualization",
+            "desktop.ini",
+            "AI components",
+        ],
+        "support_article_improvement_details": [
+            "Secure Boot: Updates hardening for startup components.",
+            "Virtualization: Improves reliability for protected workloads.",
+            "desktop.ini: Hardens desktop.ini processing.",
+            "AI components: Updates Windows AI components.",
+        ],
         "cve_count": 2,
         "cves": ["CVE-2026-0001", "CVE-2026-0002"],
     }
@@ -2666,17 +2692,40 @@ def test_caught_up_kb5094126_renders_baseline_update_notice_before_operational_p
     assert 'data-baseline-notice-kb="KB5094126"' in index
     assert 'data-baseline-notice-visible-until="2026-06-30T00:00:00Z"' in index
     assert f'data-baseline-notice-source-url="{KB5094126_SUPPORT_URL}"' in index
+    assert 'data-baseline-notice-security-url="https://msrc.microsoft.com/update-guide"' in index
     assert "New required baseline: 25H2 build 26200.8655" in index
     assert "KB5094126" in index
     assert "2026-06 B" in index
     assert "Security confirmed by MSRC" in index
-    assert "Atom first spotted 2026-06-09T17:04:01Z" in index
-    assert "Support updated 2026-06-10T17:20:31Z" in index
+    assert "MSRC CVE entries: 2" not in index
+    assert (
+        '<div class="baseline-review"><span class="baseline-review-label">Update highlights:</span>'
+        '<ul class="baseline-review-list"><li>Secure Boot: Updates hardening for startup components.</li>'
+        '<li>Virtualization: Improves reliability for protected workloads.</li>'
+        '<li>desktop.ini: Hardens desktop.ini processing.</li>'
+        '<li>AI components: Updates Windows AI components.</li></ul>'
+        f' <a class="baseline-read-more" href="{KB5094126_SUPPORT_URL}" '
+        'rel="noopener noreferrer">Read more</a></div>'
+    ) in index
+    assert "Atom first spotted June 9, 2026 at 19:04 CEST / 17:04 UTC" in index
+    assert "Support updated June 10, 2026 at 19:20 CEST / 17:20 UTC" in index
     assert "Official baseline date: 2026-06-09 (Release Health date-only)" in index
-    assert "Visible until 2026-06-30T00:00:00Z" in index
+    assert "Visible until June 30, 2026 at 02:00 CEST / 00:00 UTC" in index
+    assert 'baseline source. Security evidence: Security confirmed by MSRC.</p>' in index
+    assert "Atom first spotted 2026-06-09T17:04:01Z" not in index
+    assert "Support updated 2026-06-10T17:20:31Z" not in index
+    assert "update-guide/vulnerability/CVE-2026-0001" not in index
     assert "baseline update notice expiry" in index
     assert "Date.parse(until)" in index
     assert ".baseline-update-notice{position:relative" in index
+    assert '<span class="baseline-chip">KB5094126</span>' in index
+    assert '<span class="baseline-chip security">Security confirmed by MSRC</span>' in index
+    assert '<span class="baseline-chip security">MSRC CVE entries: 2</span>' not in index
+    notice_html = index[
+        index.index(notice_marker) : index.index(freshness_marker)
+    ]
+    assert notice_html.count(f'href="{KB5094126_SUPPORT_URL}"') == 1
+    assert ".baseline-read-more" in index
     assert ".dashboard-grid.has-baseline-notice .baseline-update-notice{grid-column:1/-1;grid-row:1}" in index
     assert ".dashboard-grid.has-baseline-notice #live-freshness-panel{grid-row:2/span 2}" in index
     assert ".dashboard-grid.has-baseline-notice .source-diagnostics{grid-row:2/span 2}" in index

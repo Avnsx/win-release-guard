@@ -907,23 +907,34 @@ def test_pages_index_source_diagnostics_render_enriched_atom_summary_and_export_
     assert 'data-is-security="true"' in index
     assert 'data-security-evidence-source="msrc_cvrf"' in index
     assert f'data-support-article-url="{KB5094126_SUPPORT_URL}"' in index
+    assert f'data-source-url="{KB5094126_SUPPORT_URL}"' in index
+    assert f'data-read-more-url="{KB5094126_SUPPORT_URL}"' in index
+    assert 'data-security-url="https://msrc.microsoft.com/update-guide"' in index
+    assert 'data-cves="CVE-2026-0001, CVE-2026-0002"' in index
+    assert 'data-cve-count="2"' in index
     assert f'data-atom-entry-id="{ATOM_ENTRY_ID}"' in index
     assert 'data-atom-support-article-id="968480"' in index
     assert (
-        f'<p class="diag-user-message">{user_message}</p>'
+        f'<p class="diag-user-message">{user_message} '
+        f'<a class="diag-read-more-inline" href="{KB5094126_SUPPORT_URL}" '
+        'rel="noopener noreferrer">Read more</a></p>'
         f'<p class="diag-technical-message">{technical_message}</p>'
     ) in index
     for tag in (
         "Release 25H2",
         "Build 26200.8655",
-        "KB5094126",
-        "Security patch",
-        "CVEs 2",
         "Family 26200",
         "Required baseline",
         "id=968480",
     ):
         assert f"<span>{tag}</span>" in index
+    assert "<span>KB5094126</span>" in index
+    assert "<span>Security patch</span>" in index
+    assert "<span>CVEs 2</span>" not in index
+    assert "update-guide/vulnerability/CVE-2026-0001" not in index
+    assert "This patch contains" not in index
+    assert "<span>June 10, 2026 at 19:20 CEST / 17:20 UTC</span>" in index
+    assert "<span>2026-06-10T17:20:31Z</span>" not in index
     assert (
         "message:compactText(row.querySelector('.diag-technical-message'))"
         "||compactText(row.querySelector('p'))"
@@ -934,6 +945,11 @@ def test_pages_index_source_diagnostics_render_enriched_atom_summary_and_export_
         "addAttr('data-kb-update-bucket-confidence','kb_update_bucket_confidence')",
         "addAttr('data-security-evidence-source','security_evidence_source')",
         "addAttr('data-support-article-url','support_article_url')",
+        "addAttr('data-source-url','source_url')",
+        "addAttr('data-read-more-url','read_more_url')",
+        "addAttr('data-security-url','security_url')",
+        "addAttr('data-cves','cves')",
+        "addAttr('data-cve-count','cve_count')",
         "addAttr('data-atom-entry-id','atom_entry_id')",
         "addAttr('data-atom-support-article-id','atom_support_article_id')",
     ):
@@ -941,7 +957,46 @@ def test_pages_index_source_diagnostics_render_enriched_atom_summary_and_export_
     assert "if(isSecurity==='true'){entry.is_security=true;}else if(isSecurity==='false')" in index
     assert "export_schema:'win11_release_guard.source_diagnostics.visible.v1'" in index
     assert "do not override signed policy verdicts" in index
+    assert ".diag-read-more-inline" in index
     _assert_no_external_page_dependencies(index)
+
+
+def test_pages_index_source_diagnostics_do_not_link_unsafe_evidence_urls() -> None:
+    event = {
+        "id": ATOM_SOURCE_DIAGNOSTIC_ID,
+        "severity": "warning",
+        "kind": "atom_newer_than_release_history",
+        "release": "25H2",
+        "build_family": 26200,
+        "build": "26200.8655",
+        "kb_article": "KB5094126",
+        "affects_broad_target": True,
+        "affects_required_baseline": True,
+        "message": "Atom feed shows a newer non-preview build for the broad target.",
+        "is_security": True,
+        "security_evidence_source": "support_article",
+        "support_article_url": "https://evil.example/kb5094126",
+        "source_url": "https://evil.example/kb5094126",
+        "cves": ["not-a-cve"],
+    }
+    policy = ReleasePolicy(
+        source_diagnostics={
+            "event_counts": {"notice": 0, "warning": 1, "error": 0},
+            "events": [event],
+        }
+    )
+
+    index = render_policy_index(policy, policy_bytes=None, signature=None)
+    HTMLParser().feed(index)
+
+    assert "https://evil.example" not in index
+    assert 'data-read-more-url=' not in index
+    assert 'data-security-url=' not in index
+    assert 'data-cves=' not in index
+    assert 'class="diag-row-actions"' not in index
+    assert '<span>KB5094126</span>' in index
+    assert '<span>Security patch</span>' in index
+    assert "not-a-cve" not in index
 
 
 def test_pages_index_latest_observed_label_uses_atom_support_metadata() -> None:

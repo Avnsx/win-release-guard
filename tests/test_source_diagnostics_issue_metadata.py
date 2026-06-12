@@ -174,11 +174,18 @@ def test_source_diagnostic_issue_metadata_keeps_enriched_atom_row_fields() -> No
     assert 'data-is-security="true"' in index
     assert 'data-security-evidence-source="support_article"' in index
     assert f'data-support-article-url="{KB5094126_SUPPORT_URL}"' in index
+    assert f'data-read-more-url="{KB5094126_SUPPORT_URL}"' in index
     assert f'data-atom-entry-id="{ATOM_ENTRY_ID}"' in index
     assert 'data-atom-support-article-id="968480"' in index
-    assert '<p class="diag-user-message">Security Patch June 2026' in index
+    assert (
+        f'<p class="diag-user-message">Security Patch June 2026: Windows 11 KB5094126 moves 25H2 to 26200.8655. '
+        f'<a class="diag-read-more-inline" href="{KB5094126_SUPPORT_URL}" '
+        'rel="noopener noreferrer">Read more</a></p>'
+    ) in index
     assert '<p class="diag-technical-message">Atom feed shows a newer non-preview build 26200.8655 for 25H2.</p>' in index
-    assert '<span>Security patch</span>' in index
+    assert 'class="diag-read-more"' not in index
+    assert "diag-tag-link" not in index
+    assert "<span>Security patch</span>" in index
     assert '<span>id=968480</span>' in index
     assert "#Ticket 42" in index
     assert "message:compactText(row.querySelector('.diag-technical-message'))" in index
