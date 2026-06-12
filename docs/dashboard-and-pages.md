@@ -81,7 +81,11 @@ tracking query strings or fragments. If an Atom KB row lacks a
 usable Support article href, the generator records
 `atom_support_article_href_missing` evidence instead of fetching `/help/<KB>`.
 Legacy `/help/<digits>` paths remain valid only when they came directly from
-Atom. MSRC CVRF and validated explicit Support article wording provide
+Atom. Direct or fixture-provided Atom links are revalidated before becoming
+release-history `kb_url`, manifest metadata, dashboard links, or copied
+diagnostic JSON. Release History enrichment prefers Atom entries matching both
+KB and row build, then build-only evidence, and skips ambiguous KB-only
+fallbacks. MSRC CVRF and validated explicit Support article wording provide
 higher-confidence security classification; Atom titles are kept as
 low-confidence update buckets only. Source Diagnostics and enrichment can
 explain observed builds and KB classification, but they do not override signed
@@ -96,10 +100,12 @@ applicability. The bounded `Applies to` extractor handles compact paragraphs,
 heading/list blocks, and heading/paragraph blocks, stops at following sections,
 and records `applies_to_releases` such as `["24H2", "25H2"]` when release
 values are parseable. Empty or unknown `Applies to` evidence is degraded, not
-treated as proof of mismatch by itself. Mismatched article KB/build/release evidence
-remains visible as Source Diagnostics validation metadata, but it is not used
-for administrator summaries, Support-derived security labels, or `Security
-patch` tags. MSRC CVRF joins use exact KB tokens only, so values such as
+treated as proof of mismatch by itself. If `applies_to_releases` explicitly
+excludes the expected release, the article is treated as untrusted for that
+event. Mismatched article KB/build/release evidence remains visible as Source
+Diagnostics validation metadata, but it is not used for administrator
+summaries, Support-derived security labels, or `Security patch` tags. MSRC CVRF
+joins use exact KB tokens only, so values such as
 `KB50941260`, `15094126`, or `5094126a` do not classify `KB5094126` as security
 evidence. Exact-KB remediation evidence still marks the KB as security even
 when optional CVE, severity, or product fields are absent. Public dashboard
@@ -129,8 +135,10 @@ article facts, and exact MSRC KB evidence; it does not use an LLM, cloud API,
 browser token, or external JavaScript. Microsoft date-only source precision is
 shown as date-only, the visibility window is 14 days from the source-derived
 official baseline date, and a small inline script hides stale static notices
-after the hidden `visible_until_utc` marker without fetching network resources.
-The expiry marker is not rendered as a user-facing badge. The notice is
+after the hidden `visible_until_utc` marker without fetching network resources
+or leaving an empty first grid row. Expired or inactive notice metadata does
+not fetch optional Support/MSRC enrichment solely for stale historical notice
+data. The expiry marker is not rendered as a user-facing badge. The notice is
 dashboard-only: it does not alter signed policy verdicts, required-baseline
 selection, `/api/v1` aliases, runtime client behavior, or GitHub Issue sync.
 

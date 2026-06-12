@@ -42,13 +42,20 @@ resolver. The generator prefers safe Atom `alternate` links to
 `https://support.microsoft.com` article paths and records a Source Diagnostic
 when no usable support href exists. Otherwise safe article URLs have tracking
 queries and fragments stripped; unsafe ports, userinfo, traversal, overlong
-paths, and non-support hosts still reject.
+paths, and non-support hosts still reject. Direct or fixture-provided Atom
+entries are revalidated before their links can become release-history URLs,
+support metadata, manifest evidence, dashboard hrefs, or copied diagnostics
+JSON. Release History enrichment prefers Atom entries that match both KB and
+build, then build-only entries, and skips ambiguous KB-only fallbacks.
 
 Support article enrichment is trusted only after URL, KB, expected build, and
 parseable `Applies to` evidence are compatible with the Atom record. Mismatch
 and degraded statuses stay visible without dumping raw article HTML or treating
 mismatched article text as summary/security truth. The parser records bounded
 `applies_to` text and `applies_to_releases` when release values can be parsed.
+If those parsed releases explicitly exclude the expected release, the article
+is a visible mismatch and is untrusted for summaries or Support-derived
+security wording for that event.
 
 MSRC CVRF exact-KB-token evidence can still classify a KB as security when the
 Support article is bad. Larger tokens such as `KB50941260`, `15094126`, and
@@ -60,13 +67,18 @@ CVE lists or counts.
 
 When a real non-preview, non-OOB Release Health B-release row becomes the
 required baseline and matches the broad target's latest observed build, the
-dashboard can show an informational blue/white baseline-update notice for 21
+dashboard can show an informational blue/white baseline-update notice for 14
 days from the source-derived official baseline date. It labels date-only
 Release Health precision explicitly and uses deterministic local facts from
 Release Health, Atom, validated Support, and exact MSRC data. It does not call
 an LLM or cloud API, and it does not change signed verdicts, baseline
 selection, Source Diagnostics issue sync, runtime behavior, or `/api/v1`
-aliases.
+aliases. Expired or inactive notice metadata does not trigger optional
+Support/MSRC enrichment fetches solely for stale notice data. If an already
+published static page becomes stale, inline local JavaScript hides the expired
+notice and removes the `has-baseline-notice` grid class so the operational
+panels reflow; invalid expiry data leaves the notice visible instead of
+crashing the page.
 
 ## Generated Output Coverage
 
@@ -75,7 +87,18 @@ dashboard HTML, `/api/v1` aliases, visible Source Diagnostics JSON export, and
 remote parser acceptance. They cover the KB5094126 latest-observed case, the
 caught-up Release Health case, unique diagnostic IDs, Support mismatch/degraded
 states, MSRC unavailable/malformed states, no raw Support HTML leakage, and no
-synthesized `/help/5094126` fallback.
+synthesized `/help/5094126` fallback. Additional coverage guards unsafe direct
+Atom links, build-aware Atom matching, explicit release/applicability
+mismatches, expired-notice no-fetch behavior, stale-notice grid reflow, and
+static dashboard constraints.
+
+## Release Gate Result
+
+The local `0.3.3` release gate passed compileall, the full pytest suite, fixture
+Pages generation, generated-output sanity inspection, secret scanning, clean
+archive export/validation, identity/version/action audits, `--self-test`, live
+public policy/pages checks, and the Windows Panther JSON regression harness.
+Generated archive validation reported 153 clean source entries.
 
 ## Packaging And PyPI
 

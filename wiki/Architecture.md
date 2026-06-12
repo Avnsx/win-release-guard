@@ -50,10 +50,21 @@ select that same build, all three fields can legitimately report the same
 build.
 
 Atom discovers Support article hrefs; it is not a `/help/<KB>` fallback
-resolver. Atom-linked Support article facts are trusted only after URL, KB,
-build, and parseable applicability validation against the Atom record. MSRC
-CVRF enrichment requires exact KB-token matching, and unavailable or malformed
-CVRF data remains unknown instead of proving that a KB is non-security.
+resolver. Direct or fixture-provided Atom links are revalidated before they
+become release-history URLs, manifest metadata, dashboard links, or copied
+diagnostic JSON. Release History enrichment prefers Atom entries matching both
+KB and row build, then build-only evidence, and skips ambiguous KB-only
+fallbacks. Atom-linked Support article facts are trusted only after URL, KB,
+build, and parseable applicability validation against the Atom record; explicit
+`applies_to_releases` exclusions are untrusted for that event. MSRC CVRF
+enrichment requires exact KB-token matching, and unavailable or malformed CVRF
+data remains unknown instead of proving that a KB is non-security.
+
+The dashboard-only baseline-update notice appears only when baseline rules
+select a real Release Health B-release row that matches latest observed
+evidence. It uses a 14-day source-date visibility window, does not fetch
+optional Support/MSRC enrichment solely for expired inactive notice data, and
+does not affect verdicts, issue sync, runtime clients, or `/api/v1`.
 
 ## Rules
 

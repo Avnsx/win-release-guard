@@ -108,7 +108,9 @@ Canonical repository and feed:
 - Atom is discovery for Support article hrefs, not a `/help/<KB>` resolver.
   Atom-linked Support article facts must be validated against Atom URL, KB,
   build, and parseable applicability before use in summaries or Support-derived
-  security labels. MSRC CVRF joins require exact KB-token matches.
+  security labels. Direct or fixture-provided Atom links must be revalidated
+  before becoming release-history `kb_url`, manifest, dashboard, or copied JSON
+  evidence. MSRC CVRF joins require exact KB-token matches.
 - Source Diagnostic IDs may be deterministic hash-form or Atom-form. When one
   Atom entry produces multiple events, sibling events must keep unique IDs while
   retaining Atom metadata for triage.
@@ -124,6 +126,10 @@ Canonical repository and feed:
   `warning` and `error` events from real `source_diagnostics.events`; the legacy
   `internals: notices` label may be searched only to close older managed Notice
   issues that contain the exact internal marker.
+- Baseline-update notices are dashboard-only. They use a 14-day source-date
+  visibility window, must not fetch optional Support/MSRC enrichment solely for
+  expired inactive notice data, and stale static pages must hide expired notices
+  without leaving empty dashboard grid space.
 
 ## GitHub Actions Pinning Policy
 

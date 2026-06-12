@@ -69,13 +69,19 @@ tracking query strings or fragments. Legacy
 `/help/<digits>` paths remain valid only when Atom provided them directly; the
 generator does not synthesize `/help/<KB>` fallbacks. If an Atom KB row lacks a
 usable support href, the generator records `atom_support_article_href_missing`
-evidence. Support article text can provide human-readable KB context and
+evidence. Direct or fixture-provided Atom links are revalidated before they
+become release-history `kb_url`, manifest metadata, dashboard links, or copied
+diagnostic JSON. Release History enrichment prefers Atom entries matching both
+KB and row build, then build-only evidence, and avoids ambiguous KB-only
+fallbacks. Support article text can provide human-readable KB context and
 explicit security wording only after validation confirms that the article URL,
 KB, expected build, and parseable applicability match the Atom record. Empty or
 unknown `Applies to` values are degraded, not mismatch proof by themselves. The
 article parser records bounded `applies_to` text and `applies_to_releases`
 when release values are parseable, and it stops heading/list extraction before
-unrelated sections such as prerequisites or known issues.
+unrelated sections such as prerequisites or known issues. If
+`applies_to_releases` explicitly excludes the expected release, article facts
+for that event are untrusted for summaries and Support-derived security labels.
 Public MSRC CVRF data provides higher-confidence exact-KB-token security
 classification when available; substring values such as `KB50941260`,
 `15094126`, or `5094126a` do not match `KB5094126`. Atom title buckets remain
@@ -167,7 +173,10 @@ The `required_baseline_matched_latest_observed` event is a dashboard-only
 notice emitted only when the active baseline-update notice exists. It explains
 that a real Release Health B-release required baseline has caught up to latest
 observed Microsoft evidence. It is never warning/error severity and is skipped
-by GitHub Issue sync.
+by GitHub Issue sync. Expired or inactive baseline notice metadata does not
+fetch optional Support/MSRC enrichment solely for stale historical notice data.
+On stale static pages, local inline JavaScript hides an expired notice and
+removes the baseline grid class so the operational panels reflow.
 
 In the publish workflow, a GitHub Issues API, label, or permission failure in the
 sync step is published as static degraded metadata instead of blocking signed
@@ -210,6 +219,7 @@ Issues or writing tokens.
 | Atom feed has newer build than Release Health. | `atom_newer_than_release_history` event. | Inspect the KB, Support article href, build family, and whether latest observed remains informational. |
 | Atom KB row has no Support article href. | `atom_support_article_href_missing` event. | Treat as source evidence gap; do not add a `/help/<KB>` resolver. |
 | Atom row links only to feed/API/search/download/static, non-support, or traversal URL. | `atom_support_article_href_missing` event with no latest-observed advancement. | Treat as unsafe or non-article evidence; use only a safe Atom `alternate` Support article URL. |
+| Same KB appears in multiple Atom entries. | Build-aware Release History enrichment selects the entry matching the row build when available. | Do not trust first-match ordering; inspect build, source URL, preview/OOB flags, and timestamps. |
 | Support article KB/build/applies-to disagrees with Atom. | `support_article_enrichment_mismatch` event and validation reason codes. | Trust Atom KB/build/release and MSRC exact-KB evidence; do not use the mismatched article for summaries or Support-derived security labels. |
 | Required baseline catches up to latest observed build. | `baseline_update_notice` plus `required_baseline_matched_latest_observed` notice. | Treat as dashboard-only context; do not open or sync a GitHub Issue. |
 | Source diagnostics warning appears on dashboard. | Event kind and affected release/build. | Keep visible; only block if severity is error. |

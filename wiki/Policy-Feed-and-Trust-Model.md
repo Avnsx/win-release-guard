@@ -80,8 +80,19 @@ When the selected `required_baseline_build` comes from a real non-preview,
 non-OOB Release Health B-release row and matches `latest_observed_build`, the
 dashboard may show a 14-day informational baseline-update notice. That notice
 is generated from local Release Health, Atom, validated Support, and exact MSRC
-facts; it does not change the signed policy verdict, baseline selection,
-runtime client behavior, issue sync, or public `/api/v1` contract.
+facts; expired or inactive notice metadata does not fetch optional Support/MSRC
+enrichment solely for stale historical notice data. It does not change the
+signed policy verdict, baseline selection, runtime client behavior, issue sync,
+or public `/api/v1` contract.
+
+Atom-linked evidence stays bounded by source-trust rules. Safe Support article
+URLs are canonicalized before use, direct Atom links are revalidated before
+they become public metadata or dashboard/export links, and Release History
+enrichment prefers Atom entries matching both KB and row build. Support article
+URL, KB, build, and parseable release/applicability must match before article
+facts can affect summaries or Support-derived security labels. MSRC security
+classification requires exact KB remediation evidence and remains unknown when
+CVRF data is malformed or unavailable.
 
 | Field / term | Meaning |
 | --- | --- |

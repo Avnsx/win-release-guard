@@ -71,6 +71,7 @@ python -m win11_release_guard --json-pretty --wua --include-raw-local-diagnostic
 | 26H1 note | Confirm special/new-devices-only text is still detected. |
 | B baseline | Confirm broad target has a B-release baseline. |
 | Atom support href | Use only safe Atom `alternate` links to `https://support.microsoft.com` article paths. Safe `:443`, query, or fragment variants canonicalize to scheme/host/path; unsafe ports, feed/API/search/download/static/traversal paths, and non-support hosts reject. If an Atom KB row lacks a safe Support article href, keep the Source Diagnostic evidence; do not add a `/help/<KB>` fallback resolver. |
+| Atom row matching | If the same KB appears more than once, confirm Release History enrichment selected a row-build match before accepting KB-only metadata. Ambiguous KB-only fallbacks should be skipped rather than silently choosing the first entry. |
 | Support article mismatch | If Support article KB, build, URL, or parseable `Applies to` evidence disagrees with Atom, trust Atom KB/build/release and exact MSRC KB evidence; treat Support-derived summary/security wording as untrusted. Use `applies_to_releases` when present to see which release values were parsed. |
 | Security classification | Use exact MSRC CVRF KB-token evidence or validated explicit Support article wording; do not infer security status from generic Atom title text or KB substrings embedded in larger tokens. Exact-KB remediations count even when optional CVE/severity/product fields are absent. |
 
@@ -99,6 +100,7 @@ build, all three fields can legitimately show the same build number.
 | Required baseline source | Confirm the row is a real non-preview, non-OOB Release Health B-release. |
 | Notice timing | Check `official_release_date`, `official_release_precision`, `visible_from_utc`, and `visible_until_utc`; date-only Microsoft evidence is intentionally labeled date-only. |
 | Evidence status | If Support or MSRC evidence is degraded/unknown, keep the notice but do not treat Support text as security proof. |
+| Expired notice | Expired or inactive notice metadata should not fetch optional Support/MSRC enrichment just to decorate stale history. A stale static page hides the notice and reflows the operational panels. |
 | Issue sync | Leave it dashboard-only; the `required_baseline_matched_latest_observed` notice must not create or reopen GitHub Issues. |
 
 The notice explains that the compliance floor has caught up to already observed

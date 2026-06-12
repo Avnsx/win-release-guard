@@ -2,19 +2,7 @@
 
 ## [Unreleased]
 
-### Added
-
-* Added a dashboard-only required-baseline catch-up notice for the case where a real Release Health B-release baseline now matches the broad target's latest observed Microsoft build. The notice is informational, expires after the 14-day source-date window, labels date-only Release Health precision honestly, and does not change signed verdicts, baseline selection, issue sync, or runtime client behavior.
-
-### Fixed
-
-* Tightened support and MSRC enrichment edge cases: safe Support URLs with explicit `:443`, tracking queries, and fragments canonicalize to scheme/host/path; unsafe ports and paths still reject. Support article `Applies to` extraction now handles heading/list and heading/paragraph layouts without swallowing following sections, and exposes `applies_to_releases` for compatibility checks.
-* Exact MSRC CVRF KB remediation matches now classify a KB as security even when optional CVE, severity, or product fields are absent.
-* Removed CVE lists and counts from baseline notices, Source Diagnostic dashboard rows, and copied visible JSON; administrators still get deterministic security/non-security/unknown labeling with the evidence source.
-
-### Tests
-
-* Added local regression coverage for the baseline-update notice payload, rendering order, dashboard-only issue-sync behavior, degraded evidence wording, Support URL canonicalization, bounded `Applies to` extraction, exact MSRC KB matching, and no raw Support HTML leakage.
+No unreleased changes yet.
 
 ## v0.3.3 - 2026-06-11
 
@@ -24,6 +12,7 @@ Version 0.3.3 is the corrective source-evidence hardening release. It bumps the 
 
 ### Changed
 
+* Added a dashboard-only required-baseline catch-up notice for the case where a real Release Health B-release baseline now matches the broad target's latest observed Microsoft build. The notice is informational, expires after the 14-day source-date window, labels date-only Release Health precision honestly, and does not change signed verdicts, baseline selection, issue sync, or runtime client behavior.
 * Documented the split between Release Health `latest_build`, informational `latest_observed_build`, and signed `required_baseline_build`; Atom-linked Support article evidence can advance latest-observed context without changing the required fleet baseline.
 * Documented Source Diagnostics enrichment from Atom-linked Microsoft Support articles and unauthenticated MSRC CVRF data, including no `/help/<KB>` fallback when Atom lacks a support href, Atom-form diagnostic IDs, and GitHub Issue title suffixes such as `[id=968480]`.
 * Aligned repository docs and Wiki pages with the caught-up build case, validated Support/MSRC enrichment, unique hash-form or Atom-form Source Diagnostic IDs, dashboard-only notices, static dashboard constraints, and anti patch-only handoff rules.
@@ -32,6 +21,14 @@ Version 0.3.3 is the corrective source-evidence hardening release. It bumps the 
 ### Fixed
 
 * Ensured unique multi-build Atom diagnostic IDs when one Atom entry produces multiple release/build events. The canonical broad-target warning can retain the public Atom-form ID, while sibling events use deterministic hash-form IDs and retain Atom entry, support article, support URL, source URL, and article-id metadata for triage.
+* Tightened support and MSRC enrichment edge cases: safe Support URLs with explicit `:443`, tracking queries, and fragments canonicalize to scheme/host/path; unsafe ports and paths still reject. Support article `Applies to` extraction now handles heading/list and heading/paragraph layouts without swallowing following sections, and exposes `applies_to_releases` for compatibility checks.
+* Exact MSRC CVRF KB remediation matches now classify a KB as security even when optional CVE, severity, or product fields are absent.
+* Removed CVE lists and counts from baseline notices, Source Diagnostic dashboard rows, and copied visible JSON; administrators still get deterministic security/non-security/unknown labeling with the evidence source.
+* Hardened backend source-evidence paths so direct or fixture-provided Atom links are still revalidated before they can become release-history `kb_url`, support metadata, manifest evidence, dashboard links, or copied Source Diagnostics JSON.
+* Improved Atom row matching to prefer KB-and-build matches, then build matches, and to skip ambiguous KB-only fallbacks when source URL, preview/OOB, or update-bucket evidence would be unclear.
+* Treated explicit `applies_to_releases` exclusions as untrusted article mismatches for summaries and Support-derived security wording while preserving exact MSRC KB evidence as an independent security signal.
+* Prevented expired or inactive baseline-update notices from fetching optional Support/MSRC enrichment solely for stale historical notice data.
+* Fixed stale static dashboard reflow so client-side expiry hides the baseline notice and removes the `has-baseline-notice` grid class, avoiding a blank first operations row.
 * Validated Atom-linked Microsoft Support article URL, KB, build, and applicability evidence before using article facts for Source Diagnostics summaries or Support-derived security labels; mismatches now remain visible as compact validation metadata without trusting the mismatched article text.
 * Hardened Microsoft source matching so Atom enrichment uses only safe alternate Support article links, Support URLs reject unsafe hosts, paths, ports, and traversal while stripping tracking queries and fragments from otherwise safe article URLs, MSRC CVRF joins require exact KB tokens, and unknown applies-to evidence degrades instead of silently passing.
 * Kept security classification honest when enrichment is incomplete: exact MSRC CVRF KB-token evidence can still classify a KB as security, malformed or unavailable CVRF remains unknown/unavailable, and title-only `OS Build(s)` wording or mismatched Support article text is not treated as security proof.
@@ -40,7 +37,10 @@ Version 0.3.3 is the corrective source-evidence hardening release. It bumps the 
 ### Tests
 
 * Added generated-output regressions for KB5094126 latest-observed behavior, caught-up Release Health behavior, diagnostic ID uniqueness, Support article mismatch/degraded states, MSRC unavailable/malformed states, API aliases, manifests, and raw Support HTML leakage.
+* Added local regression coverage for the baseline-update notice payload, rendering order, dashboard-only issue-sync behavior, degraded evidence wording, Support URL canonicalization, bounded `Applies to` extraction, exact MSRC KB matching, and no raw Support HTML leakage.
+* Added generated-output and browser-backed dashboard checks for unsafe Atom URL leakage, expired-notice no-fetch behavior, stale notice class removal, static-page constraints, mobile/desktop layout, and no raw Support article body leakage.
 * Added regression coverage for safe Atom `alternate` link selection, support.microsoft.com URL canonicalization/rejection, exact MSRC KB-token joins, applies-to compatibility parsing, visible dashboard/copy JSON diagnostic IDs, and clean archive exclusion of temporary artifacts.
+* Final local release gates for the `0.3.3` cut passed compileall, the full pytest suite, fixture Pages generation, generated-output sanity inspection, secret scanning, clean archive export/validation, identity/version/action audits, self-test, live public policy/pages checks, and the Windows Panther JSON regression harness.
 
 ### Packaging And Release
 

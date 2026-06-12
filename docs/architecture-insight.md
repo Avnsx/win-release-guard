@@ -52,19 +52,27 @@ the same build.
 
 Atom is discovery for Support article hrefs, not a fallback URL resolver. The
 generator does not synthesize `/help/<KB>` when Atom lacks a usable support
-href. Atom-linked Support article facts must match the selected Atom URL, KB,
-expected build, and parseable release/applicability before they are trusted for
-summaries or Support-derived security labels. MSRC CVRF enrichment requires an
-exact KB-token match; unavailable or malformed CVRF data remains unknown rather
-than becoming proof that a KB is non-security.
+href. Direct or fixture-provided Atom links are revalidated before they become
+release-history URLs, manifest metadata, dashboard links, or copied diagnostic
+JSON. Release History enrichment prefers Atom entries matching both KB and row
+build, then build-only evidence, and skips ambiguous KB-only fallbacks. Atom-linked
+Support article facts must match the selected Atom URL, KB, expected build, and
+parseable release/applicability before they are trusted for summaries or
+Support-derived security labels. Explicit `applies_to_releases` exclusions are
+untrusted for that event. MSRC CVRF enrichment requires an exact KB-token match;
+unavailable or malformed CVRF data remains unknown rather than becoming proof
+that a KB is non-security.
 
 When baseline rules select a real Release Health B-release row and that
 `required_baseline_build` matches the broad target's `latest_observed_build`,
 the generator can add a dashboard-only baseline-update notice for 14 days from
 the source-derived official baseline date. The notice is deterministic local
 HTML/policy metadata from Release Health, Atom, validated Support, and exact
-MSRC facts. It is not an LLM/cloud summary and it does not change verdicts,
-baseline selection, issue sync, runtime behavior, or `/api/v1` compatibility.
+MSRC facts. Expired or inactive notice metadata does not fetch optional
+Support/MSRC enrichment solely for stale historical notice data, and stale
+static pages hide expired notices while reflowing the operations grid. It is
+not an LLM/cloud summary and it does not change verdicts, baseline selection,
+issue sync, runtime behavior, or `/api/v1` compatibility.
 
 ## Release Targeting
 

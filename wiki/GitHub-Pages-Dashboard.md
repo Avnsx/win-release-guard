@@ -97,11 +97,16 @@ value.
 Atom is discovery for Support article hrefs, not a synthesized `/help/<KB>`
 resolver. The generator uses safe Atom `alternate` support article links,
 canonicalizes otherwise safe support URLs by stripping query strings and
-fragments, validates fetched Support article URL, KB, build, and parseable applicability
-before trusting article facts, and keeps mismatch/degraded status visible in
-Source Diagnostics. MSRC CVRF joins require exact KB-token matches; substring
-matches and malformed/unavailable CVRF data must not silently become
-non-security proof.
+fragments, and revalidates direct or fixture-provided Atom links before they
+become release-history URLs, manifest metadata, dashboard links, or copied
+diagnostic JSON. Release History enrichment prefers Atom entries matching both
+KB and row build, then build-only evidence, and avoids ambiguous KB-only
+fallbacks. The generator validates fetched Support article URL, KB, build, and
+parseable applicability before trusting article facts, and keeps
+mismatch/degraded status visible in Source Diagnostics. Explicit
+`applies_to_releases` exclusions are untrusted for that event. MSRC CVRF joins
+require exact KB-token matches; substring matches and malformed/unavailable
+CVRF data must not silently become non-security proof.
 
 When the broad target's required baseline is selected from a real non-preview,
 non-OOB Release Health B-release row and catches up to
@@ -109,11 +114,15 @@ non-OOB Release Health B-release row and catches up to
 notice above `Policy Feed Currency` and `Source Diagnostics`. It is
 informational only, lasts 14 days from the source-derived official baseline
 date, labels Release Health date-only precision when Microsoft provides only a
-date, keeps the expiry marker hidden from the UI, and uses deterministic local summary text from Release Health, Atom,
-validated Support facts, and exact MSRC evidence. It never calls an LLM, cloud
-API, GitHub runtime API, external JS/CSS/font/CDN, or changes the signed
-policy verdict, required baseline selection, issue sync, runtime client
-behavior, or `/api/v1` aliases.
+date, keeps the expiry marker hidden from the UI, and uses deterministic local
+summary text from Release Health, Atom, validated Support facts, and exact MSRC
+evidence. Expired or inactive notice metadata does not fetch optional
+Support/MSRC enrichment solely for stale historical notice data. If a static
+page ages past the hidden expiry marker, inline local JavaScript hides the
+notice and removes the grid class so the operational panels reflow without a
+blank row. It never calls an LLM, cloud API, GitHub runtime API, external
+JS/CSS/font/CDN, or changes the signed policy verdict, required baseline
+selection, issue sync, runtime client behavior, or `/api/v1` aliases.
 
 ## Rules
 

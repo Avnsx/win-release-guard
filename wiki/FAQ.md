@@ -64,6 +64,23 @@ does not become `required_baseline_build` unless the signed baseline rules
 select it. When Release Health has caught up and those rules select the same
 build, all three values can legitimately match.
 
+## What is the baseline-update notice?
+
+It is dashboard-only context shown when a real Release Health B-release
+required baseline catches up to the latest observed Microsoft build. It lasts
+14 days from the source-derived official date, labels date-only Microsoft
+precision honestly, and does not change verdicts, baselines, issue sync,
+runtime clients, signatures, or `/api/v1`.
+
+## How are Support and MSRC evidence trusted?
+
+Atom discovers Support article links; it is not a `/help/<KB>` resolver. Safe
+Support URLs are canonicalized, direct Atom links are revalidated before public
+metadata use, and article URL/KB/build/applicability must match before article
+facts affect summaries or Support-derived security labels. MSRC security
+classification requires exact KB remediation evidence; malformed or unavailable
+CVRF stays unknown.
+
 ## Related Pages
 
 [Home](Home) | [Quick Start](Quick-Start) | [Troubleshooting](Troubleshooting)
