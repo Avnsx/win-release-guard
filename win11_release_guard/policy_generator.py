@@ -1445,6 +1445,13 @@ def _unambiguous_kb_only_atom_entries(
     if not entries:
         return ()
 
+    # KB-only fallback runs only after exact KB+build matching failed, so any entry
+    # that lists builds here is build-specific evidence for a *different* build. Such
+    # an entry must never attach its build-specific metadata to this row by KB alone
+    # (a KB can map to multiple builds). Only build-agnostic entries may fall back.
+    if any(entry.builds for entry in entries):
+        return ()
+
     safe_urls = {_atom_entry_support_url(entry) for entry in entries}
     if len(safe_urls) > 1:
         return ()
@@ -1936,13 +1943,30 @@ def _baseline_update_notice_record(
     return {key: value for key, value in record.items() if value not in (None, "", [], ())}
 
 
+def _baseline_notice_official_date(value: str | None) -> datetime | None:
+    """Parse a date-only Microsoft source value to a UTC-midnight datetime.
+
+    Accepts zero-padded and non-zero-padded ``YYYY-M-D`` forms deterministically.
+    Impossible calendar dates (for example ``2026-02-30`` or ``2026-13-01``) raise
+    ``ValueError`` during construction and degrade to ``None`` instead of crashing
+    policy generation. Only a calendar date is parsed; no time of day is invented.
+    """
+    match = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", str(value or "").strip())
+    if not match:
+        return None
+    try:
+        return datetime(int(match[1]), int(match[2]), int(match[3]), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def _baseline_notice_visibility_window(
     row: ReleaseHistoryEntry,
 ) -> tuple[str, str, str, str] | None:
-    official_date = str(row.availability_date or "").strip()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", official_date):
+    visible_from = _baseline_notice_official_date(row.availability_date)
+    if visible_from is None:
         return None
-    visible_from = datetime.fromisoformat(official_date).replace(tzinfo=timezone.utc)
+    official_date = f"{visible_from.year:04d}-{visible_from.month:02d}-{visible_from.day:02d}"
     visible_until = visible_from + timedelta(days=_BASELINE_UPDATE_NOTICE_WINDOW_DAYS)
     return official_date, "date", _datetime_utc_z(visible_from), _datetime_utc_z(visible_until)
 
@@ -1993,6 +2017,23 @@ def _security_evidence_display_label(*, is_security: Any, evidence_source: Any) 
     return None
 
 
+def _baseline_notice_security_clause(is_security: Any, evidence_source: Any) -> str:
+    """Source-aware security sentence clause for the user-facing baseline summary.
+
+    Only MSRC CVRF evidence may claim MSRC confirmation; Support article evidence
+    is attributed to Microsoft Support. Unavailable/none/unknown evidence (or an
+    ``is_security`` that is not ``True``) emits no hard security-confirmation wording.
+    """
+    if is_security is not True:
+        return ""
+    source = str(evidence_source or "").strip().lower()
+    if source == "msrc_cvrf":
+        return " MSRC confirms it as a security update"
+    if source == "support_article":
+        return " Microsoft Support notes it includes the security update"
+    return ""
+
+
 def _baseline_notice_summary(
     *,
     release: str,
@@ -2002,10 +2043,11 @@ def _baseline_notice_summary(
     official_release_date: str,
     is_security: Any,
     security_evidence_status: str,
+    security_evidence_source: Any = None,
 ) -> str:
     kb_text = kb_article or "The selected KB"
     update_text = update_type or "B-release"
-    security_clause = " MSRC confirms it as a security update" if is_security is True else ""
+    security_clause = _baseline_notice_security_clause(is_security, security_evidence_source)
     summary = (
         f"New required baseline: Windows 11 {release} build {build} now matches Microsoft evidence "
         f"and the signed fleet baseline. For broad-fleet {release} devices, this likely marks the "
@@ -2013,7 +2055,7 @@ def _baseline_notice_summary(
     )
     details: list[str] = []
     details.append(f"Release Health lists the baseline date as {official_release_date}")
-    if is_security is not True:
+    if not security_clause:
         details.append(f"security evidence is {security_evidence_status}")
     return f"{summary}; {', and '.join(details)}."
 
@@ -2106,6 +2148,7 @@ def _baseline_update_notice_payload(
         official_release_date=official_release_date,
         is_security=is_security,
         security_evidence_status=security_evidence_status,
+        security_evidence_source=security_evidence_source,
     )
     security_detail = _security_evidence_display_label(
         is_security=is_security,
@@ -2297,8 +2340,6 @@ def _support_article_validation_for_record(
         )
         if applies_compatibility == "incompatible":
             mismatch_reasons.append("applies_to_mismatch")
-        elif applies_compatibility == "release_unmatched":
-            degraded_reasons.append("applies_to_release_unmatched")
         elif applies_compatibility == "unknown" and status == "ok":
             degraded_reasons.append("applies_to_missing" if applies_to in (None, "") else "applies_to_unknown")
 
@@ -3679,6 +3720,21 @@ def _wiki_helper_text(texts: Mapping[Path, str], helper_name: str) -> str | None
     return None
 
 
+def _read_markdown_source(path: Path) -> str:
+    """Read repo-controlled Markdown without aborting generation on invalid bytes.
+
+    Valid UTF-8 is returned unchanged so normal Markdown rendering and link
+    generation are unaffected. Undecodable bytes degrade deterministically to the
+    Unicode replacement character instead of raising ``UnicodeDecodeError``, so a
+    single malformed wiki/changelog source cannot crash the whole Pages generator;
+    the replacement characters keep the problem visible in generated output.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_bytes().decode("utf-8", errors="replace")
+
+
 def _discover_wiki_sources(wiki_dir: str | Path = WIKI_SOURCE_DIR) -> tuple[tuple[WikiPageSource, ...], dict[Path, str]]:
     source_dir = Path(wiki_dir)
     if not source_dir.exists():
@@ -3688,7 +3744,7 @@ def _discover_wiki_sources(wiki_dir: str | Path = WIKI_SOURCE_DIR) -> tuple[tupl
     for path in sorted(source_dir.glob("*.md"), key=lambda item: item.name.casefold()):
         if not path.is_file():
             continue
-        text = path.read_text(encoding="utf-8")
+        text = _read_markdown_source(path)
         texts[path] = text
         if _is_wiki_helper_page(path):
             continue
@@ -5638,7 +5694,7 @@ def render_changelog_pages(
     source = Path(changelog_path)
     if not source.is_file():
         return {}
-    text = source.read_text(encoding="utf-8")
+    text = _read_markdown_source(source)
     sections = _parse_changelog_sections(text)
     changelog_warnings = _changelog_render_warnings(text, sections)
     body_html, _headings, broken_links = _render_changelog_body(text, sections, base_url=base_url)
@@ -5719,7 +5775,7 @@ def _changelog_sitemap_urls(
     source = Path(changelog_path)
     if not source.is_file():
         return ()
-    sections = _parse_changelog_sections(source.read_text(encoding="utf-8"))
+    sections = _parse_changelog_sections(_read_markdown_source(source))
     urls = [_changelog_pages_base_url(base_url=base_url)]
     urls.extend(
         href

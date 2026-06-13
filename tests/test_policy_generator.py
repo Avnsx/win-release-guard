@@ -4776,3 +4776,372 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
     assert "https://avnsx.github.io/win11_release_guard/" in sitemap
     assert "https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in sitemap
     assert "https://avnsx.github.io/win11_release_guard/policy-manifest.json" in sitemap
+
+
+# ---------------------------------------------------------------------------
+# Source-aware baseline-notice security wording. The user-facing summary must
+# only claim MSRC confirmation for msrc_cvrf evidence, attribute Support article
+# evidence to Microsoft Support, and stay neutral when evidence is absent.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "evidence_source, expected_phrase, forbidden_phrase",
+    [
+        ("msrc_cvrf", "MSRC confirms it as a security update", None),
+        (
+            "support_article",
+            "Microsoft Support notes it includes the security update",
+            "MSRC confirms",
+        ),
+    ],
+)
+def test_baseline_notice_summary_security_wording_is_source_aware(
+    evidence_source: str, expected_phrase: str, forbidden_phrase: str | None
+) -> None:
+    summary = policy_generator_module._baseline_notice_summary(
+        release="25H2",
+        build="26200.8655",
+        kb_article="KB5094126",
+        update_type="2026-06 B",
+        official_release_date="2026-06-09",
+        is_security=True,
+        security_evidence_status="trusted",
+        security_evidence_source=evidence_source,
+    )
+    assert expected_phrase in summary
+    if forbidden_phrase is not None:
+        assert forbidden_phrase not in summary
+
+
+@pytest.mark.parametrize("evidence_source", ["unavailable", "none", "unknown", "", None])
+def test_baseline_notice_summary_stays_neutral_without_trusted_evidence(evidence_source) -> None:
+    summary = policy_generator_module._baseline_notice_summary(
+        release="25H2",
+        build="26200.8655",
+        kb_article="KB5094126",
+        update_type="2026-06 B",
+        official_release_date="2026-06-09",
+        is_security=None,
+        security_evidence_status="unknown",
+        security_evidence_source=evidence_source,
+    )
+    assert "MSRC confirms" not in summary
+    assert "Microsoft Support notes" not in summary
+    assert "security evidence is unknown" in summary
+
+
+def test_baseline_notice_summary_non_security_has_no_confirmation() -> None:
+    summary = policy_generator_module._baseline_notice_summary(
+        release="25H2",
+        build="26200.8655",
+        kb_article="KB5094126",
+        update_type="2026-06 B",
+        official_release_date="2026-06-09",
+        is_security=False,
+        security_evidence_status="not_security",
+        security_evidence_source="none",
+    )
+    assert "MSRC confirms" not in summary
+    assert "Microsoft Support notes" not in summary
+    assert "security evidence is not_security" in summary
+
+
+def test_baseline_update_notice_uses_support_wording_when_only_support_confirms_security(
+    tmp_path: Path,
+) -> None:
+    # Support article validates and reports a security update, but MSRC CVRF is
+    # unavailable. Security must be attributed to Microsoft Support, never MSRC.
+    support_html = _support_article_html(security=True)
+    policy = _kb5094126_generated_fixture_policy(
+        _release_health_caught_up_to_kb5094126(),
+        support_html=support_html,
+        msrc_error=PolicyFetchError("MSRC unavailable"),
+    )
+    notice = policy.source_diagnostics["baseline_update_notice"]
+    assert notice["active"] is True
+    assert notice["is_security"] is True
+    assert notice["security_evidence_source"] == "support_article"
+    assert "MSRC confirms" not in notice["summary"]
+    assert "Microsoft Support notes it includes the security update" in notice["summary"]
+
+    outputs = _generated_output_bundle(policy, tmp_path)
+    index = str(outputs["index"])
+    # Dashboard chip and summary must agree on the Microsoft Support attribution.
+    assert "Security confirmed by Microsoft Support" in index
+    assert "MSRC confirms" not in index
+    # Visible copy/export JSON must not carry contradictory MSRC source wording.
+    assert "MSRC confirms" not in str(outputs["policy_text"])
+    assert "MSRC confirms" not in str(outputs["manifest_text"])
+    _assert_no_raw_support_article_leakage(outputs, support_html)
+
+
+# ---------------------------------------------------------------------------
+# Baseline-notice date hardening: impossible ISO-shaped dates degrade instead of
+# crashing; non-zero-padded dates are accepted and normalized; window stays 14d.
+# ---------------------------------------------------------------------------
+
+
+def _history_row_with_date(date_text: str) -> "policy_generator_module.ReleaseHistoryEntry":
+    return policy_generator_module.ReleaseHistoryEntry(
+        release="25H2",
+        build_family=26200,
+        build="26200.8655",
+        availability_date=date_text,
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5094126",
+    )
+
+
+@pytest.mark.parametrize(
+    "bad_date",
+    ["2026-02-30", "2026-13-01", "2026-00-10", "2026-06-00", "2026-06-31", "not-a-date", "20260609", ""],
+)
+def test_baseline_notice_window_degrades_on_impossible_or_malformed_dates(bad_date: str) -> None:
+    row = _history_row_with_date(bad_date)
+    assert policy_generator_module._baseline_notice_visibility_window(row) is None
+    assert (
+        policy_generator_module._baseline_notice_is_active(
+            row, generated_at_utc="2026-06-15T00:00:00+00:00"
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "source_date, expected",
+    [("2026-6-9", "2026-06-09"), ("2026-06-09", "2026-06-09"), ("2026-12-1", "2026-12-01")],
+)
+def test_baseline_notice_window_accepts_and_normalizes_non_zero_padded_dates(
+    source_date: str, expected: str
+) -> None:
+    window = policy_generator_module._baseline_notice_visibility_window(
+        _history_row_with_date(source_date)
+    )
+    assert window is not None
+    official_date, precision, visible_from, visible_until = window
+    assert official_date == expected
+    assert precision == "date"
+    assert visible_from == f"{expected}T00:00:00Z"
+    from datetime import datetime
+
+    delta = datetime.fromisoformat(visible_until.replace("Z", "+00:00")) - datetime.fromisoformat(
+        visible_from.replace("Z", "+00:00")
+    )
+    assert delta.days == 14
+
+
+def _release_health_with_baseline_date(date_text: str) -> str:
+    base = _release_health_caught_up_to_kb5094126()
+    needle = "        <td>2026-06 B</td>\n        <td>2026-06-09</td>"
+    assert needle in base
+    return base.replace(needle, f"        <td>2026-06 B</td>\n        <td>{date_text}</td>", 1)
+
+
+def test_generation_and_rendering_survive_impossible_baseline_date(tmp_path: Path) -> None:
+    policy = _kb5094126_generated_fixture_policy(_release_health_with_baseline_date("2026-02-30"))
+    notice = policy.source_diagnostics.get("baseline_update_notice")
+    assert notice is None or notice.get("active") is not True
+    outputs = _generated_output_bundle(policy, tmp_path)
+    # The baseline-notice panel must not be rendered (the JS selector string for
+    # the live timer can still appear, so assert on the panel section marker).
+    assert 'class="panel span-12 baseline-update-notice"' not in str(outputs["index"])
+    validate_policy_document(outputs["policy"])
+
+
+# ---------------------------------------------------------------------------
+# KB-only Atom fallback must never attach build-specific metadata for a build
+# the Atom entry does not actually list (a KB can map to multiple builds).
+# ---------------------------------------------------------------------------
+
+
+def test_match_atom_skips_kb_only_when_atom_lists_a_different_build() -> None:
+    row = policy_generator_module.ReleaseHistoryEntry(
+        release="24H2",
+        build_family=26100,
+        build="26100.5000",
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5090000",
+    )
+    wrong_build_only = policy_generator_module.AtomFeedEntry(
+        title="June 2026 Update",
+        entry_id="tag:test,wrong",
+        link="https://support.microsoft.com/help/5090000",
+        kb_article="KB5090000",
+        builds=("26200.5000",),
+    )
+    assert policy_generator_module._match_atom(row, (wrong_build_only,)) is None
+
+
+def test_enrich_history_does_not_attach_wrong_build_atom_metadata() -> None:
+    row = policy_generator_module.ReleaseHistoryEntry(
+        release="24H2",
+        build_family=26100,
+        build="26100.5000",
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5090000",
+    )
+    wrong_build_only = policy_generator_module.AtomFeedEntry(
+        title="June 2026 Update for 26200",
+        entry_id="tag:test,wrong",
+        link="https://support.microsoft.com/help/5090000",
+        kb_article="KB5090000",
+        builds=("26200.5000",),
+    )
+    enriched = policy_generator_module._enrich_history((row,), (wrong_build_only,))[0]
+    assert enriched.metadata.get("atom_enriched") is not True
+    assert "atom_feed_title" not in enriched.metadata
+    assert "atom_feed_url" not in enriched.metadata
+
+
+def test_match_atom_kb_only_fallback_allows_build_agnostic_entry() -> None:
+    row = policy_generator_module.ReleaseHistoryEntry(
+        release="24H2",
+        build_family=26100,
+        build="26100.5000",
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5091111",
+    )
+    servicing_stack = policy_generator_module.AtomFeedEntry(
+        title="Servicing stack update",
+        entry_id="tag:test,ssu",
+        link="https://support.microsoft.com/help/5091111",
+        kb_article="KB5091111",
+        builds=(),
+    )
+    assert policy_generator_module._match_atom(row, (servicing_stack,)) is servicing_stack
+
+
+def test_match_atom_enriches_each_build_of_a_multi_build_kb() -> None:
+    atom = policy_generator_module.AtomFeedEntry(
+        title="June 9, 2026-KB5094126 (OS Builds 26200.8655 and 26100.8655)",
+        entry_id="tag:test,multi",
+        link=KB5094126_SUPPORT_URL,
+        kb_article="KB5094126",
+        builds=("26200.8655", "26100.8655"),
+    )
+    row_25h2 = policy_generator_module.ReleaseHistoryEntry(
+        release="25H2",
+        build_family=26200,
+        build="26200.8655",
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5094126",
+    )
+    row_24h2 = policy_generator_module.ReleaseHistoryEntry(
+        release="24H2",
+        build_family=26100,
+        build="26100.8655",
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article="KB5094126",
+    )
+    assert policy_generator_module._match_atom(row_25h2, (atom,)) is atom
+    assert policy_generator_module._match_atom(row_24h2, (atom,)) is atom
+
+
+# ---------------------------------------------------------------------------
+# Applies-to compatibility produces a closed set of statuses (no dead
+# "release_unmatched" branch), and validation never emits its phantom reason.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "applies_to",
+    [
+        "",
+        "Windows 11, version 25H2",
+        "Windows 11, version 24H2",
+        "Windows 11, version 25H2; Windows 11, version 24H2",
+        "Windows 10, version 22H2",
+        "Windows 11",
+        "Some unrelated product",
+        "Windows Server 2025",
+        None,
+    ],
+)
+@pytest.mark.parametrize("release", ["25H2", "24H2", "", None])
+def test_applies_to_compatibility_only_yields_known_statuses(applies_to, release) -> None:
+    result = policy_generator_module._support_article_applies_to_compatibility(
+        applies_to, release=release, build_family=26200
+    )
+    assert result in {"compatible", "incompatible", "unknown"}
+    assert result != "release_unmatched"
+
+
+def test_support_article_validation_never_emits_release_unmatched_reason() -> None:
+    record = {
+        "kb_article": "KB5094126",
+        "build": "26200.8655",
+        "release": "25H2",
+        "build_family": 26200,
+        "support_url": KB5094126_SUPPORT_URL,
+    }
+    matrix = [
+        (None, None),
+        ("Windows 11, version 25H2", ["25H2"]),
+        ("Windows 11, version 24H2", ["24H2"]),
+        ("Windows 10, version 22H2", []),
+        ("Windows 11", []),
+        ("", []),
+    ]
+    for applies_to, applies_releases in matrix:
+        article = {
+            "url": KB5094126_SUPPORT_URL,
+            "status": "ok",
+            "kb_article": "KB5094126",
+            "builds": ["26200.8655"],
+        }
+        if applies_to is not None:
+            article["applies_to"] = applies_to
+        if applies_releases is not None:
+            article["applies_to_releases"] = applies_releases
+        validation = policy_generator_module._support_article_validation_for_record(record, article)
+        reasons = validation.get("support_article_validation_reasons", [])
+        assert "applies_to_release_unmatched" not in reasons
+
+
+# ---------------------------------------------------------------------------
+# Repo-controlled Markdown reads must not crash generation on invalid UTF-8.
+# ---------------------------------------------------------------------------
+
+
+def test_read_markdown_source_preserves_valid_and_replaces_invalid(tmp_path: Path) -> None:
+    good = tmp_path / "good.md"
+    good.write_text("# Title\n\nAll good - ünïcödé.\n", encoding="utf-8")
+    assert policy_generator_module._read_markdown_source(good) == (
+        "# Title\n\nAll good - ünïcödé.\n"
+    )
+
+    bad = tmp_path / "bad.md"
+    bad.write_bytes(b"# Title\n\nbroken \xff\xfe bytes\n")
+    text = policy_generator_module._read_markdown_source(bad)
+    assert "broken" in text
+    assert "�" in text
+
+
+def test_render_wiki_pages_survives_invalid_utf8_source(tmp_path: Path) -> None:
+    wiki_dir = tmp_path / "wiki"
+    wiki_dir.mkdir()
+    (wiki_dir / "Home.md").write_text("# Home\n\nWelcome.\n", encoding="utf-8")
+    (wiki_dir / "Broken-Page.md").write_bytes(b"# Broken \xff\xfe Page\n\nContent.\n")
+
+    pages = policy_generator_module.render_wiki_pages(wiki_dir=wiki_dir)
+    assert pages
+    assert any(name.endswith("index.html") for name in pages)
+
+
+def test_render_changelog_pages_survives_invalid_utf8(tmp_path: Path) -> None:
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_bytes(
+        b"# Changelog\n\n## [Unreleased]\n\nBroken \xff\xfe bytes.\n\n"
+        b"## v0.3.3 - 2026-06-11\n\n- item\n"
+    )
+
+    rendered = policy_generator_module.render_changelog_pages(changelog_path=changelog)
+    assert rendered
+    assert any("changelog" in name for name in rendered)
