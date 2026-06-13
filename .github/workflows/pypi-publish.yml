@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to publish, for example v0.3.3. Leave blank for build/twine/self-test only."
+        description: "Existing tag to publish, for example v0.3.4. Leave blank for build/twine/self-test only."
         required: false
         type: string
   release:

@@ -2,7 +2,7 @@
 
 Purpose: document the explicit GitHub Release path for clean source archives. These are distribution checkpoints for Windows 11 Release Guard source archives, separate from the twice-daily public policy feed publish workflow.
 
-Related links: [maintainer guide](maintainer-guide.md) | [v0.3.3 release notes](releases/v0.3.3.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
+Related links: [maintainer guide](maintainer-guide.md) | [v0.3.4 release notes](releases/v0.3.4.md) | [wiki tagged release lane](../wiki/Tagged-Release-Lane.md) | [safe exports](../wiki/Safe-Exports-and-Clean-Archives.md)
 
 ## Release Contract
 
@@ -85,9 +85,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 `export_clean_archive.py --validate` runs its inner archive test gate with
 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` so ambient third-party pytest plugins cannot
 change, slow, or hang validation; the project declares no required pytest
-plugins, so coverage is unchanged. The validated clean archive preserves the
-historical release notes `docs/releases/v0.3.1.md`, `docs/releases/v0.3.2.md`,
-and `docs/releases/v0.3.3.md`.
+plugins, so coverage is unchanged. The validated clean archive requires the
+current `docs/releases/v0.3.4.md` and preserves the historical release notes
+`docs/releases/v0.3.1.md`, `docs/releases/v0.3.2.md`, and `docs/releases/v0.3.3.md`.
 
 ## Release Checklist
 

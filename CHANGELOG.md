@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
-Post-0.3.3 source-evidence and release-tooling hardening, staged for review on a
-feature branch and not yet merged to `main`. No new program version is cut; the
-signed policy verdict, required-baseline selection, `schema_version`,
-`api_version`, and the 14-day baseline-update notice window are unchanged.
+No unreleased changes yet.
+
+## v0.3.4 - 2026-06-13
+
+### Summary
+
+Version 0.3.4 is a source-evidence and release-tooling hardening release on top of
+0.3.3. It bumps the package/runtime/generator/WUA identity to `0.3.4` through the
+shared version helper and keeps the signed policy verdict, `required_baseline_build`
+selection, `schema_version`, `api_version`, `/api/v1` compatibility, Source
+Diagnostics issue-sync rules, and the 14-day baseline-update notice window
+unchanged. Windows release targeting is unchanged.
 
 ### Fixed
 
@@ -57,9 +65,9 @@ signed policy verdict, required-baseline selection, `schema_version`,
   project declares no required pytest plugins, so coverage is unchanged, and CI
   still runs the full suite separately and validates with `--skip-test-run`, so
   no duplicate full run is introduced.
-* Added `docs/releases/v0.3.1.md` to the required clean-archive entries so the
-  historical release note is protected by archive validation alongside `v0.3.2`
-  and `v0.3.3`.
+* Added `docs/releases/v0.3.1.md` to the required clean-archive entries (alongside
+  the existing `v0.3.2` and `v0.3.3` release notes) so release history stays
+  protected by archive validation.
 * Clarified that the Source Diagnostics issue-sync `include_notices` flag is
   retained only for CLI backward compatibility and is intentionally inert:
   `notice` events stay dashboard-only and are never synced as GitHub Issues
@@ -99,6 +107,23 @@ signed policy verdict, required-baseline selection, `schema_version`,
   Segoe UI font stack and clamp-based scale system; no generated Pages HTML uses
   zoom/transform-scale/viewport hacks or external assets; and wiki code blocks,
   tables, and long links stay responsive.
+
+### Packaging And Release
+
+* Program/package version is `0.3.4`; runtime user-agent, generator identity, and
+  WUA client application ID continue to derive from the shared version helper
+  instead of hardcoded per-module strings.
+* Release documentation now includes `docs/releases/v0.3.4.md` and
+  `wiki/Release-v0.3.4.md`; clean archives require the new release-note files while
+  keeping historical `v0.3.1`, `v0.3.2`, and `v0.3.3` material available.
+* PyPI publishing remains handled by `.github/workflows/pypi-publish.yml` through
+  Trusted Publishing / GitHub OIDC: it builds wheel and sdist artifacts, runs
+  `python -m twine check dist/*`, and still requires Pending Trusted Publisher
+  setup if the project is absent; no PyPI tokens, usernames, passwords, or
+  credentialed repository URLs are introduced.
+* The signed bundled production policy and detached signature are not regenerated
+  by this local version bump; production packaging uses the existing secure signing
+  workflow with the real policy signing key.
 
 ## v0.3.3 - 2026-06-11
 

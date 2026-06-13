@@ -10,12 +10,12 @@ WORKFLOW = ROOT / ".github" / "workflows" / "pypi-publish.yml"
 README = ROOT / "README.md"
 PYPI_DOC_PATHS = (
     ROOT / "CHANGELOG.md",
-    ROOT / "docs" / "releases" / "v0.3.3.md",
+    ROOT / "docs" / "releases" / "v0.3.4.md",
     ROOT / "docs" / "tagged-release-lane.md",
     ROOT / "docs" / "security-automation.md",
     ROOT / "wiki" / "Build-Test-and-Release.md",
     ROOT / "wiki" / "Tagged-Release-Lane.md",
-    ROOT / "wiki" / "Release-v0.3.3.md",
+    ROOT / "wiki" / "Release-v0.3.4.md",
     ROOT / "wiki" / "FAQ.md",
 )
 
@@ -260,8 +260,8 @@ def test_pypi_docs_connect_release_lane_package_artifacts_and_oidc() -> None:
         assert "OIDC" in text
 
     changelog = _repo_text(ROOT / "CHANGELOG.md")
-    detailed_release = _repo_text(ROOT / "docs" / "releases" / "v0.3.3.md")
-    wiki_release = _repo_text(ROOT / "wiki" / "Release-v0.3.3.md")
+    detailed_release = _repo_text(ROOT / "docs" / "releases" / "v0.3.4.md")
+    wiki_release = _repo_text(ROOT / "wiki" / "Release-v0.3.4.md")
     for text in (changelog, detailed_release, wiki_release):
         assert ".github/workflows/pypi-publish.yml" in text
         assert "wheel" in text
