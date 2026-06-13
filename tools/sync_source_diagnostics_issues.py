@@ -282,6 +282,10 @@ def diagnostics_from_policy(
     include_notices: bool = False,
     stdout: TextIO | None = None,
 ) -> list[DiagnosticIssue]:
+    # Source Diagnostic ``notice`` events are dashboard-only and must never become
+    # GitHub Issues (AGENTS.md). ``include_notices`` is retained only for CLI
+    # backward compatibility and is intentionally inert here: notices are always
+    # skipped below regardless of its value, so no caller can opt notices into sync.
     del include_notices
     diagnostics: list[DiagnosticIssue] = []
     seen_ids: set[str] = set()
