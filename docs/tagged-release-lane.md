@@ -68,13 +68,26 @@ python -m compileall -q win11_release_guard tools
 python tools/check_project_identity.py
 python tools/check_github_action_versions.py
 python tools/check_version_consistency.py
-pytest -q
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD="1"; python -m pytest -q
 python -m win11_release_guard --self-test
 python -m win11_release_guard --check-policy-source
 python -m win11_release_guard --check-public-pages
 python tools/export_clean_archive.py --output dist/win11_release_guard-source.zip
 python tools/export_clean_archive.py --validate dist/win11_release_guard-source.zip
 ```
+
+Bash form for the test gate:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+```
+
+`export_clean_archive.py --validate` runs its inner archive test gate with
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` so ambient third-party pytest plugins cannot
+change, slow, or hang validation; the project declares no required pytest
+plugins, so coverage is unchanged. The validated clean archive preserves the
+historical release notes `docs/releases/v0.3.1.md`, `docs/releases/v0.3.2.md`,
+and `docs/releases/v0.3.3.md`.
 
 ## Release Checklist
 

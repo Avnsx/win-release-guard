@@ -2,7 +2,63 @@
 
 ## [Unreleased]
 
-No unreleased changes yet.
+Post-0.3.3 source-evidence and release-tooling hardening on `main`. No new
+program version is cut; the signed policy verdict, required-baseline selection,
+`schema_version`, `api_version`, and the 14-day baseline-update notice window
+are unchanged.
+
+### Fixed
+
+* Made the dashboard baseline-update notice security wording source-aware. The
+  user-facing summary previously asserted "MSRC confirms it as a security
+  update" whenever the baseline was security-classified, even when the only
+  evidence was a validated Microsoft Support article (for example when MSRC CVRF
+  was unavailable). It now credits MSRC only for exact MSRC CVRF evidence,
+  attributes Support article evidence to Microsoft Support, and stays neutral
+  when evidence is unavailable or unknown, matching the evidence-source chip and
+  `technical_summary`.
+* Hardened baseline-notice date parsing so impossible or malformed ISO-shaped
+  source dates such as `2026-02-30` degrade to no active notice instead of
+  raising `ValueError` and aborting policy, dashboard, and manifest generation.
+  Non-zero-padded calendar dates such as `2026-6-9` are now accepted and
+  normalized to `2026-06-09`; date-only precision is preserved and no time of
+  day is invented.
+* Stopped the KB-only Atom fallback from attaching build-specific Atom metadata
+  to a Release History row whose build the Atom entry does not list. A KB that
+  maps to multiple builds no longer lets a wrong-build entry enrich the row;
+  exact KB+build matches and build-agnostic KB entries still enrich correctly.
+* Removed an unreachable `release_unmatched` support-article validation branch;
+  applies-to compatibility only ever produces `compatible`, `incompatible`, or
+  `unknown`.
+* Guarded repo-controlled Markdown reads in Wiki and changelog Pages generation
+  so invalid UTF-8 in a source file degrades to replacement characters instead
+  of crashing the generator; valid Markdown rendering and links are unchanged.
+
+### Changed
+
+* Made clean-archive validation deterministic. `tools/export_clean_archive.py
+  --validate` now runs its inner extracted-archive pytest gate with
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (scoped to that subprocess, recursion guard
+  preserved) so ambient third-party pytest plugins cannot change, slow, fail, or
+  hang validation. The project declares no required pytest plugins, so coverage
+  is unchanged.
+* Added `docs/releases/v0.3.1.md` to the required clean-archive entries so the
+  historical release note is protected by archive validation alongside `v0.3.2`
+  and `v0.3.3`.
+* Clarified that the Source Diagnostics issue-sync `include_notices` flag is
+  retained only for CLI backward compatibility and is intentionally inert:
+  `notice` events stay dashboard-only and are never synced as GitHub Issues
+  regardless of the flag.
+
+### Tests
+
+* Added regression coverage for source-aware baseline-notice wording (MSRC vs
+  Microsoft Support vs neutral), impossible/malformed and non-zero-padded
+  baseline dates, KB-only Atom wrong-build rejection, multi-build KB enrichment,
+  the applies-to compatibility status set, guarded Markdown reads, archive
+  validation plugin-autoload determinism, archive failure on a real test
+  failure, `--skip-test-run` content validation, and required historical
+  release-doc entries.
 
 ## v0.3.3 - 2026-06-11
 

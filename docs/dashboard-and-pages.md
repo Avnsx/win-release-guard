@@ -132,11 +132,16 @@ renders a blue/white informational notice above the `Policy Feed Currency` and
 B-release row and now matches `latest_observed_build`. The notice uses
 deterministic local summary text from Release Health, Atom, validated Support
 article facts, and exact MSRC KB evidence; it does not use an LLM, cloud API,
-browser token, or external JavaScript. Microsoft date-only source precision is
+browser token, or external JavaScript. Security wording is evidence-aware: the
+summary credits MSRC only for exact MSRC CVRF evidence, attributes validated
+Support article evidence to Microsoft Support, and stays neutral when security
+evidence is unavailable or unknown. Microsoft date-only source precision is
 shown as date-only, the visibility window is 14 days from the source-derived
-official baseline date, and a small inline script hides stale static notices
-after the hidden `visible_until_utc` marker without fetching network resources
-or leaving an empty first grid row. Expired or inactive notice metadata does
+official baseline date, non-zero-padded calendar dates are accepted and
+normalized, impossible or malformed source dates degrade to no active notice
+instead of crashing generation, and a small inline script hides stale static
+notices after the hidden `visible_until_utc` marker without fetching network
+resources or leaving an empty first grid row. Expired or inactive notice metadata does
 not fetch optional Support/MSRC enrichment solely for stale historical notice
 data. The expiry marker is not rendered as a user-facing badge. The notice is
 dashboard-only: it does not alter signed policy verdicts, required-baseline
