@@ -2,31 +2,41 @@
 
 ## [Unreleased]
 
-Post-0.3.3 source-evidence and release-tooling hardening on `main`. No new
-program version is cut; the signed policy verdict, required-baseline selection,
-`schema_version`, `api_version`, and the 14-day baseline-update notice window
-are unchanged.
+Post-0.3.3 source-evidence and release-tooling hardening, staged for review on a
+feature branch and not yet merged to `main`. No new program version is cut; the
+signed policy verdict, required-baseline selection, `schema_version`,
+`api_version`, and the 14-day baseline-update notice window are unchanged.
 
 ### Fixed
 
-* Made the dashboard baseline-update notice security wording source-aware. The
-  user-facing summary previously asserted "MSRC confirms it as a security
-  update" whenever the baseline was security-classified, even when the only
-  evidence was a validated Microsoft Support article (for example when MSRC CVRF
-  was unavailable). It now credits MSRC only for exact MSRC CVRF evidence,
-  attributes Support article evidence to Microsoft Support, and stays neutral
-  when evidence is unavailable or unknown, matching the evidence-source chip and
-  `technical_summary`.
+* Made the dashboard baseline-update notice security wording source-aware and
+  punctuation-clean. The user-facing summary previously asserted "MSRC confirms
+  it as a security update" whenever the baseline was security-classified, even
+  when the only evidence was a validated Microsoft Support article (for example
+  when MSRC CVRF was unavailable). It now credits MSRC only for exact MSRC CVRF
+  evidence, attributes Support article evidence to Microsoft Support, uses
+  neutral wording when evidence is unavailable or unknown, and uses clear
+  non-alarmist wording when checked evidence does not classify the update as
+  security. The summary is assembled from complete sentences, so it no longer
+  emits the `B.;` punctuation artifact or leaks raw status enums such as
+  `not_security` into human-facing copy; machine JSON fields still carry the
+  structured `security_evidence_source`/`security_evidence_status` values.
 * Hardened baseline-notice date parsing so impossible or malformed ISO-shaped
   source dates such as `2026-02-30` degrade to no active notice instead of
   raising `ValueError` and aborting policy, dashboard, and manifest generation.
   Non-zero-padded calendar dates such as `2026-6-9` are now accepted and
   normalized to `2026-06-09`; date-only precision is preserved and no time of
   day is invented.
-* Stopped the KB-only Atom fallback from attaching build-specific Atom metadata
-  to a Release History row whose build the Atom entry does not list. A KB that
-  maps to multiple builds no longer lets a wrong-build entry enrich the row;
-  exact KB+build matches and build-agnostic KB entries still enrich correctly.
+* Rebalanced the KB-only Atom fallback so it keeps legitimate build-agnostic
+  article evidence without attaching wrong-build metadata. It runs only after
+  exact KB+build and build-only matching fail, and then attaches a build-agnostic
+  candidate only when the candidate KB matches, the candidate has a safe
+  canonical Atom support URL, it is not Preview/Out-of-band for a normal broad
+  target, it is unambiguous, and no same-release-family explicit candidate
+  contradicts the row build. An explicit candidate for a different build family
+  no longer blocks an otherwise-safe build-agnostic fallback, while wrong-build,
+  unsafe-URL, Preview/OOB, and ambiguous candidates are still rejected. Exact
+  KB+build matches (including the KB5094126 multi-build case) are unaffected.
 * Removed an unreachable `release_unmatched` support-article validation branch;
   applies-to compatibility only ever produces `compatible`, `incompatible`, or
   `unknown`.
@@ -36,12 +46,17 @@ are unchanged.
 
 ### Changed
 
-* Made clean-archive validation deterministic. `tools/export_clean_archive.py
-  --validate` now runs its inner extracted-archive pytest gate with
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (scoped to that subprocess, recursion guard
-  preserved) so ambient third-party pytest plugins cannot change, slow, fail, or
-  hang validation. The project declares no required pytest plugins, so coverage
-  is unchanged.
+* Made clean-archive validation deterministic and resistant to ambient pytest
+  configuration. `tools/export_clean_archive.py --validate` builds an isolated
+  environment for its inner extracted-archive pytest gate: it sets
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, removes inherited `PYTEST_ADDOPTS` and
+  `PYTEST_PLUGINS` (which otherwise inject options or force plugin imports even
+  with autoload disabled), and preserves the recursion guard and required Python
+  runtime variables. A developer shell exporting `--cov=...` via `PYTEST_ADDOPTS`
+  or a stale `PYTEST_PLUGINS` can no longer change, fail, or hang validation. The
+  project declares no required pytest plugins, so coverage is unchanged, and CI
+  still runs the full suite separately and validates with `--skip-test-run`, so
+  no duplicate full run is introduced.
 * Added `docs/releases/v0.3.1.md` to the required clean-archive entries so the
   historical release note is protected by archive validation alongside `v0.3.2`
   and `v0.3.3`.
@@ -49,16 +64,41 @@ are unchanged.
   retained only for CLI backward compatibility and is intentionally inert:
   `notice` events stay dashboard-only and are never synced as GitHub Issues
   regardless of the flag.
+* Unified the generated Pages Wiki visual scale and layout width with the
+  dashboard. The wiki and changelog theme is rem-based but had no explicit root
+  size and a narrow content cap, so it rendered noticeably smaller and denser
+  than the dashboard at normal browser zoom while wide gutters sat empty. The
+  shared wiki shell now sets a responsive root `font-size`
+  (`clamp(1.0625rem, 1rem + 0.45vw, 1.25rem)`) so `/wiki/`, every wiki subpage,
+  and the generated changelog pages scale their typography, spacing, and gutters
+  to the dashboard's reading size without any CSS/browser zoom, transform-scale,
+  or viewport tricks, and stay responsive (smaller on narrow screens, capped on
+  wide desktops). The content column now uses the available horizontal space (up
+  to a generous cap) so tables get room without shrinking their text, and long
+  code blocks wrap at argument/whitespace boundaries (`white-space: pre-wrap`)
+  so commands stay fully visible instead of being clipped behind a horizontal
+  scrollbar. Prose paragraphs stay readable at ~74ch, content wraps long
+  words/URLs, narrow screens still stack cleanly, and `overflow-x: clip` contains
+  any stray overflow without breaking the sticky sidebar. The dashboard scale is
+  unchanged and the Pages output remains static with no external JS, CSS, fonts,
+  CDNs, tokens, or runtime API calls.
 
 ### Tests
 
-* Added regression coverage for source-aware baseline-notice wording (MSRC vs
-  Microsoft Support vs neutral), impossible/malformed and non-zero-padded
-  baseline dates, KB-only Atom wrong-build rejection, multi-build KB enrichment,
-  the applies-to compatibility status set, guarded Markdown reads, archive
-  validation plugin-autoload determinism, archive failure on a real test
-  failure, `--skip-test-run` content validation, and required historical
-  release-doc entries.
+* Added regression coverage for source-aware and punctuation-clean baseline-notice
+  wording (MSRC vs Microsoft Support vs neutral vs non-security, no `B.;`, no raw
+  enums), impossible/malformed and non-zero-padded baseline dates, the rebalanced
+  KB-only Atom fallback (safe build-agnostic accepted; wrong-build/unsafe/Preview/
+  ambiguous rejected; multi-build KB enrichment intact), the applies-to
+  compatibility status set, guarded Markdown reads, archive-validation isolation
+  from `PYTEST_ADDOPTS`/`PYTEST_PLUGINS` plus autoload determinism, archive
+  failure on a real test failure, `--skip-test-run` content validation, and
+  required historical release-doc entries.
+* Added Pages visual-scale coverage: wiki home, wiki subpages, and changelog
+  pages carry the shared responsive root scale; the dashboard and wiki share the
+  Segoe UI font stack and clamp-based scale system; no generated Pages HTML uses
+  zoom/transform-scale/viewport hacks or external assets; and wiki code blocks,
+  tables, and long links stay responsive.
 
 ## v0.3.3 - 2026-06-11
 
