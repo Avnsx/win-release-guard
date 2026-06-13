@@ -45,6 +45,7 @@ def test_export_clean_archive_contains_only_clean_source_entries(tmp_path: Path)
     assert "wiki/Home.md" in names
     assert "docs/releases/v0.3.3.md" in names
     assert "docs/releases/v0.3.2.md" in names
+    assert "docs/releases/v0.3.1.md" in names
     assert "wiki/Release-v0.3.3.md" in names
     assert "wiki/Release-v0.3.2.md" in names
     assert "wiki/Release-v0.3.1.md" in names
@@ -187,3 +188,98 @@ def test_export_clean_archive_rejects_legacy_name_in_signed_bundled_policy_json(
 
     with pytest.raises(RuntimeError, match="stale project identity after rename"):
         export_clean_archive.validate_archive(archive_path, run_tests=False)
+
+
+class _FakeCompletedProcess:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _is_pytest_command(command: object) -> bool:
+    parts = [str(part) for part in command] if isinstance(command, (list, tuple)) else [str(command)]
+    return any(part == "pytest" or part.endswith("pytest") for part in parts) or (
+        "-m" in parts and "pytest" in parts
+    )
+
+
+def test_archive_validation_subprocess_disables_pytest_plugin_autoload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive_path = tmp_path / "source.zip"
+    export_clean_archive.create_archive(export_clean_archive.REPO_ROOT, archive_path)
+
+    captured: list[tuple[list[str], dict]] = []
+
+    def fake_run(command, **kwargs):
+        captured.append((list(command), dict(kwargs.get("env") or {})))
+        return _FakeCompletedProcess(0)
+
+    monkeypatch.setattr(export_clean_archive.subprocess, "run", fake_run)
+    monkeypatch.delenv("WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH", raising=False)
+
+    export_clean_archive.validate_archive(archive_path, run_tests=True)
+
+    pytest_envs = [env for command, env in captured if _is_pytest_command(command)]
+    assert pytest_envs, "archive validation must run an inner pytest gate"
+    for env in pytest_envs:
+        assert env.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD") == "1"
+        # Recursion guard must remain so the inner gate does not re-run itself.
+        assert env.get("WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH") == "1"
+
+
+def test_archive_validation_fails_on_inner_test_failure(tmp_path: Path, monkeypatch) -> None:
+    archive_path = tmp_path / "source.zip"
+    export_clean_archive.create_archive(export_clean_archive.REPO_ROOT, archive_path)
+
+    def fake_run(command, **kwargs):
+        if _is_pytest_command(command):
+            return _FakeCompletedProcess(1, stdout="1 failed", stderr="")
+        return _FakeCompletedProcess(0)
+
+    monkeypatch.setattr(export_clean_archive.subprocess, "run", fake_run)
+    monkeypatch.delenv("WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH", raising=False)
+
+    with pytest.raises(RuntimeError, match="Archive test run failed"):
+        export_clean_archive.validate_archive(archive_path, run_tests=True)
+
+
+def test_skip_test_run_skips_pytest_but_still_validates_contents(tmp_path: Path, monkeypatch) -> None:
+    archive_path = tmp_path / "source.zip"
+    export_clean_archive.create_archive(export_clean_archive.REPO_ROOT, archive_path)
+
+    invoked: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        invoked.append(list(command))
+        return _FakeCompletedProcess(0)
+
+    monkeypatch.setattr(export_clean_archive.subprocess, "run", fake_run)
+
+    # --skip-test-run still validates structure/contents but runs no subprocess gate.
+    export_clean_archive.validate_archive(archive_path, run_tests=False)
+    assert invoked == []
+
+    # Required-entry validation remains enforced even when tests are skipped.
+    tampered = tmp_path / "missing-entry.zip"
+    keep = sorted(export_clean_archive.REQUIRED_ARCHIVE_ENTRIES - {"docs/releases/v0.3.1.md"})
+    with zipfile.ZipFile(tampered, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for entry in keep:
+            archive.write(export_clean_archive.REPO_ROOT / entry, entry)
+    with pytest.raises(RuntimeError, match="missing required entries"):
+        export_clean_archive.validate_archive(tampered, run_tests=False)
+
+
+def test_required_archive_entries_preserve_historical_release_docs() -> None:
+    for version in ("v0.3.1", "v0.3.2", "v0.3.3"):
+        entry = f"docs/releases/{version}.md"
+        assert entry in export_clean_archive.REQUIRED_ARCHIVE_ENTRIES
+        assert (export_clean_archive.REPO_ROOT / entry).is_file()
+
+
+def test_no_project_required_pytest_plugins() -> None:
+    # Controlled archive validation runs pytest with plugin autoload disabled.
+    # That is safe only because the project declares no required pytest plugins.
+    pyproject = (export_clean_archive.REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "required_plugins" not in pyproject

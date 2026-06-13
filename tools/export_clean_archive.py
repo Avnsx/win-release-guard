@@ -144,6 +144,7 @@ REQUIRED_ARCHIVE_ENTRIES = {
     "docs/security-automation.md",
     "docs/releases/v0.3.3.md",
     "docs/releases/v0.3.2.md",
+    "docs/releases/v0.3.1.md",
     "wiki/Home.md",
     "wiki/Release-v0.3.3.md",
     "wiki/Release-v0.3.2.md",
@@ -357,6 +358,12 @@ def _validate_archive_extracts_and_tests_run(archive_path: Path) -> None:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONPATH"] = str(extract_root)
         env["WIN11_RELEASE_GUARD_ARCHIVE_VALIDATION_DEPTH"] = "1"
+        # Make the inner gate deterministic: ambient third-party pytest plugins
+        # (coverage, xdist, randomly, network shims, etc.) can otherwise change,
+        # slow, fail, or hang archive validation. The project declares no required
+        # pytest plugins, and the full suite passes with autoload disabled, so this
+        # mirrors the CI gate without reducing coverage. Scoped to this subprocess.
+        env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-q"],
             cwd=extract_root,
