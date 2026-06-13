@@ -346,29 +346,27 @@ def test_release_workflow_runs_required_gates_and_attaches_clean_archive() -> No
     assert "--draft" in text
 
 
-def test_release_workflow_body_links_docs_pages_and_feed() -> None:
+def test_release_workflow_body_uses_compact_human_format() -> None:
     text = _read(RELEASE_WORKFLOW)
 
-    assert "Changelog: https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md" in text
+    # Compact, human-facing release notes per AGENTS.md "Release Notes Format".
+    assert "## Windows 11 Release Guard" in text
+    assert "- Version: ${version}" in text
+    assert "- Commit: ${commit_sha}" in text
     assert (
-        "Detailed release notes: https://github.com/Avnsx/win11_release_guard/blob/main/"
-        "docs/releases/v${{ steps.release_ref.outputs.version }}.md"
+        "Read the related changelog hosted here: "
+        "https://avnsx.github.io/win11_release_guard/wiki/changelog/v${version}/"
     ) in text
-    assert "Pages dashboard: https://avnsx.github.io/win11_release_guard/" in text
-    assert "Pages Wiki: https://avnsx.github.io/win11_release_guard/wiki/" in text
-    assert "Pages changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/" in text
-    assert (
-        "Pages version changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/"
-        "v${{ steps.release_ref.outputs.version }}/"
-    ) in text
-    assert "Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json" in text
-    assert "Pages publishing remains separate in `.github/workflows/publish-policy.yml`" in text
-    assert "use the main-branch push, schedule, or workflow_dispatch lane" in text
-    assert "tag pushes trigger that lane" not in text
-    assert "GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`" in text
-    assert "tag pushes trigger Wiki Markdown sync for `wiki/*.md` source Markdown" in text
-    assert "pypi-publish.yml" in text
-    assert "Trusted Publishing / GitHub OIDC" in text
+    assert "### Download from PyPI ⬇️" in text
+    assert "https://pypi.org/project/win11-release-guard/" in text
+    assert "### Summary 📝" in text
+    # The Summary is sourced from the version's CHANGELOG section, not hardcoded.
+    assert "CHANGELOG.md" in text
+    assert "${summary}" in text
+    # The verbose operational link dump and boilerplate are gone.
+    assert "Pages dashboard: https://avnsx.github.io/win11_release_guard/" not in text
+    assert "Public source feed:" not in text
+    assert "Runtime clients use the signed public JSON feed" not in text
 
 
 def test_release_workflow_uses_only_builtin_release_token_reference() -> None:

@@ -173,24 +173,36 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .tmp
+          version="${{ steps.release_ref.outputs.version }}"
           commit_sha="$(git rev-parse HEAD)"
+          # Compact, human-facing release notes (see AGENTS.md "Release Notes Format").
+          # The Summary is the version's "### Summary" paragraph from CHANGELOG.md, so
+          # release notes stay short and plain-language; deeper detail stays in the
+          # changelog and docs that the notes link to.
+          summary="$(awk -v hdr="## v${version} -" '
+            index($0, hdr) == 1 { found = 1; next }
+            found && /^## v/ { exit }
+            found && /^### Summary/ { grab = 1; next }
+            grab && /^### / { exit }
+            grab && NF { print }
+          ' CHANGELOG.md)"
+          if [ -z "$summary" ]; then
+            summary="Windows 11 Release Guard ${version}. See the linked changelog for details."
+          fi
           cat > .tmp/release-notes.md <<EOF
-          ## win11_release_guard ${{ steps.release_ref.outputs.version }}
+          ## Windows 11 Release Guard
 
-          - Version: ${{ steps.release_ref.outputs.version }}
+          - Version: ${version}
           - Commit: ${commit_sha}
-          - Artifact: win11_release_guard-source.zip
-          - Changelog: https://github.com/Avnsx/win11_release_guard/blob/main/CHANGELOG.md
-          - Detailed release notes: https://github.com/Avnsx/win11_release_guard/blob/main/docs/releases/v${{ steps.release_ref.outputs.version }}.md
-          - Pages dashboard: https://avnsx.github.io/win11_release_guard/
-          - Pages Wiki: https://avnsx.github.io/win11_release_guard/wiki/
-          - Pages changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/
-          - Pages version changelog: https://avnsx.github.io/win11_release_guard/wiki/changelog/v${{ steps.release_ref.outputs.version }}/
-          - Public source feed: https://avnsx.github.io/win11_release_guard/windows-release-policy.json
-          - Pages publishing remains separate in `.github/workflows/publish-policy.yml`; use the main-branch push, schedule, or workflow_dispatch lane for the generated Pages Wiki and changelog.
-          - GitHub internal Wiki sync remains separate in `.github/workflows/sync-wiki.yml`; tag pushes trigger Wiki Markdown sync for `wiki/*.md` source Markdown.
-          - PyPI package lane: publishing is separate and runs through `.github/workflows/pypi-publish.yml` with Trusted Publishing / GitHub OIDC.
-          - Runtime clients use the signed public JSON feed and detached Ed25519 signature; GitHub Release assets are distribution artifacts, not policy trust roots.
+          - Read the related changelog hosted here: https://avnsx.github.io/win11_release_guard/wiki/changelog/v${version}/
+
+          ### Download from PyPI ⬇️
+
+          A download of this version is available through the Python Package Manager (PyPI) under https://pypi.org/project/win11-release-guard/
+
+          ### Summary 📝
+
+          ${summary}
           EOF
 
       - name: Create GitHub Release

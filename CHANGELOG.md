@@ -8,12 +8,13 @@ No unreleased changes yet.
 
 ### Summary
 
-Version 0.3.4 is a source-evidence and release-tooling hardening release on top of
-0.3.3. It bumps the package/runtime/generator/WUA identity to `0.3.4` through the
-shared version helper and keeps the signed policy verdict, `required_baseline_build`
-selection, `schema_version`, `api_version`, `/api/v1` compatibility, Source
-Diagnostics issue-sync rules, and the 14-day baseline-update notice window
-unchanged. Windows release targeting is unchanged.
+Windows 11 Release Guard 0.3.4 is a polish and reliability release on top of 0.3.3.
+It makes the dashboard's security wording match the evidence it actually has, reads
+Microsoft's source dates and update links more defensively so unusual data degrades
+gracefully instead of breaking, and gives the public wiki and changelog the same
+comfortable, readable scale as the dashboard. Device compliance results are
+unchanged: the signed policy verdict and required-baseline rules behave exactly as
+before.
 
 ### Fixed
 

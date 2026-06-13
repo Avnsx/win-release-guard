@@ -198,3 +198,26 @@ Bad examples:
 - `stuff`
 - `AI changes`
 - `final final`
+
+## Release Notes Format
+
+- GitHub Release notes (the body shown at
+  `https://github.com/Avnsx/win11_release_guard/releases`) must stay compact,
+  human-facing, and visually scannable. `.github/workflows/release.yml` generates
+  every release body in this fixed format, and future releases must keep it:
+  - An `## Windows 11 Release Guard` heading.
+  - A short bullet list: `Version`, `Commit`, and a single
+    `Read the related changelog hosted here:` link to that version's Pages
+    changelog route `https://avnsx.github.io/win11_release_guard/wiki/changelog/vX.Y.Z/`.
+  - A `### Download from PyPI ⬇️` section linking
+    `https://pypi.org/project/win11-release-guard/`.
+  - A `### Summary 📝` section containing the version's `### Summary` paragraph
+    from `CHANGELOG.md`.
+- Keep the Summary to roughly two or three plain-language sentences that describe
+  the release for administrators accurately without being overly technical. It is
+  not a change dump; deeper detail lives in `CHANGELOG.md`,
+  `docs/releases/vX.Y.Z.md`, and the Pages changelog that the notes link to.
+- Because the release body reuses the changelog Summary, keep each
+  `CHANGELOG.md` `### Summary` compact and human-readable as well.
+- Do not pad release notes with operational/workflow boilerplate, internal
+  publish-lane explanations, badges, or marketing filler.
