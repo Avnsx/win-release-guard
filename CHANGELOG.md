@@ -2,7 +2,15 @@
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Fixed
+
+* Restored the dashboard info-icon hover tooltips. The bubble that holds the
+  explanation text was `position: fixed`, but the dashboard `<main>` uses
+  `backdrop-filter`, which makes a fixed descendant resolve against `<main>`
+  instead of the viewport; its `bottom` offset then landed far below the fold, so
+  only the small caret showed on hover. The tooltip is now `position: absolute`,
+  anchored directly under its icon (connected to the caret) and contained within
+  the viewport, so the full explanation panel shows again on hover/focus.
 
 ## v0.3.4 - 2026-06-13
 

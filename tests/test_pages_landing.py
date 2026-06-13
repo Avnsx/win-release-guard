@@ -311,6 +311,10 @@ def test_pages_index_shows_generated_age_and_source_diagnostics_summary(tmp_path
     assert 'aria-label="Source diagnostic event feed"' in index
     assert index.count('class="dashboard-info-link"') == 6
     assert ".dashboard-info-link:after{display:none}" in index
+    # The hover tooltip must stay anchored to its icon (connected to the caret),
+    # not position:fixed (which a backdrop-filter ancestor pushes off-screen).
+    assert ".dashboard-info-tooltip{position:absolute;top:calc(100% + 11px);left:50%;" in index
+    assert ".dashboard-info-tooltip{position:fixed" not in index
     assert ".dashboard-info-tooltip-action{margin-top:7px;color:#0067c0" in index
     assert "class=\"ui-icon dashboard-info-icon\"" in index
     for info_link_html in index.split('class="dashboard-info-link"')[1:]:
