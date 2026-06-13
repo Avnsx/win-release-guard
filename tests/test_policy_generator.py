@@ -2911,10 +2911,10 @@ def test_caught_up_kb5094126_creates_active_baseline_update_notice(tmp_path: Pat
         "update_type": "2026-06 B",
         "quality_policy": "b_release_only",
         "summary": (
-            "New required baseline: Windows 11 25H2 build 26200.8655 now matches Microsoft evidence "
-            "and the signed fleet baseline. For broad-fleet 25H2 devices, this likely marks the "
-            "stable rollout floor for KB5094126 / 2026-06 B. MSRC confirms it as a security update; "
-            "Release Health lists the baseline date as 2026-06-09."
+            "New required baseline: Windows 11 25H2 build 26200.8655 now matches Microsoft "
+            "evidence and the signed fleet baseline. For broad-fleet 25H2 devices, this likely "
+            "marks the stable rollout floor for KB5094126 / 2026-06 B. Release Health lists the "
+            "baseline date as 2026-06-09. MSRC confirms it as a security update."
         ),
         "update_summary": (
             "Update highlights: Secure Boot: Updates hardening for startup components. "
@@ -3179,7 +3179,11 @@ def test_baseline_update_notice_uses_unknown_security_when_msrc_and_article_are_
     assert notice["security_evidence_status"] == "unknown"
     assert "is_security" not in notice
     assert "security baseline" not in notice["summary"]
-    assert "security evidence is unknown" in notice["summary"]
+    # Human-facing summary uses neutral prose, never the raw status enum.
+    assert "Security classification is unavailable from the checked enrichment source." in notice["summary"]
+    assert "unknown" not in notice["summary"]
+    assert "B.;" not in notice["summary"]
+    assert "MSRC confirms" not in notice["summary"]
     event = next(
         event
         for event in policy.source_diagnostics["events"]
@@ -4806,10 +4810,10 @@ def test_baseline_notice_summary_security_wording_is_source_aware(
         update_type="2026-06 B",
         official_release_date="2026-06-09",
         is_security=True,
-        security_evidence_status="trusted",
         security_evidence_source=evidence_source,
     )
     assert expected_phrase in summary
+    assert "B.;" not in summary
     if forbidden_phrase is not None:
         assert forbidden_phrase not in summary
 
@@ -4823,12 +4827,14 @@ def test_baseline_notice_summary_stays_neutral_without_trusted_evidence(evidence
         update_type="2026-06 B",
         official_release_date="2026-06-09",
         is_security=None,
-        security_evidence_status="unknown",
         security_evidence_source=evidence_source,
     )
     assert "MSRC confirms" not in summary
     assert "Microsoft Support notes" not in summary
-    assert "security evidence is unknown" in summary
+    assert "Security classification is unavailable from the checked enrichment source." in summary
+    # No raw status enums or punctuation artifacts leak into human copy.
+    for token in ("not_security", "msrc_cvrf", "support_article", "B.;", "security evidence is"):
+        assert token not in summary
 
 
 def test_baseline_notice_summary_non_security_has_no_confirmation() -> None:
@@ -4839,12 +4845,13 @@ def test_baseline_notice_summary_non_security_has_no_confirmation() -> None:
         update_type="2026-06 B",
         official_release_date="2026-06-09",
         is_security=False,
-        security_evidence_status="not_security",
         security_evidence_source="none",
     )
     assert "MSRC confirms" not in summary
     assert "Microsoft Support notes" not in summary
-    assert "security evidence is not_security" in summary
+    assert "Checked evidence does not classify it as a security update." in summary
+    for token in ("not_security", "msrc_cvrf", "support_article", "B.;"):
+        assert token not in summary
 
 
 def test_baseline_update_notice_uses_support_wording_when_only_support_confirms_security(
@@ -5145,3 +5152,71 @@ def test_render_changelog_pages_survives_invalid_utf8(tmp_path: Path) -> None:
     rendered = policy_generator_module.render_changelog_pages(changelog_path=changelog)
     assert rendered
     assert any("changelog" in name for name in rendered)
+
+
+# ---------------------------------------------------------------------------
+# Rebalanced KB-only Atom fallback: keep safe build-agnostic evidence while
+# still refusing wrong-build, unsafe, or ambiguous attachment.
+# ---------------------------------------------------------------------------
+
+
+def _kb_row(build_family: int, build: str, kb: str = "KB5091111") -> "policy_generator_module.ReleaseHistoryEntry":
+    return policy_generator_module.ReleaseHistoryEntry(
+        release="24H2",
+        build_family=build_family,
+        build=build,
+        update_type="2026-06 B",
+        update_type_letter="B",
+        kb_article=kb,
+    )
+
+
+def _kb_atom(entry_id: str, *, builds=(), url="https://support.microsoft.com/help/5091111",
+             kb="KB5091111", preview=False, out_of_band=False, title="Update"):
+    return policy_generator_module.AtomFeedEntry(
+        title=title, entry_id=entry_id, link=url, kb_article=kb,
+        builds=builds, preview=preview, out_of_band=out_of_band,
+    )
+
+
+def test_match_atom_other_family_explicit_does_not_block_build_agnostic_fallback() -> None:
+    row = _kb_row(26100, "26100.5000")
+    agnostic = _kb_atom("urn:agnostic")
+    other_family_explicit = _kb_atom("urn:other", builds=("26200.9999",))
+    # The unrelated other-family explicit entry must not block the safe build-agnostic one.
+    assert policy_generator_module._match_atom(row, (agnostic, other_family_explicit)) is agnostic
+
+
+def test_match_atom_rejects_same_family_wrong_build_even_with_agnostic_sibling() -> None:
+    row = _kb_row(26100, "26100.5000")
+    agnostic = _kb_atom("urn:agnostic")
+    same_family_wrong = _kb_atom("urn:wrong", builds=("26100.9999",))
+    # A contradictory same-family explicit candidate makes the fallback ambiguous.
+    assert policy_generator_module._match_atom(row, (agnostic, same_family_wrong)) is None
+
+
+def test_match_atom_rejects_multiple_build_agnostic_candidates_with_different_urls() -> None:
+    row = _kb_row(26100, "26100.5000")
+    a1 = _kb_atom("urn:a1", url="https://support.microsoft.com/help/5091111")
+    a2 = _kb_atom("urn:a2", url="https://support.microsoft.com/help/5099999")
+    assert policy_generator_module._match_atom(row, (a1, a2)) is None
+
+
+def test_match_atom_rejects_build_agnostic_with_unsafe_url() -> None:
+    row = _kb_row(26100, "26100.5000")
+    unsafe = _kb_atom("urn:unsafe", url="https://evil.example/help/5091111")
+    assert policy_generator_module._match_atom(row, (unsafe,)) is None
+
+
+def test_match_atom_rejects_build_agnostic_preview_or_oob_for_normal_row() -> None:
+    row = _kb_row(26100, "26100.5000")
+    preview = _kb_atom("urn:preview", preview=True)
+    oob = _kb_atom("urn:oob", out_of_band=True)
+    assert policy_generator_module._match_atom(row, (preview,)) is None
+    assert policy_generator_module._match_atom(row, (oob,)) is None
+
+
+def test_match_atom_single_safe_build_agnostic_candidate_attaches() -> None:
+    row = _kb_row(26100, "26100.5000")
+    agnostic = _kb_atom("urn:agnostic")
+    assert policy_generator_module._match_atom(row, (agnostic,)) is agnostic

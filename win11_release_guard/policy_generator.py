@@ -1438,37 +1438,67 @@ def _preferred_atom_entry(entries: Iterable[AtomFeedEntry]) -> AtomFeedEntry | N
     return max(candidates, key=_atom_entry_preference_key)
 
 
+def _atom_entry_build_families(entry: AtomFeedEntry) -> set[int]:
+    families = {_build_key(build)[0] for build in entry.builds}
+    return {family for family in families if family >= 0}
+
+
+def _is_contradictory_same_family_atom_entry(row: ReleaseHistoryEntry, entry: AtomFeedEntry) -> bool:
+    """True if an explicit-build entry covers the row's build family but not its build."""
+    return bool(
+        entry.builds
+        and row.build_family in _atom_entry_build_families(entry)
+        and row.build not in entry.builds
+    )
+
+
 def _unambiguous_kb_only_atom_entries(
     row: ReleaseHistoryEntry,
     entries: tuple[AtomFeedEntry, ...],
 ) -> tuple[AtomFeedEntry, ...]:
+    """Build-agnostic KB-only fallback, allowed only in narrow, safe cases.
+
+    This runs after exact KB+build and build-only matching have failed. A KB can
+    map to multiple builds, so build-specific Atom metadata must never attach to a
+    row by KB alone. The balance here keeps legitimate article-level (build-
+    agnostic) evidence while still refusing wrong-build attachment:
+
+    - if any explicit-build entry covers the row's build family but excludes the
+      row build, the situation is contradictory for this row family and no fallback
+      is allowed (an explicit entry for a *different* family does not block it);
+    - only build-agnostic entries (no parsed explicit builds) may fall back;
+    - the candidate must have a safe canonical Atom support URL;
+    - Preview/Out-of-band candidates never enrich a normal broad-target row;
+    - the surviving candidates must be unambiguous (single safe URL and bucket).
+
+    When anything is ambiguous, prefer no enrichment over wrong enrichment.
+    """
     if not entries:
         return ()
 
-    # KB-only fallback runs only after exact KB+build matching failed, so any entry
-    # that lists builds here is build-specific evidence for a *different* build. Such
-    # an entry must never attach its build-specific metadata to this row by KB alone
-    # (a KB can map to multiple builds). Only build-agnostic entries may fall back.
-    if any(entry.builds for entry in entries):
+    if any(_is_contradictory_same_family_atom_entry(row, entry) for entry in entries):
         return ()
 
-    safe_urls = {_atom_entry_support_url(entry) for entry in entries}
+    row_flags = (bool(row.preview), bool(row.out_of_band))
+    candidates = [
+        entry
+        for entry in entries
+        if not entry.builds
+        and _atom_entry_support_url(entry)
+        and (bool(entry.preview), bool(entry.out_of_band)) == row_flags
+    ]
+    if not candidates:
+        return ()
+
+    safe_urls = {_atom_entry_support_url(entry) for entry in candidates}
     if len(safe_urls) > 1:
         return ()
 
-    flags = {(bool(entry.preview), bool(entry.out_of_band)) for entry in entries}
-    if len(flags) > 1:
-        return ()
-    atom_flags = next(iter(flags))
-    row_flags = (bool(row.preview), bool(row.out_of_band))
-    if atom_flags != row_flags:
-        return ()
-
-    buckets = {_atom_title_bucket(entry.title).get("bucket") for entry in entries}
+    buckets = {_atom_title_bucket(entry.title).get("bucket") for entry in candidates}
     if len(buckets) > 1:
         return ()
 
-    return entries
+    return tuple(candidates)
 
 
 def _match_atom(row: ReleaseHistoryEntry, entries: tuple[AtomFeedEntry, ...]) -> AtomFeedEntry | None:
@@ -2017,21 +2047,25 @@ def _security_evidence_display_label(*, is_security: Any, evidence_source: Any) 
     return None
 
 
-def _baseline_notice_security_clause(is_security: Any, evidence_source: Any) -> str:
-    """Source-aware security sentence clause for the user-facing baseline summary.
+def _baseline_notice_security_sentence(is_security: Any, evidence_source: Any) -> str:
+    """Source-aware, human-facing security sentence for the baseline summary.
 
-    Only MSRC CVRF evidence may claim MSRC confirmation; Support article evidence
-    is attributed to Microsoft Support. Unavailable/none/unknown evidence (or an
-    ``is_security`` that is not ``True``) emits no hard security-confirmation wording.
+    MSRC wording is used only for exact MSRC CVRF evidence; validated Support
+    article evidence is attributed to Microsoft Support; unavailable/unknown/none
+    evidence (or ``is_security`` None) yields neutral wording; ``is_security``
+    False yields clear, non-alarmist wording. No raw enum/status tokens
+    (``msrc_cvrf``, ``support_article``, ``not_security``, ...) are emitted.
     """
-    if is_security is not True:
-        return ""
-    source = str(evidence_source or "").strip().lower()
-    if source == "msrc_cvrf":
-        return " MSRC confirms it as a security update"
-    if source == "support_article":
-        return " Microsoft Support notes it includes the security update"
-    return ""
+    if is_security is True:
+        source = str(evidence_source or "").strip().lower()
+        if source == "msrc_cvrf":
+            return "MSRC confirms it as a security update."
+        if source == "support_article":
+            return "Microsoft Support notes it includes the security update."
+        return "Checked evidence classifies it as a security update."
+    if is_security is False:
+        return "Checked evidence does not classify it as a security update."
+    return "Security classification is unavailable from the checked enrichment source."
 
 
 def _baseline_notice_summary(
@@ -2042,22 +2076,22 @@ def _baseline_notice_summary(
     update_type: str | None,
     official_release_date: str,
     is_security: Any,
-    security_evidence_status: str,
     security_evidence_source: Any = None,
 ) -> str:
-    kb_text = kb_article or "The selected KB"
+    kb_text = kb_article or "the selected KB"
     update_text = update_type or "B-release"
-    security_clause = _baseline_notice_security_clause(is_security, security_evidence_source)
-    summary = (
-        f"New required baseline: Windows 11 {release} build {build} now matches Microsoft evidence "
-        f"and the signed fleet baseline. For broad-fleet {release} devices, this likely marks the "
-        f"stable rollout floor for {kb_text} / {update_text}.{security_clause}"
+    # Build complete sentences and join with a single space so the visible copy
+    # never produces punctuation artifacts such as "B.;" and never leaks raw
+    # status enums into human-facing text.
+    sentences = (
+        f"New required baseline: Windows 11 {release} build {build} now matches Microsoft "
+        f"evidence and the signed fleet baseline.",
+        f"For broad-fleet {release} devices, this likely marks the stable rollout floor for "
+        f"{kb_text} / {update_text}.",
+        f"Release Health lists the baseline date as {official_release_date}.",
+        _baseline_notice_security_sentence(is_security, security_evidence_source),
     )
-    details: list[str] = []
-    details.append(f"Release Health lists the baseline date as {official_release_date}")
-    if not security_clause:
-        details.append(f"security evidence is {security_evidence_status}")
-    return f"{summary}; {', and '.join(details)}."
+    return " ".join(sentence for sentence in sentences if sentence)
 
 
 def _baseline_notice_update_summary(article: Mapping[str, Any], validation_status: str) -> str | None:
@@ -2147,7 +2181,6 @@ def _baseline_update_notice_payload(
         update_type=row.update_type,
         official_release_date=official_release_date,
         is_security=is_security,
-        security_evidence_status=security_evidence_status,
         security_evidence_source=security_evidence_source,
     )
     security_detail = _security_evidence_display_label(
@@ -4833,6 +4866,79 @@ def _wiki_section_scrollspy_script_html() -> str:
 """
 
 
+def _wiki_copy_button_script_html() -> str:
+    """Client-side, dependency-free copy button for wiki/changelog code blocks.
+
+    Adds a half-transparent button to every ``.wiki-content pre`` that copies the
+    block's source text. The code text is captured before the button is appended,
+    so the button label never leaks into the copied content. Uses the Clipboard
+    API with a hidden-textarea fallback; no external scripts, fonts, or network
+    calls. The button is revealed on hover/focus via CSS.
+    """
+    return """  <script>
+    (function () {
+      var blocks = document.querySelectorAll(".wiki-content pre");
+      if (!blocks.length) return;
+      function flash(btn, label, ok) {
+        var original = btn.getAttribute("data-label") || "Copy";
+        btn.textContent = label;
+        btn.classList.toggle("is-copied", !!ok);
+        window.setTimeout(function () {
+          btn.textContent = original;
+          btn.classList.remove("is-copied");
+        }, 1400);
+      }
+      function copyText(text, btn) {
+        function fallback() {
+          try {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "absolute";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            flash(btn, ok ? "Copied" : "Copy failed", ok);
+          } catch (e) {
+            flash(btn, "Copy failed", false);
+          }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            flash(btn, "Copied", true);
+          }, fallback);
+        } else {
+          fallback();
+        }
+      }
+      Array.prototype.forEach.call(blocks, function (pre) {
+        if (pre.querySelector(".wiki-copy-btn")) return;
+        var code = pre.querySelector("code");
+        var text = code ? code.textContent : pre.textContent;
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "wiki-copy-btn";
+        btn.textContent = "Copy";
+        btn.setAttribute("data-label", "Copy");
+        btn.setAttribute("aria-label", "Copy code to clipboard");
+        btn.addEventListener("click", function () { copyText(text, btn); });
+        pre.appendChild(btn);
+      });
+    })();
+  </script>
+"""
+
+
+# Shared Pages visual scale. The wiki/changelog theme is fully rem-based, so a
+# single responsive root font-size lifts its typography, spacing, gutters, and
+# rem widths to the dashboard's reading size at normal (100%) browser zoom,
+# instead of relying on browser zoom or CSS zoom/transform/viewport hacks. The
+# clamp keeps it responsive: ~17px on small screens up to ~20px on wide desktops.
+_PAGES_WIKI_VISUAL_SCALE = "clamp(1.0625rem, 1rem + 0.45vw, 1.25rem)"
+
+
 def _wiki_page_html(
     source: WikiPageSource,
     body_html: str,
@@ -4863,6 +4969,7 @@ def _wiki_page_html(
     warning_html = _render_wiki_warnings(warnings)
     content_class = "wiki-content changelog-content" if source.slug.startswith("changelog") else "wiki-content"
     scrollspy_script = _wiki_section_scrollspy_script_html()
+    copy_button_script = _wiki_copy_button_script_html()
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -4889,7 +4996,18 @@ def _wiki_page_html(
       --shadow: 0 18px 45px rgba(15, 108, 189, 0.12);
     }}
     * {{ box-sizing: border-box; }}
-    html {{ scroll-behavior: smooth; }}
+    html {{
+      scroll-behavior: smooth;
+      /* Unify the wiki visual scale with the dashboard at normal browser zoom
+         level using a real responsive root font size (not a browser or layout
+         trick), so this rem-based theme scales proportionally and stays clean
+         on small screens. */
+      font-size: {_PAGES_WIKI_VISUAL_SCALE};
+      /* Contain any stray horizontal overflow at the narrowest viewports.
+         `clip` does not create a scroll container, so the sticky sidebar still
+         pins to the viewport and wrappable nav/content is never hidden. */
+      overflow-x: clip;
+    }}
     body {{
       margin: 0;
       min-height: 100vh;
@@ -4948,7 +5066,7 @@ def _wiki_page_html(
       filter: drop-shadow(0 5px 10px rgba(15, 108, 189, 0.18));
     }}
     .wiki-brand span {{ color: var(--brand); }}
-    .wiki-topbar nav {{ display: flex; flex-wrap: wrap; gap: 0.55rem; font-size: 0.94rem; }}
+    .wiki-topbar nav {{ display: flex; flex-wrap: wrap; gap: 0.55rem; font-size: 0.94rem; max-width: 100%; }}
     .wiki-topbar nav a {{
       display: inline-flex;
       align-items: center;
@@ -4964,7 +5082,11 @@ def _wiki_page_html(
       display: grid;
       grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
       gap: clamp(1rem, 3vw, 2.5rem);
-      width: min(1220px, calc(100% - 2rem));
+      /* Use the available horizontal space so the content column is wide enough
+         for tables and code blocks instead of cramming them while wide gutters
+         sit empty. Prose stays readable (paragraphs are capped at ~74ch below),
+         while tables and pre blocks fill the wider column. */
+      width: min(1880px, calc(100% - 2rem));
       margin: 1.6rem auto 3rem;
       align-items: start;
     }}
@@ -5101,6 +5223,7 @@ def _wiki_page_html(
     }}
     .wiki-content {{
       min-width: 0;
+      overflow-wrap: break-word;
       padding: clamp(1.25rem, 4vw, 2.25rem);
       background: var(--surface);
       border: 1px solid var(--border);
@@ -5185,7 +5308,11 @@ def _wiki_page_html(
     .wiki-content h3 {{ margin-top: 2rem; margin-bottom: 0.85rem; color: #21395d; }}
     .wiki-content p, .wiki-content li {{ color: var(--text); }}
     .wiki-content p {{
-      max-width: 74ch;
+      /* Let prose blocks use nearly the full content width so they look unified
+         with the full-width tables and code blocks (at least ~88% of the column),
+         instead of sitting in a narrow measure with empty space beside them.
+         Narrower columns fall back to the readable ~74ch measure. */
+      max-width: max(74ch, 96%);
       margin-top: 0;
       margin-bottom: 1.55rem;
     }}
@@ -5220,13 +5347,50 @@ def _wiki_page_html(
       font-size: 0.92em;
     }}
     .wiki-content pre {{
-      overflow: auto;
+      /* Show commands in full. The content column is wide, but some shell
+         commands are longer than any viewport, so wrap at argument/whitespace
+         boundaries (and break pathological unbreakable tokens) instead of
+         clipping behind a horizontal scrollbar. Explicit line breaks are kept. */
+      position: relative;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      overflow-x: auto;
       padding: 1rem;
       background: #0b1f33;
       color: #eaf4ff;
       border-radius: 8px;
     }}
-    .wiki-content pre code {{ padding: 0; background: transparent; color: inherit; }}
+    .wiki-content pre code {{ padding: 0; background: transparent; color: inherit; white-space: inherit; }}
+    /* Half-transparent copy button revealed on hover/focus of a code block.
+       Injected client-side; no external scripts, fonts, or network calls. */
+    .wiki-copy-btn {{
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font: inherit;
+      font-size: 0.78rem;
+      line-height: 1;
+      padding: 0.35rem 0.6rem;
+      color: #eaf4ff;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      border-radius: 6px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }}
+    .wiki-content pre:hover .wiki-copy-btn,
+    .wiki-content pre:focus-within .wiki-copy-btn,
+    .wiki-copy-btn:focus-visible {{ opacity: 1; }}
+    .wiki-copy-btn:hover {{ background: rgba(255, 255, 255, 0.26); }}
+    .wiki-copy-btn.is-copied {{
+      background: rgba(120, 220, 150, 0.28);
+      border-color: rgba(120, 220, 150, 0.55);
+    }}
+    @media (hover: none) {{ .wiki-copy-btn {{ opacity: 0.6; }} }}
     .wiki-content table {{
       width: 100%;
       border-collapse: collapse;
@@ -5385,7 +5549,7 @@ def _wiki_page_html(
     </article>
   </main>
   <footer class="wiki-footer">{footer_html}</footer>
-{scrollspy_script}</body>
+{scrollspy_script}{copy_button_script}</body>
 </html>
 """
 
