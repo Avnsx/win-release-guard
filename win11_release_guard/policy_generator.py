@@ -5982,6 +5982,7 @@ def write_policy_outputs(
     write_robots: bool = False,
     write_sitemap: bool = False,
     write_manifest: bool = False,
+    generated_age_reference: datetime | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -6011,6 +6012,7 @@ def write_policy_outputs(
                 policy,
                 policy_bytes=policy_bytes,
                 verification_metadata=verification_metadata,
+                generated_age_reference=generated_age_reference,
             ),
         )
         written["index"] = index_file
@@ -7907,6 +7909,7 @@ def render_policy_index(
     signature: Mapping[str, Any] | None = None,
     verification_metadata: Mapping[str, Any] | None = None,
     base_url: str = DEFAULT_PAGES_BASE_URL,
+    generated_age_reference: datetime | None = None,
 ) -> str:
     target = policy.broad_target_existing_devices
     policy_hash = _sha256_hex(policy_bytes)
@@ -7914,8 +7917,11 @@ def render_policy_index(
     generated_human = _generated_at_human(generated_at_utc)
     generated_local_date = _generated_at_local_date(generated_at_utc)
     generated_local_time = _generated_at_local_time(generated_at_utc)
-    generated_age_days = _generated_age_days(generated_at_utc)
-    generated_age_text, generated_age_size, generated_age_label = _dashboard_age_display(generated_at_utc)
+    generated_age_days = _generated_age_days(generated_at_utc, reference=generated_age_reference)
+    generated_age_text, generated_age_size, generated_age_label = _dashboard_age_display(
+        generated_at_utc,
+        reference=generated_age_reference,
+    )
     generated_age_class = "freshness-metric" + (f" {generated_age_size}" if generated_age_size else "")
     verification = verification_metadata if verification_metadata is not None else _public_verification_metadata(signature)
     signature_attached = verification is not None

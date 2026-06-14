@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+from datetime import datetime, timezone
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
@@ -48,6 +49,7 @@ REMOVED_SCHEMA_PANEL_LABELS = (
     "Policy " + "schema",
     "Reader " + "range",
 )
+FRESH_FIXTURE_RENDER_REFERENCE_UTC = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 ATOM_SOURCE_DIAGNOSTIC_ID = "wrg-source-diagnostic-v1:uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
 ATOM_ENTRY_ID = "uuid:07747009-7264-44f2-86c2-1c3e09919af3;id=968480"
 ATOM_SUPPORT_ARTICLE_ID = "968480"
@@ -4389,6 +4391,7 @@ def test_signed_pages_output_contains_manifest_aliases_and_polished_index(tmp_pa
         write_robots=True,
         write_sitemap=True,
         write_manifest=True,
+        generated_age_reference=FRESH_FIXTURE_RENDER_REFERENCE_UTC,
     )
 
     expected = {

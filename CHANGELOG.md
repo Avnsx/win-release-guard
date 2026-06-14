@@ -11,6 +11,24 @@
   only the small caret showed on hover. The tooltip is now `position: absolute`,
   anchored directly under its icon (connected to the caret) and contained within
   the viewport, so the full explanation panel shows again on hover/focus.
+* Stabilized generated Pages freshness rendering in fixed-date tests. The
+  polished dashboard fixture used `2026-05-31T14:11:50+00:00`; once scheduled CI
+  reached June 14, 2026, that fixture crossed the 14-day refresh threshold and
+  correctly rendered `Policy feed refresh due` instead of the expected
+  `No source issues reported` notice. `render_policy_index()` and
+  `write_policy_outputs()` now accept an optional render-age reference used only
+  by tests and fixture helpers, while production output still computes freshness
+  from the real current UTC time.
+
+### Tests
+
+* Pinned the fixed-date Pages and policy-generator fixture renders to a stable
+  fresh reference time so the Unreleased dashboard expectations keep testing the
+  intended notice-only path. The regression was reproduced from the failed
+  `publish-policy` `sync-source-diagnostics-issues` job and verified locally with
+  the exact failing test, the workflow's source-diagnostics test selection, the
+  Pages landing tests, the full pytest suite, fixture Pages generation, secret
+  scanning, clean archive validation, and live public Pages checks.
 
 ## v0.3.4 - 2026-06-13
 

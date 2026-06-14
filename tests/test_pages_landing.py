@@ -21,6 +21,7 @@ REMOVED_SCHEMA_PANEL_LABELS = (
     "Policy " + "schema",
     "Reader " + "range",
 )
+FRESH_FIXTURE_RENDER_REFERENCE_UTC = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 FRESHNESS_SCRIPT_RE = re.compile(
     r'<script type="application/json" id="policy-freshness-data">(.*?)</script>',
     re.DOTALL,
@@ -47,7 +48,12 @@ def _render_landing(tmp_path: Path) -> str:
         generated_at_utc="2026-05-31T14:11:50+00:00",
         signature_status="valid",
     )
-    write_policy_outputs(policy, output_dir=tmp_path, write_index=True)
+    write_policy_outputs(
+        policy,
+        output_dir=tmp_path,
+        write_index=True,
+        generated_age_reference=FRESH_FIXTURE_RENDER_REFERENCE_UTC,
+    )
     return (tmp_path / "index.html").read_text(encoding="utf-8")
 
 
