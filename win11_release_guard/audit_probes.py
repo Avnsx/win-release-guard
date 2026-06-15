@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
+from ._subprocess_util import hidden_console_kwargs
 from .config import (
     DEFAULT_DISM_TIMEOUT_SECONDS,
     DEFAULT_PANTHER_TAIL_MAX_BYTES,
@@ -110,6 +111,7 @@ def query_dism_packages(timeout_seconds: float = DEFAULT_DISM_TIMEOUT_SECONDS) -
             errors="replace",
             timeout=timeout_seconds,
             check=False,
+            **hidden_console_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         return {
