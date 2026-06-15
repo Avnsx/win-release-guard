@@ -9,6 +9,7 @@ import argparse
 from collections import Counter
 from typing import Any, Mapping
 
+from ._subprocess_util import hidden_console_kwargs
 from .config import (
     DEFAULT_EVENT_LOG_MAX_EVENTS,
     DEFAULT_POWERSHELL_TIMEOUT_SECONDS,
@@ -265,6 +266,7 @@ Add-Events @{{ProviderName='Microsoft-Windows-Servicing'; StartTime=$since}} 'Mi
             errors="replace",
             timeout=timeout_seconds,
             check=False,
+            **hidden_console_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return [], [f"Event log query timed out after {timeout_seconds:g} seconds."]
@@ -491,6 +493,7 @@ def _query_wua_secondary_subprocess(
             errors="replace",
             timeout=max(0.1, float(timeout_seconds)),
             check=False,
+            **hidden_console_kwargs(),
         )
     except subprocess.TimeoutExpired:
         result = _empty_result()

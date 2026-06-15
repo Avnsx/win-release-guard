@@ -9,6 +9,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Mapping
 
+from ._subprocess_util import hidden_console_kwargs
 from .config import (
     DEFAULT_DISM_TIMEOUT_SECONDS,
     DEFAULT_PANTHER_TAIL_MAX_BYTES,
@@ -423,6 +424,7 @@ def _read_wmi_operating_system(
             errors="replace",
             timeout=timeout_seconds,
             check=False,
+            **hidden_console_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError(
@@ -561,6 +563,7 @@ def _read_dism_current_edition(
             errors="replace",
             timeout=timeout_seconds,
             check=False,
+            **hidden_console_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError(

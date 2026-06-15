@@ -34,6 +34,7 @@
 
 **Releases**
 
+- [[Release v0.3.5|Release-v0.3.5]]
 - [[Release v0.3.4|Release-v0.3.4]]
 - [[Release v0.3.3|Release-v0.3.3]]
 - [[Release v0.3.2|Release-v0.3.2]]
